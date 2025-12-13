@@ -8,6 +8,8 @@
     --primary-500: #7c3aed;
     --primary-400: #a78bfa;
     --primary-300: #c4b5fd;
+    --primary-100: #ede9fe;
+    --primary-50: #faf5ff;
 
     /* Neutral Colors */
     --gray-50: #f9fafb;
@@ -97,6 +99,10 @@
     --source-tag-bg: #3a3a4a;
     --source-tag-text: #c4b5fd;
     --source-tag-border: #5b21b6;
+
+    /* Primary colors for dark mode */
+    --primary-100: #2d2447;
+    --primary-50: #1f1833;
 }
 
 /* ===== Reset and Base Styles ===== */
@@ -150,7 +156,7 @@ body {
 .header {
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     color: white;
-    padding: var(--space-xl) var(--space-2xl);
+    padding: var(--space-md) var(--space-xl);
     position: relative;
     overflow: hidden;
 }
@@ -167,9 +173,9 @@ body {
 }
 
 .header h1 {
-    font-size: 1.75rem;
+    font-size: 1.5rem;
     font-weight: 700;
-    margin-bottom: var(--space-md);
+    margin-bottom: var(--space-sm);
     position: relative;
     letter-spacing: -0.025em;
 }
@@ -364,6 +370,47 @@ body {
     font-weight: 600;
     color: var(--text-primary);
     margin: 0;
+    flex: 1;
+}
+
+.refresh-suggestions-btn {
+    padding: var(--space-xs) var(--space-sm);
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-secondary);
+    transition: all 0.2s ease;
+}
+
+.refresh-suggestions-btn:hover {
+    background: var(--hover-bg);
+    color: var(--primary-500);
+    border-color: var(--primary-300);
+}
+
+.refresh-suggestions-btn:active {
+    transform: scale(0.95);
+}
+
+.refresh-suggestions-btn svg {
+    transition: transform 0.3s ease;
+}
+
+.refresh-suggestions-btn.rotating svg {
+    animation: rotate 0.6s ease-in-out;
+}
+
+@keyframes rotate {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
 }
 
 .suggested-questions-list {
@@ -782,7 +829,7 @@ body {
 .input-area {
     display: flex;
     gap: var(--space-md);
-    padding: var(--space-xl) var(--space-2xl);
+    padding: var(--space-md) var(--space-xl);
     background: var(--container-bg);
     border-top: 1px solid var(--border-color);
     align-items: flex-end;
@@ -854,7 +901,7 @@ body {
 .controls {
     display: flex;
     gap: var(--space-sm);
-    padding: var(--space-md) var(--space-2xl);
+    padding: var(--space-sm) var(--space-xl);
     background: var(--hover-bg);
     border-top: 1px solid var(--border-color);
     flex-wrap: wrap;
@@ -971,13 +1018,13 @@ body {
 
 /* ===== Document Upload Section ===== */
 .upload-section {
-    padding: var(--space-xl) var(--space-2xl);
+    padding: var(--space-md) var(--space-xl);
     border-bottom: 1px solid var(--border-color);
     transition: border-color 0.3s ease;
 }
 
 .upload-section h3 {
-    margin: 0 0 var(--space-lg) 0;
+    margin: 0 0 var(--space-md) 0;
     font-size: 1.125rem;
     color: var(--text-primary);
     font-weight: 600;
@@ -986,7 +1033,7 @@ body {
 .upload-area {
     border: 2px dashed var(--border-color);
     border-radius: var(--radius-xl);
-    padding: var(--space-2xl);
+    padding: var(--space-lg);
     text-align: center;
     cursor: pointer;
     transition: all 0.3s ease;
@@ -995,12 +1042,12 @@ body {
 
 .upload-area:hover {
     border-color: var(--primary-500);
-    background: var(--primary-50, #ede9fe);
+    background: var(--primary-50);
 }
 
 .upload-area.dragover {
     border-color: var(--primary-600);
-    background: var(--primary-100, #ddd6fe);
+    background: var(--primary-100);
     transform: scale(1.02);
 }
 
@@ -1053,6 +1100,10 @@ body {
 /* ===== Document List ===== */
 .docs-list-section {
     padding: var(--space-xl) var(--space-2xl);
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
 }
 
 .docs-list-header {
@@ -1087,6 +1138,30 @@ body {
 .docs-list {
     display: grid;
     gap: var(--space-md);
+    flex: 1;
+    overflow-y: auto;
+    padding-right: var(--space-sm);
+    min-height: 0;
+}
+
+/* Scrollbar styles for docs list */
+.docs-list::-webkit-scrollbar {
+    width: 8px;
+}
+
+.docs-list::-webkit-scrollbar-track {
+    background: var(--hover-bg);
+    border-radius: 4px;
+}
+
+.docs-list::-webkit-scrollbar-thumb {
+    background: var(--border-color);
+    border-radius: 4px;
+    transition: background 0.2s ease;
+}
+
+.docs-list::-webkit-scrollbar-thumb:hover {
+    background: var(--primary-500);
 }
 
 .doc-item {
@@ -1889,7 +1964,7 @@ textarea:focus {
     background: var(--container-bg);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-lg);
-    margin-bottom: var(--space-lg);
+    margin-bottom: 4px;
     overflow: hidden;
     box-shadow: var(--shadow-sm);
     transition: all 0.3s ease;
@@ -1956,7 +2031,7 @@ textarea:focus {
 
 .filter-content {
     max-height: 500px;
-    overflow: hidden;
+    overflow: visible;
     transition: max-height 0.3s ease, opacity 0.3s ease;
 }
 
@@ -1999,8 +2074,14 @@ textarea:focus {
 
 .document-list {
     padding: var(--space-lg);
+    padding-bottom: 0;
     max-height: 300px;
     overflow-y: auto;
+    overflow-x: hidden;
+}
+
+.document-list > :last-child {
+    margin-bottom: var(--space-lg);
 }
 
 .loading-documents {

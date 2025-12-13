@@ -10,6 +10,14 @@ marked.setOptions({
     gfm: true
 });
 
+// Debug mode control
+const DEBUG_MODE = false; // Set to true for development, false for production
+
+// Console wrapper for production
+const devLog = (...args) => DEBUG_MODE && console.log(...args);
+const devWarn = (...args) => DEBUG_MODE && console.warn(...args);
+// Keep console.error for production errors
+
 // DOM elements
 const chatContainer = document.getElementById('chatContainer');
 const userInput = document.getElementById('userInput');
@@ -21,6 +29,7 @@ const reindexBtn = document.getElementById('reindexBtn');
 const statusEl = document.getElementById('status');
 const docCountEl = document.getElementById('doc-count');
 const themeToggle = document.getElementById('themeToggle');
+const refreshSuggestionsBtn = document.getElementById('refreshSuggestionsBtn');
 
 // Source modal elements
 const sourceModal = document.getElementById('sourceModal');
@@ -39,6 +48,11 @@ let isLoading = false;
 let conversationHistory = [];  // Store conversation history
 let currentAbortController = null;  // For stopping generation
 let lastUserQuestion = '';  // For regenerate function
+
+// Initialize feature modules
+const errorHandler = new ErrorHandler();
+const streamingVisualizer = new StreamingVisualizer();
+let questionAutoComplete = null;  // Will be initialized after fetching questions
 let currentContextData = [];  // Store context data for source details
 
 // Initialize
@@ -48,7 +62,25 @@ async function init() {
     setupEventListeners();
     setupScrollButton();
     await loadSuggestedQuestions();  // Load suggested questions after status check
+
+    // Initialize AutoComplete after loading suggested questions
+    await initializeAutoComplete();
+
     userInput.focus();
+}
+
+// Initialize AutoComplete
+async function initializeAutoComplete() {
+    try {
+        const response = await fetch('/api/suggested-questions');
+        if (response.ok) {
+            const data = await response.json();
+            const questions = data.questions || [];
+            questionAutoComplete = new QuestionAutoComplete(userInput, questions);
+        }
+    } catch (error) {
+        console.error('Error initializing autocomplete:', error);
+    }
 }
 
 // Setup event listeners
@@ -97,6 +129,11 @@ function setupEventListeners() {
             sendMessage();
         }
     });
+
+    // Refresh suggestions button
+    if (refreshSuggestionsBtn) {
+        refreshSuggestionsBtn.addEventListener('click', refreshSuggestedQuestions);
+    }
 
     userInput.addEventListener('input', () => {
         autoResize();
@@ -280,8 +317,15 @@ async function sendMessage(regenerate = false) {
     let question;
 
     if (regenerate) {
+        console.log('[REGENERATE] Regenerate button clicked');
+        console.log('[REGENERATE] lastUserQuestion:', lastUserQuestion);
         question = lastUserQuestion;
-        if (!question) return;
+        if (!question) {
+            console.error('[REGENERATE] No last user question found! Cannot regenerate.');
+            alert('재생성할 질문이 없습니다. 먼저 질문을 입력해주세요.');
+            return;
+        }
+        console.log('[REGENERATE] Using question:', question);
         // Remove last bot response for regeneration
         if (conversationHistory.length > 0 && conversationHistory[conversationHistory.length - 1].role === 'assistant') {
             conversationHistory.pop();
@@ -343,7 +387,12 @@ async function sendMessage(regenerate = false) {
     // Show step-by-step loading
     isLoading = true;
     showStopButton();
-    const loadingId = showLoading('문서 검색 중...');
+
+    // Show typing indicator (StreamingVisualizer)
+    streamingVisualizer.showTypingIndicator(chatContainer);
+
+    // Scroll to bottom to show typing indicator
+    scrollToBottom();
 
     // Track response time
     const startTime = Date.now();
@@ -355,31 +404,41 @@ async function sendMessage(regenerate = false) {
         // Get selected document IDs from filter
         const documentIds = getSelectedDocumentIds();
 
-        const response = await fetch('/api/query/stream', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                question: question,
-                top_k: currentSettings.top_k,
-                temperature: currentSettings.temperature,
-                max_tokens: currentSettings.max_tokens,
-                system_prompt: currentSettings.system_prompt,
-                cache_threshold: currentSettings.cache_threshold,
-                cache_ttl: currentSettings.cache_ttl,
-                document_ids: documentIds,  // Add selected document IDs
-                history: conversationHistory.slice(0, -1)  // Send history without current question
-            }),
-            signal: currentAbortController.signal
-        });
+        // Wrap fetch with ErrorHandler retry and timeout
+        const response = await errorHandler.withTimeout(
+            () => errorHandler.withRetry(
+                async () => {
+                    const res = await fetch('/api/query/stream', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            question: question,
+                            top_k: currentSettings.top_k,
+                            temperature: currentSettings.temperature,
+                            max_tokens: currentSettings.max_tokens,
+                            system_prompt: currentSettings.system_prompt,
+                            cache_threshold: currentSettings.cache_threshold,
+                            cache_ttl: currentSettings.cache_ttl,
+                            document_ids: documentIds,  // Add selected document IDs
+                            history: conversationHistory.slice(0, -1)  // Send history without current question
+                        }),
+                        signal: currentAbortController.signal
+                    });
 
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
+                    if (!res.ok) {
+                        throw new Error(`HTTP error! status: ${res.status}`);
+                    }
 
-        // Update loading message
-        updateLoadingMessage(loadingId, '답변 생성 중...');
+                    return res;
+                }
+            ),
+            30000 // 30 second timeout
+        );
+
+        // Show streaming progress (StreamingVisualizer)
+        streamingVisualizer.showStreamingProgress(chatContainer);
 
         // Create message container for streaming
         const messageDiv = document.createElement('div');
@@ -389,11 +448,9 @@ async function sendMessage(regenerate = false) {
         messageDiv.appendChild(contentDiv);
         chatContainer.appendChild(messageDiv);
 
-        // Remove loading after starting stream
-        removeLoading(loadingId);
-
         let sources = null;
         let fullText = '';
+        let tokenCount = 0;
 
         // Read stream
         const reader = response.body.getReader();
@@ -424,7 +481,7 @@ async function sendMessage(regenerate = false) {
                             // Store context data for source details
                             currentContextData = data.data.context || [];
 
-                            console.log('🔍 [METADATA] Received metadata:', {
+                            devLog('🔍 [METADATA] Received metadata:', {
                                 sources: sources,
                                 sourcesLength: sources ? sources.length : 0,
                                 sourcesType: typeof sources,
@@ -434,6 +491,10 @@ async function sendMessage(regenerate = false) {
                             });
                         } else if (data.type === 'chunk') {
                             fullText += data.data;
+
+                            // Update token count (approximate by splitting on spaces)
+                            tokenCount = fullText.split(/\s+/).filter(w => w.length > 0).length;
+                            streamingVisualizer.updateTokenCount(tokenCount);
 
                             // Server already filters <think> tags, so just render
                             try {
@@ -454,6 +515,12 @@ async function sendMessage(regenerate = false) {
                             // Calculate response time
                             const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
 
+                            // Show completion (StreamingVisualizer)
+                            streamingVisualizer.showCompletion(tokenCount, parseFloat(elapsed));
+
+                            // Scroll to bottom to show completion
+                            scrollToBottom();
+
                             // Add assistant response to conversation history
                             // Server already filtered <think> tags, use fullText directly
                             conversationHistory.push({
@@ -473,7 +540,7 @@ async function sendMessage(regenerate = false) {
                             addActionButtons(contentDiv, fullText);
 
                             // Add sources if available (after action buttons)
-                            console.log('📚 [SOURCES] Checking sources:', {
+                            devLog('📚 [SOURCES] Checking sources:', {
                                 sources: sources,
                                 length: sources ? sources.length : 'undefined',
                                 type: typeof sources,
@@ -481,7 +548,7 @@ async function sendMessage(regenerate = false) {
                             });
 
                             if (sources && sources.length > 0) {
-                                console.log('✅ [SOURCES] Adding sources to UI:', sources);
+                                devLog('✅ [SOURCES] Adding sources to UI:', sources);
 
                                 // Add HR separator before sources
                                 const hr = document.createElement('hr');
@@ -508,7 +575,7 @@ async function sendMessage(regenerate = false) {
 
                                 contentDiv.appendChild(sourcesDiv);
                             } else {
-                                console.warn('⚠️ [SOURCES] No sources to display:', {
+                                devWarn('⚠️ [SOURCES] No sources to display:', {
                                     sources: sources,
                                     sourcesExists: !!sources,
                                     sourcesLength: sources ? sources.length : 0,
@@ -525,35 +592,28 @@ async function sendMessage(regenerate = false) {
 
     } catch (error) {
         console.error('Query failed:', error);
-        removeLoading(loadingId);
+
+        // Show error in StreamingVisualizer
+        streamingVisualizer.showError('응답 생성 중 오류가 발생했습니다.');
+
+        // Handle error with ErrorHandler
+        const errorInfo = errorHandler.handleError(error, 'sendMessage');
 
         // Handle abort (user stopped generation)
         if (error.name === 'AbortError') {
             addMessage('⚠️ 응답 생성이 중단되었습니다.', 'bot');
-        } else if (error.message.includes('HTTP error')) {
-            // HTTP error with retry option
-            addErrorMessageWithRetry(
-                `❌ 서버 오류가 발생했습니다 (${error.message})`,
-                question
-            );
-        } else if (error.message.includes('Failed to fetch')) {
-            // Network error
-            addErrorMessageWithRetry(
-                '❌ 네트워크 연결에 실패했습니다. 인터넷 연결을 확인해주세요.',
-                question
-            );
         } else {
-            // Generic error with retry
-            addErrorMessageWithRetry(
-                `❌ 오류가 발생했습니다: ${error.message}`,
-                question
-            );
+            // Show error message with retry option if available
+            errorHandler.showErrorMessage(errorInfo, errorInfo.canRetry);
         }
     } finally {
         isLoading = false;
         currentAbortController = null;
         hideStopButton();
         updateSendButton();
+
+        // Reset StreamingVisualizer
+        streamingVisualizer.reset();
     }
 }
 
@@ -676,14 +736,49 @@ function clearChat() {
         // Clear conversation history (both in memory and localStorage)
         clearHistory();
 
-        // Clear chat UI
+        // Clear AutoComplete
+        if (questionAutoComplete) {
+            questionAutoComplete.clear();
+        }
+
+        // Clear chat UI and recreate suggested questions section
         chatContainer.innerHTML = `
             <div class="welcome-message">
                 <h2>안녕하세요! 👋</h2>
                 <p>PDF 문서 내용에 대해 무엇이든 질문해주세요.</p>
                 <p class="hint">문서가 로딩되면 질문을 시작할 수 있습니다.</p>
             </div>
+
+            <!-- Suggested Questions Section -->
+            <div class="suggested-questions" id="suggestedQuestions" style="display: none;">
+                <div class="suggested-questions-header">
+                    <span class="suggested-icon">💡</span>
+                    <h3>이런 질문은 어떠세요?</h3>
+                    <button id="refreshSuggestionsBtn" class="refresh-suggestions-btn" title="새로운 질문 생성">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <path d="M1 4v6h6M23 20v-6h-6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                            <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </button>
+                </div>
+                <div class="suggested-questions-list" id="suggestedQuestionsList">
+                    <!-- Questions will be inserted here dynamically -->
+                </div>
+            </div>
         `;
+
+        // Reattach event listener for refresh button
+        const refreshBtn = document.getElementById('refreshSuggestionsBtn');
+        if (refreshBtn) {
+            refreshBtn.addEventListener('click', loadSuggestedQuestions);
+        }
+
+        // Show and load suggested questions
+        const suggestedQuestionsContainer = document.getElementById('suggestedQuestions');
+        if (suggestedQuestionsContainer) {
+            suggestedQuestionsContainer.style.display = 'block';
+        }
+        loadSuggestedQuestions();
     }
 }
 
@@ -1424,13 +1519,13 @@ clearCacheBtn.addEventListener('click', async () => {
 
 // ===== Source Details Modal =====
 function showSourceDetails(filename) {
-    console.log('showSourceDetails called for:', filename);
-    console.log('currentContextData:', currentContextData);
+    devLog('showSourceDetails called for:', filename);
+    devLog('currentContextData:', currentContextData);
 
     // Find all context items for this filename
     const sourceContexts = currentContextData.filter(ctx => ctx.filename === filename);
 
-    console.log('sourceContexts found:', sourceContexts);
+    devLog('sourceContexts found:', sourceContexts);
 
     if (sourceContexts.length === 0) {
         console.error('No context found for filename:', filename);
@@ -1562,6 +1657,14 @@ function restoreChatUI() {
             currentContextData.push(...msg.context);
         }
     });
+
+    // Find last user question for regenerate function
+    for (let i = conversationHistory.length - 1; i >= 0; i--) {
+        if (conversationHistory[i].role === 'user') {
+            lastUserQuestion = conversationHistory[i].content;
+            break;
+        }
+    }
 
     conversationHistory.forEach(msg => {
         if (msg.role === 'user') {
@@ -2028,16 +2131,57 @@ async function loadSuggestedQuestions() {
     try {
         const response = await fetch('/api/suggested-questions');
         if (!response.ok) {
-            console.warn('Failed to load suggested questions');
+            devWarn('Failed to load suggested questions');
             return;
         }
 
         const data = await response.json();
         if (data.questions && data.questions.length > 0) {
             displaySuggestedQuestions(data.questions);
+
+            // Update AutoComplete with new questions
+            if (questionAutoComplete) {
+                questionAutoComplete.updateSuggestions(data.questions);
+            }
         }
     } catch (error) {
         console.error('Error loading suggested questions:', error);
+    }
+}
+
+/**
+ * Refresh suggested questions with animation
+ */
+async function refreshSuggestedQuestions() {
+    const btn = refreshSuggestionsBtn;
+    if (!btn) return;
+
+    // Add rotating animation
+    btn.classList.add('rotating');
+    btn.disabled = true;
+
+    try {
+        // Clear current suggestions
+        const listElement = document.getElementById('suggestedQuestionsList');
+        if (listElement) {
+            listElement.style.opacity = '0.5';
+        }
+
+        // Load new suggestions
+        await loadSuggestedQuestions();
+
+        // Restore opacity
+        if (listElement) {
+            listElement.style.opacity = '1';
+        }
+    } catch (error) {
+        console.error('Error refreshing suggested questions:', error);
+    } finally {
+        // Remove animation after it completes
+        setTimeout(() => {
+            btn.classList.remove('rotating');
+            btn.disabled = false;
+        }, 600);
     }
 }
 
@@ -2048,7 +2192,13 @@ function displaySuggestedQuestions(questions) {
     const container = document.getElementById('suggestedQuestions');
     const listElement = document.getElementById('suggestedQuestionsList');
 
-    if (!container || !listElement || questions.length === 0) {
+    if (!container || !listElement) {
+        console.error('Suggested questions elements not found');
+        return;
+    }
+
+    if (!questions || questions.length === 0) {
+        console.warn('No questions to display');
         return;
     }
 
@@ -2073,8 +2223,9 @@ function displaySuggestedQuestions(questions) {
         listElement.appendChild(questionItem);
     });
 
-    // Show the suggestions container
+    // ALWAYS show the suggestions container when questions are added
     container.style.display = 'block';
+    console.log('Suggested questions displayed:', questions.length);
 }
 
 /**
