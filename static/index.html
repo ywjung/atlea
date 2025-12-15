@@ -549,6 +549,29 @@
         </div>
     </div>
 
+    <!-- Chunk Viewer Modal -->
+    <div id="chunkViewerModal" class="modal">
+        <div class="modal-content chunk-viewer-modal">
+            <div class="modal-header">
+                <h2>📄 문서 청크 보기</h2>
+                <button class="modal-close" id="closeChunkViewerModal">&times;</button>
+            </div>
+
+            <div class="chunk-viewer-content">
+                <div class="chunk-viewer-header">
+                    <h3 id="chunkViewerFilename"></h3>
+                    <div class="chunk-viewer-info">
+                        <span id="chunkViewerCount" class="chunk-count-badge"></span>
+                    </div>
+                </div>
+
+                <div id="chunkViewerList" class="chunk-list">
+                    <div class="loading">청크를 불러오는 중...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Session Manager -->
     <script src="/static/session-manager.js"></script>
 

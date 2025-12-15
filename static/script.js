@@ -43,6 +43,13 @@ const helpModal = document.getElementById('helpModal');
 const helpBtn = document.getElementById('helpBtn');
 const closeHelpModal = document.getElementById('closeHelpModal');
 
+// Chunk viewer modal elements
+const chunkViewerModal = document.getElementById('chunkViewerModal');
+const closeChunkViewerModal = document.getElementById('closeChunkViewerModal');
+const chunkViewerFilename = document.getElementById('chunkViewerFilename');
+const chunkViewerCount = document.getElementById('chunkViewerCount');
+const chunkViewerList = document.getElementById('chunkViewerList');
+
 // State
 let isLoading = false;
 let conversationHistory = [];  // Store conversation history
@@ -124,6 +131,18 @@ function setupEventListeners() {
         }
     });
 
+    // Chunk viewer modal event listeners
+    closeChunkViewerModal.addEventListener('click', () => {
+        chunkViewerModal.classList.remove('active');
+    });
+
+    // Close modal when clicking outside
+    chunkViewerModal.addEventListener('click', (e) => {
+        if (e.target === chunkViewerModal) {
+            chunkViewerModal.classList.remove('active');
+        }
+    });
+
     userInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
             e.preventDefault();
@@ -181,6 +200,11 @@ function setupKeyboardShortcuts() {
             // Close source modal
             if (sourceModal.classList.contains('active')) {
                 sourceModal.classList.remove('active');
+                return;
+            }
+            // Close chunk viewer modal
+            if (chunkViewerModal.classList.contains('active')) {
+                chunkViewerModal.classList.remove('active');
                 return;
             }
         }
@@ -1213,7 +1237,9 @@ async function loadDocuments() {
         docsList.innerHTML = data.documents.map(doc => `
             <div class="doc-item">
                 <div class="doc-info">
-                    <div class="doc-name">${doc.filename}</div>
+                    <div class="doc-name" onclick="viewDocumentChunks('${doc.filename.replace(/'/g, "\\'")}')">
+                        ${doc.filename}
+                    </div>
                     <div class="doc-meta">
                         <span class="doc-meta-item">📊 ${doc.size_mb} MB</span>
                         <span class="doc-meta-item">📦 ${doc.chunk_count} 청크</span>
@@ -1238,6 +1264,70 @@ async function loadDocuments() {
             </div>
         `;
     }
+}
+
+// View document chunks
+async function viewDocumentChunks(filename) {
+    // Show modal
+    chunkViewerModal.classList.add('active');
+
+    // Set filename
+    chunkViewerFilename.textContent = filename;
+
+    // Show loading state
+    chunkViewerList.innerHTML = '<div class="loading">청크를 불러오는 중...</div>';
+    chunkViewerCount.textContent = '';
+
+    try {
+        const response = await fetch(`/api/documents/${encodeURIComponent(filename)}/chunks`);
+
+        if (!response.ok) {
+            throw new Error(`Failed to fetch chunks: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+
+        if (!data.chunks || data.chunks.length === 0) {
+            chunkViewerList.innerHTML = `
+                <div class="empty-state">
+                    <p>이 문서에는 청크가 없습니다</p>
+                </div>
+            `;
+            chunkViewerCount.textContent = '청크 0개';
+            return;
+        }
+
+        // Update count badge
+        chunkViewerCount.textContent = `총 ${data.total_count}개 청크`;
+
+        // Render chunks
+        chunkViewerList.innerHTML = data.chunks.map(chunk => `
+            <div class="chunk-item">
+                <div class="chunk-header">
+                    <span class="chunk-index">청크 #${chunk.index}</span>
+                    <span class="chunk-page">📄 ${chunk.page || 'N/A'}</span>
+                </div>
+                <div class="chunk-text">${escapeHtml(chunk.text)}</div>
+            </div>
+        `).join('');
+
+    } catch (error) {
+        console.error('Error loading chunks:', error);
+        chunkViewerList.innerHTML = `
+            <div class="empty-state">
+                <p>청크를 불러오는데 실패했습니다</p>
+                <p class="hint-text">${error.message}</p>
+            </div>
+        `;
+        chunkViewerCount.textContent = '';
+    }
+}
+
+// Helper function to escape HTML
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }
 
 // Delete document

@@ -1254,6 +1254,133 @@ body {
     box-shadow: var(--shadow-md);
 }
 
+/* ===== Chunk Viewer Modal ===== */
+.chunk-viewer-modal {
+    max-width: 1000px;
+    max-height: 90vh;
+}
+
+.chunk-viewer-content {
+    padding: var(--space-xl) var(--space-2xl);
+    display: flex;
+    flex-direction: column;
+    max-height: calc(90vh - 120px);
+}
+
+.chunk-viewer-header {
+    margin-bottom: var(--space-xl);
+    padding-bottom: var(--space-lg);
+    border-bottom: 2px solid var(--border-color);
+}
+
+.chunk-viewer-header h3 {
+    margin: 0 0 var(--space-sm) 0;
+    font-size: 1.25rem;
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+.chunk-viewer-info {
+    display: flex;
+    gap: var(--space-md);
+    align-items: center;
+}
+
+.chunk-count-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    padding: var(--space-xs) var(--space-md);
+    background: var(--primary-100);
+    color: var(--primary-700);
+    border-radius: var(--radius-full);
+    font-size: 0.875rem;
+    font-weight: 600;
+}
+
+.chunk-list {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-lg);
+    padding-right: var(--space-sm);
+}
+
+.chunk-list::-webkit-scrollbar {
+    width: 8px;
+}
+
+.chunk-list::-webkit-scrollbar-track {
+    background: var(--hover-bg);
+    border-radius: 4px;
+}
+
+.chunk-list::-webkit-scrollbar-thumb {
+    background: var(--border-color);
+    border-radius: 4px;
+    transition: background 0.2s ease;
+}
+
+.chunk-list::-webkit-scrollbar-thumb:hover {
+    background: var(--primary-500);
+}
+
+.chunk-item {
+    background: var(--hover-bg);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    padding: var(--space-lg);
+    transition: all 0.2s ease;
+}
+
+.chunk-item:hover {
+    border-color: var(--primary-300);
+    background: var(--container-bg);
+    box-shadow: var(--shadow-sm);
+}
+
+.chunk-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--space-md);
+    padding-bottom: var(--space-sm);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.chunk-index {
+    font-weight: 600;
+    color: var(--primary-600);
+    font-size: 0.875rem;
+}
+
+.chunk-page {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+}
+
+.chunk-text {
+    color: var(--text-primary);
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    font-size: 0.938rem;
+}
+
+.doc-name {
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: var(--space-xs);
+    cursor: pointer;
+    transition: color 0.2s ease;
+}
+
+.doc-name:hover {
+    color: var(--primary-600);
+    text-decoration: underline;
+}
+
 /* ===== Settings Panel ===== */
 .settings-overlay {
     display: none;
