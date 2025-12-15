@@ -6,23 +6,26 @@ import os
 import struct
 import zlib
 from pathlib import Path
-from typing import List, Dict
+from typing import List, Dict, Optional
 from loguru import logger
 from pypdf import PdfReader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 import olefile
 
+from .hwp_processor import HWPProcessor
+
 
 class DocumentProcessor:
     """Process documents (PDF, HWP) and create chunks"""
 
-    def __init__(self, chunk_size: int = 512, chunk_overlap: int = 50):
+    def __init__(self, chunk_size: int = 512, chunk_overlap: int = 50, hwp_service_url: str = None):
         """
         Initialize document processor
 
         Args:
             chunk_size: Size of text chunks
             chunk_overlap: Overlap between chunks
+            hwp_service_url: URL of Java HWP service (optional)
         """
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
@@ -32,6 +35,18 @@ class DocumentProcessor:
             length_function=len,
             separators=["\n\n", "\n", ". ", " ", ""]
         )
+
+        # Initialize HWP processor with Java service
+        self.hwp_processor = HWPProcessor(hwp_service_url)
+        self.use_java_hwp = False  # Default to Python fallback
+
+        # Check if Java HWP service is available
+        if self.hwp_processor.check_service_health():
+            self.use_java_hwp = True
+            logger.success("Java HWP service is available - using Java-based extraction")
+        else:
+            logger.warning("Java HWP service not available - falling back to Python extraction")
+
         logger.info(f"Document Processor initialized (chunk_size={chunk_size}, overlap={chunk_overlap})")
 
     def extract_text_from_pdf(self, pdf_path: str) -> str:
@@ -63,6 +78,7 @@ class DocumentProcessor:
     def extract_text_from_hwp(self, hwp_path: str) -> str:
         """
         Extract text from HWP file (한글 문서)
+        Uses Java HWP service if available, falls back to Python extraction
 
         Args:
             hwp_path: Path to HWP file
@@ -70,6 +86,21 @@ class DocumentProcessor:
         Returns:
             Extracted text
         """
+        # Try Java-based extraction first (more reliable)
+        if self.use_java_hwp:
+            try:
+                logger.info(f"Using Java HWP service for {Path(hwp_path).name}")
+                text = self.hwp_processor.extract_text_from_file(hwp_path)
+                if text:
+                    logger.success(f"Java extraction successful: {len(text)} characters")
+                    return text
+                else:
+                    logger.warning("Java extraction returned no text, falling back to Python")
+            except Exception as e:
+                logger.warning(f"Java extraction failed, falling back to Python: {e}")
+
+        # Fallback to Python-based extraction
+        logger.info(f"Using Python fallback extraction for {Path(hwp_path).name}")
         try:
             if not olefile.isOleFile(hwp_path):
                 raise ValueError(f"{hwp_path} is not a valid HWP file")

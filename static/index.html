@@ -181,15 +181,15 @@
 
             <!-- Upload Section -->
             <div class="upload-section">
-                <h3>새 PDF 업로드</h3>
-                <div class="upload-area" id="uploadArea" title="PDF 파일을 드래그하거나 클릭하여 업로드하세요">
-                    <input type="file" id="fileInput" accept=".pdf" style="display: none;">
+                <h3>새 문서 업로드</h3>
+                <div class="upload-area" id="uploadArea" title="PDF 또는 HWP 파일을 드래그하거나 클릭하여 업로드하세요">
+                    <input type="file" id="fileInput" accept=".pdf,.hwp" style="display: none;">
                     <div class="upload-placeholder">
                         <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor">
                             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                         </svg>
-                        <p>클릭하거나 PDF 파일을 드래그하세요</p>
-                        <p class="hint-text">파일이 자동으로 색인됩니다</p>
+                        <p>클릭하거나 PDF/HWP 파일을 드래그하세요</p>
+                        <p class="hint-text">파일이 자동으로 색인됩니다 (PDF, HWP 지원)</p>
                     </div>
                 </div>
                 <div id="uploadStatus" class="upload-status"></div>
@@ -424,12 +424,12 @@
                 <!-- Document Management -->
                 <section class="help-section">
                     <h3>📁 문서 관리</h3>
-                    <p>헤더의 "문서 관리" 버튼으로 PDF 파일을 업로드하고 관리할 수 있습니다.</p>
+                    <p>헤더의 "문서 관리" 버튼으로 PDF 및 HWP 파일을 업로드하고 관리할 수 있습니다.</p>
                     <ul>
                         <li><strong>모달 열기:</strong> 헤더의 "문서 관리" 버튼 클릭</li>
-                        <li><strong>PDF 업로드:</strong> 드래그 앤 드롭 또는 클릭하여 파일 선택</li>
+                        <li><strong>문서 업로드:</strong> PDF 또는 HWP 파일을 드래그 앤 드롭 또는 클릭하여 파일 선택</li>
                         <li><strong>업로드 진행:</strong> 파일 업로드 및 처리 진행 상황 표시</li>
-                        <li><strong>문서 목록:</strong> 업로드된 모든 PDF 문서 확인</li>
+                        <li><strong>문서 목록:</strong> 업로드된 모든 문서 확인 (PDF, HWP)</li>
                         <li><strong>문서 삭제:</strong> 각 문서의 삭제 버튼으로 문서 제거</li>
                         <li><strong>목록 새로고침:</strong> 새로고침 버튼으로 문서 목록 갱신</li>
                     </ul>
