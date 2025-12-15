@@ -54,6 +54,7 @@ const errorHandler = new ErrorHandler();
 const streamingVisualizer = new StreamingVisualizer();
 let questionAutoComplete = null;  // Will be initialized after fetching questions
 let currentContextData = [];  // Store context data for source details
+const followUpQuestions = new FollowUpQuestions();  // Initialize follow-up questions feature
 
 // Initialize
 async function init() {
@@ -434,7 +435,7 @@ async function sendMessage(regenerate = false) {
                     return res;
                 }
             ),
-            30000 // 30 second timeout
+            60000 // 60 second timeout (increased for LLM response generation)
         );
 
         // Show streaming progress (StreamingVisualizer)
@@ -581,6 +582,22 @@ async function sendMessage(regenerate = false) {
                                     sourcesLength: sources ? sources.length : 0,
                                     type: typeof sources
                                 });
+                            }
+
+                            // Generate and display follow-up questions
+                            try {
+                                const followUpQs = await followUpQuestions.generate(question, fullText);
+                                if (followUpQs && followUpQs.length > 0) {
+                                    followUpQuestions.display(contentDiv, followUpQs, (selectedQuestion) => {
+                                        // When user clicks a follow-up question, populate input and send
+                                        userInput.value = selectedQuestion;
+                                        autoResize();
+                                        updateSendButton();
+                                        sendMessage();
+                                    });
+                                }
+                            } catch (error) {
+                                console.error('Failed to generate/display follow-up questions:', error);
                             }
                         }
                     } catch (parseError) {
@@ -831,7 +848,7 @@ function addActionButtons(contentDiv, text) {
     // Copy button (icon only)
     const copyBtn = document.createElement('button');
     copyBtn.className = 'action-btn copy-btn';
-    copyBtn.setAttribute('data-tooltip', '클립보드에 복사');
+    copyBtn.setAttribute('title', '클립보드에 복사');
     copyBtn.setAttribute('aria-label', '클립보드에 복사');
     copyBtn.innerHTML = `
         <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor">
@@ -844,7 +861,7 @@ function addActionButtons(contentDiv, text) {
     // Regenerate button (icon only)
     const regenerateBtn = document.createElement('button');
     regenerateBtn.className = 'action-btn regenerate-btn';
-    regenerateBtn.setAttribute('data-tooltip', '새로운 답변 생성');
+    regenerateBtn.setAttribute('title', '새로운 답변 생성');
     regenerateBtn.setAttribute('aria-label', '새로운 답변 생성');
     regenerateBtn.innerHTML = `
         <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor">
@@ -867,7 +884,7 @@ function addActionButtonsToWrapper(wrapperDiv, text) {
     // Copy button (icon only)
     const copyBtn = document.createElement('button');
     copyBtn.className = 'action-btn copy-btn';
-    copyBtn.setAttribute('data-tooltip', '클립보드에 복사');
+    copyBtn.setAttribute('title', '클립보드에 복사');
     copyBtn.setAttribute('aria-label', '클립보드에 복사');
     copyBtn.innerHTML = `
         <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor">
@@ -880,7 +897,7 @@ function addActionButtonsToWrapper(wrapperDiv, text) {
     // Regenerate button (icon only)
     const regenerateBtn = document.createElement('button');
     regenerateBtn.className = 'action-btn regenerate-btn';
-    regenerateBtn.setAttribute('data-tooltip', '새로운 답변 생성');
+    regenerateBtn.setAttribute('title', '새로운 답변 생성');
     regenerateBtn.setAttribute('aria-label', '새로운 답변 생성');
     regenerateBtn.innerHTML = `
         <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor">
@@ -912,7 +929,7 @@ async function copyToClipboard(text, button) {
         button.style.color = '#10b981';
         button.style.borderColor = '#10b981';
         button.style.background = 'linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, rgba(16, 185, 129, 0.15) 100%)';
-        button.setAttribute('data-tooltip', '✓ 복사되었습니다');
+        button.setAttribute('title', '✓ 복사되었습니다');
 
         // Add success animation class
         button.style.transform = 'scale(1.05)';
@@ -923,7 +940,7 @@ async function copyToClipboard(text, button) {
             button.style.borderColor = '';
             button.style.background = '';
             button.style.transform = '';
-            button.setAttribute('data-tooltip', originalTooltip);
+            button.setAttribute('title', originalTooltip);
         }, 2000);
     } catch (error) {
         console.error('Copy failed:', error);

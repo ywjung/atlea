@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="/static/error-styles.css?v=34">
     <link rel="stylesheet" href="/static/streaming-styles.css?v=34">
     <link rel="stylesheet" href="/static/autocomplete-styles.css?v=34">
+    <link rel="stylesheet" href="/static/follow-up-styles.css">
     <!-- Marked.js for Markdown rendering -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <!-- Highlight.js for code syntax highlighting -->
@@ -96,7 +97,7 @@
         <div class="document-filter" id="documentFilter">
             <div class="filter-header">
                 <span class="filter-title">🔍 검색 범위</span>
-                <button id="toggleFilterBtn" class="toggle-filter-btn">
+                <button id="toggleFilterBtn" class="toggle-filter-btn" title="문서 목록 펼치기/접기">
                     <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
                         <path d="M8 4l-4 4h8l-4-4z"/>
                     </svg>
@@ -104,11 +105,11 @@
             </div>
             <div class="filter-content" id="filterContent">
                 <div class="filter-options">
-                    <label class="filter-option">
+                    <label class="filter-option" title="모든 문서에서 검색합니다">
                         <input type="radio" name="filterMode" value="all" checked>
                         <span>전체 문서</span>
                     </label>
-                    <label class="filter-option">
+                    <label class="filter-option" title="체크한 문서에서만 검색합니다">
                         <input type="radio" name="filterMode" value="selected">
                         <span>선택한 문서만</span>
                     </label>
@@ -123,10 +124,11 @@
         <div class="input-area">
             <textarea
                 id="userInput"
-                placeholder="질문을 입력하세요..."
+                placeholder="질문을 입력하세요... (Enter: 전송, Shift+Enter: 줄바꿈)"
                 rows="1"
+                title="문서에 대한 질문을 입력하세요"
             ></textarea>
-            <button id="sendBtn" class="send-btn" disabled>
+            <button id="sendBtn" class="send-btn" disabled title="질문 전송 (Enter)">
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
                     <path d="M22 2L11 13M22 2L15 22L11 13M22 2L2 8L11 13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
@@ -135,23 +137,23 @@
 
         <!-- Controls -->
         <div class="controls">
-            <button id="clearBtn" class="control-btn">
+            <button id="clearBtn" class="control-btn" title="현재 대화 내용을 모두 지웁니다">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="margin-right: 6px;">
                     <polyline points="3 6 5 6 21 6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                     <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
                 대화 초기화
             </button>
-            <button id="exportBtn" class="control-btn">💾 대화 내보내기</button>
-            <button id="importBtn" class="control-btn">📂 대화 가져오기</button>
-            <button id="reindexBtn" class="control-btn">
+            <button id="exportBtn" class="control-btn" title="대화 내용을 JSON 파일로 저장합니다">💾 대화 내보내기</button>
+            <button id="importBtn" class="control-btn" title="저장된 대화 내용을 불러옵니다">📂 대화 가져오기</button>
+            <button id="reindexBtn" class="control-btn" title="모든 문서를 다시 색인합니다 (시간이 걸릴 수 있음)">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="margin-right: 6px;">
                     <polyline points="23 4 23 10 17 10" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                     <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
                 문서 재색인
             </button>
-            <button id="docsBtn" class="control-btn">📄 문서 관리</button>
+            <button id="docsBtn" class="control-btn" title="PDF 문서를 업로드하거나 삭제합니다">📄 문서 관리</button>
         </div>
     </div>
 
@@ -166,7 +168,7 @@
             <!-- Upload Section -->
             <div class="upload-section">
                 <h3>새 PDF 업로드</h3>
-                <div class="upload-area" id="uploadArea">
+                <div class="upload-area" id="uploadArea" title="PDF 파일을 드래그하거나 클릭하여 업로드하세요">
                     <input type="file" id="fileInput" accept=".pdf" style="display: none;">
                     <div class="upload-placeholder">
                         <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor">
@@ -301,13 +303,13 @@
                             <span class="stat-value" id="statCacheHits">-</span>
                         </div>
                     </div>
-                    <button id="refreshStatsBtn" class="refresh-stats-btn">
+                    <button id="refreshStatsBtn" class="refresh-stats-btn" title="최신 캐시 통계를 가져옵니다">
                         🔄 통계 새로고침
                     </button>
                 </div>
 
                 <div class="setting-item">
-                    <button id="clearCacheBtn" class="action-btn">
+                    <button id="clearCacheBtn" class="action-btn" title="저장된 모든 캐시를 삭제합니다">
                         🗑️ 캐시 초기화
                     </button>
                 </div>
@@ -337,10 +339,10 @@
 
             <!-- Save Button -->
             <div class="settings-footer">
-                <button id="saveSettingsBtn" class="save-btn">
+                <button id="saveSettingsBtn" class="save-btn" title="현재 설정을 저장합니다 (자동 저장됨)">
                     💾 설정 저장
                 </button>
-                <button id="resetSettingsBtn" class="reset-btn">
+                <button id="resetSettingsBtn" class="reset-btn" title="모든 설정을 기본값으로 되돌립니다">
                     🔄 기본값 복원
                 </button>
             </div>
@@ -545,7 +547,10 @@
     <!-- Question AutoComplete -->
     <script src="/static/autocomplete.js"></script>
 
+    <!-- Follow-up Questions -->
+    <script src="/static/follow-up-questions.js"></script>
+
     <!-- Main Script -->
-    <script src="/static/script.js?v=36"></script>
+    <script src="/static/script.js?v=37"></script>
 </body>
 </html>
