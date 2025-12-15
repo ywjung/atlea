@@ -4,6 +4,20 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PDF RAG 챗봇</title>
+    <!-- Early theme initialization to prevent flash -->
+    <script>
+        (function() {
+            try {
+                const savedTheme = localStorage.getItem('theme') || 'light';
+                // Validate theme value
+                const theme = (savedTheme === 'dark' || savedTheme === 'light') ? savedTheme : 'light';
+                document.documentElement.setAttribute('data-theme', theme);
+            } catch (error) {
+                // Fallback to light theme if localStorage is not available
+                document.documentElement.setAttribute('data-theme', 'light');
+            }
+        })();
+    </script>
     <link rel="stylesheet" href="/static/style.css?v=35">
     <link rel="stylesheet" href="/static/error-styles.css?v=34">
     <link rel="stylesheet" href="/static/streaming-styles.css?v=34">

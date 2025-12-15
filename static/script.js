@@ -1903,35 +1903,118 @@ function hideStopButton() {
 }
 
 // ===== Theme Management =====
+let isTogglingTheme = false;  // Prevent concurrent theme switches
+
 function initTheme() {
     // Get saved theme or default to light
     const savedTheme = localStorage.getItem('theme') || 'light';
-    setTheme(savedTheme);
+    setTheme(savedTheme, true);  // Skip animation on init
 }
 
 function toggleTheme() {
-    const currentTheme = document.documentElement.getAttribute('data-theme') || 'light';
-    const newTheme = currentTheme === 'light' ? 'dark' : 'light';
-    setTheme(newTheme);
+    // Prevent concurrent toggles
+    if (isTogglingTheme) {
+        return;
+    }
+
+    isTogglingTheme = true;
+
+    try {
+        const currentTheme = document.documentElement.getAttribute('data-theme') || 'light';
+        const newTheme = currentTheme === 'light' ? 'dark' : 'light';
+        setTheme(newTheme);
+    } finally {
+        // Release lock after a short delay to prevent rapid clicking
+        setTimeout(() => {
+            isTogglingTheme = false;
+        }, 100);
+    }
 }
 
-function setTheme(theme) {
+function setTheme(theme, skipTransition = false) {
+    // Validate theme value
+    if (theme !== 'light' && theme !== 'dark') {
+        console.warn('Invalid theme:', theme, '- defaulting to light');
+        theme = 'light';
+    }
+
     // Set theme attribute on root element
     document.documentElement.setAttribute('data-theme', theme);
 
+    // Force reflow to ensure CSS variables are applied immediately
+    void document.documentElement.offsetHeight;
+
     // Save to localStorage
-    localStorage.setItem('theme', theme);
+    try {
+        localStorage.setItem('theme', theme);
+    } catch (error) {
+        console.error('Failed to save theme to localStorage:', error);
+    }
 
-    // Update theme toggle button icons
-    const sunIcon = themeToggle.querySelector('.sun-icon');
-    const moonIcon = themeToggle.querySelector('.moon-icon');
+    // Update theme toggle button icons with null checks
+    if (themeToggle) {
+        const sunIcon = themeToggle.querySelector('.sun-icon');
+        const moonIcon = themeToggle.querySelector('.moon-icon');
 
-    if (theme === 'dark') {
-        sunIcon.style.display = 'none';
-        moonIcon.style.display = 'block';
+        if (sunIcon && moonIcon) {
+            if (theme === 'dark') {
+                // Show moon icon, hide sun icon
+                if (skipTransition) {
+                    // Instant change on init
+                    sunIcon.style.display = 'none';
+                    sunIcon.style.opacity = '0';
+                    moonIcon.style.display = 'block';
+                    moonIcon.style.opacity = '1';
+                    moonIcon.style.transform = 'rotate(0deg) scale(1)';
+                } else {
+                    // Smooth transition on toggle
+                    sunIcon.style.opacity = '0';
+                    sunIcon.style.transform = 'rotate(-90deg) scale(0.8)';
+                    moonIcon.style.display = 'block';
+                    moonIcon.style.opacity = '1';
+                    moonIcon.style.transform = 'rotate(0deg) scale(1)';
+                    // Hide sun icon after transition
+                    setTimeout(() => {
+                        sunIcon.style.display = 'none';
+                    }, 300);
+                }
+            } else {
+                // Show sun icon, hide moon icon
+                if (skipTransition) {
+                    // Instant change on init
+                    moonIcon.style.display = 'none';
+                    moonIcon.style.opacity = '0';
+                    sunIcon.style.display = 'block';
+                    sunIcon.style.opacity = '1';
+                    sunIcon.style.transform = 'rotate(0deg) scale(1)';
+                } else {
+                    // Smooth transition on toggle
+                    moonIcon.style.opacity = '0';
+                    moonIcon.style.transform = 'rotate(90deg) scale(0.8)';
+                    sunIcon.style.display = 'block';
+                    sunIcon.style.opacity = '1';
+                    sunIcon.style.transform = 'rotate(0deg) scale(1)';
+                    // Hide moon icon after transition
+                    setTimeout(() => {
+                        moonIcon.style.display = 'none';
+                    }, 300);
+                }
+            }
+        } else {
+            console.warn('Theme toggle icons not found');
+        }
     } else {
-        sunIcon.style.display = 'block';
-        moonIcon.style.display = 'none';
+        console.warn('Theme toggle button not found');
+    }
+
+    // Add visual feedback
+    if (!skipTransition && themeToggle) {
+        themeToggle.style.transform = 'rotate(360deg)';
+        themeToggle.style.transition = 'transform 0.3s ease';
+        setTimeout(() => {
+            themeToggle.style.transform = '';
+            themeToggle.style.transition = '';
+        }, 300);
     }
 }
 

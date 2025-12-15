@@ -238,14 +238,34 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.2s ease;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     backdrop-filter: blur(10px);
     margin-right: var(--space-sm);
+    position: relative;
+    overflow: hidden;
 }
 
 .theme-toggle-btn:hover {
     background: rgba(255, 255, 255, 0.25);
     transform: scale(1.1);
+}
+
+.theme-toggle-btn:active {
+    transform: scale(0.95);
+}
+
+/* Smooth icon transitions */
+.theme-toggle-btn .sun-icon,
+.theme-toggle-btn .moon-icon {
+    transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+.theme-toggle-btn .sun-icon {
+    opacity: 1;
+}
+
+.theme-toggle-btn .moon-icon {
+    opacity: 0;
 }
 
 .settings-btn {
