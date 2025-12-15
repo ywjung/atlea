@@ -1,0 +1,31 @@
+server:
+  port: 8081
+  tomcat:
+    max-swallow-size: 52428800  # 50MB
+
+spring:
+  application:
+    name: hwp-service
+  servlet:
+    multipart:
+      enabled: true
+      max-file-size: 50MB
+      max-request-size: 50MB
+  main:
+    banner-mode: off
+
+logging:
+  level:
+    root: INFO
+    com.chatbot.hwp: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: always
