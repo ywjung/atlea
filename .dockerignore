@@ -1,0 +1,89 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+venv/
+env/
+ENV/
+
+# Virtual environments
+venv/
+env/
+.venv/
+.env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Documentation
+*.md
+README.md
+IMPROVEMENTS.md
+ERROR_HANDLER_INTEGRATION_GUIDE.md
+STREAMING_VISUALIZER_INTEGRATION_GUIDE.md
+SESSION_INTEGRATION_GUIDE.md
+AUTOCOMPLETE_INTEGRATION_GUIDE.md
+IMPROVEMENT_ANALYSIS.md
+
+# Development files
+.env
+.env.local
+.env.development
+*.log
+server.log
+
+# Test files
+tests/
+test_*.py
+*_test.py
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Docker
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Data and models (should be mounted or downloaded separately)
+data/*
+model/*
+!data/.gitkeep
+!model/.gitkeep
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.bak
+*.swp
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+
+# Other
+setup.sh
+run.sh
+download_models.py
+test_query.json
+tmp.md
+claudedocs/
+.playwright-mcp/

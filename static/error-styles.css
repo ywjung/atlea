@@ -1,0 +1,252 @@
+/**
+ * Error Handler Styles
+ * Styles for error messages, retry notifications, and loading indicators
+ */
+
+/* Error Message Container */
+.error-message-container {
+    margin: 15px 0;
+    animation: slideIn 0.3s ease-out;
+}
+
+.error-message {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 16px;
+    background: linear-gradient(135deg, #fff5f5 0%, #ffe5e5 100%);
+    border: 1px solid #ffcccc;
+    border-left: 4px solid #ff4444;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(255, 68, 68, 0.1);
+}
+
+.error-icon {
+    font-size: 24px;
+    flex-shrink: 0;
+    animation: pulse 2s infinite;
+}
+
+.error-content {
+    flex: 1;
+}
+
+.error-title {
+    font-weight: 600;
+    color: #cc0000;
+    margin-bottom: 4px;
+    font-size: 14px;
+}
+
+.error-text {
+    color: #666;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.error-actions {
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.retry-button,
+.cancel-button {
+    padding: 8px 16px;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.retry-button {
+    background: #ff4444;
+    color: white;
+}
+
+.retry-button:hover {
+    background: #cc0000;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(255, 68, 68, 0.3);
+}
+
+.cancel-button {
+    background: #f0f0f0;
+    color: #666;
+}
+
+.cancel-button:hover {
+    background: #e0e0e0;
+}
+
+/* Retry Notification */
+.retry-notification {
+    margin: 10px 0;
+    padding: 12px 16px;
+    background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
+    border: 1px solid #90caf9;
+    border-left: 4px solid #2196f3;
+    border-radius: 8px;
+    animation: slideIn 0.3s ease-out;
+}
+
+.retry-content {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    color: #1565c0;
+}
+
+.retry-icon {
+    font-size: 18px;
+    animation: spin 1s linear infinite;
+}
+
+.retry-text {
+    flex: 1;
+    font-weight: 500;
+}
+
+.retry-timer {
+    background: rgba(33, 150, 243, 0.1);
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+/* Loading Container with Cancel */
+.loading-container {
+    margin: 15px 0;
+    animation: slideIn 0.3s ease-out;
+}
+
+.loading-content {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 16px;
+    background: linear-gradient(135deg, #f5f5f5 0%, #e8e8e8 100%);
+    border: 1px solid #ddd;
+    border-radius: 8px;
+}
+
+.loading-spinner {
+    width: 20px;
+    height: 20px;
+    border: 3px solid #f0f0f0;
+    border-top: 3px solid #4CAF50;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+.loading-text {
+    flex: 1;
+    color: #666;
+    font-size: 14px;
+    font-weight: 500;
+}
+
+/* Animations */
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes spin {
+    0% {
+        transform: rotate(0deg);
+    }
+    100% {
+        transform: rotate(360deg);
+    }
+}
+
+@keyframes pulse {
+    0%, 100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 0.8;
+        transform: scale(1.1);
+    }
+}
+
+/* Mobile Responsive */
+@media (max-width: 600px) {
+    .error-message {
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .error-actions {
+        width: 100%;
+        flex-direction: column;
+    }
+
+    .retry-button,
+    .cancel-button {
+        width: 100%;
+    }
+
+    .retry-content {
+        flex-wrap: wrap;
+    }
+
+    .retry-timer {
+        margin-left: auto;
+    }
+}
+
+/* Dark Mode Support (Optional) */
+@media (prefers-color-scheme: dark) {
+    .error-message {
+        background: linear-gradient(135deg, #3d1f1f 0%, #4d2626 100%);
+        border-color: #663333;
+    }
+
+    .error-title {
+        color: #ff6666;
+    }
+
+    .error-text {
+        color: #ccc;
+    }
+
+    .retry-notification {
+        background: linear-gradient(135deg, #1a3a52 0%, #245270 100%);
+        border-color: #3d7096;
+    }
+
+    .retry-content {
+        color: #64b5f6;
+    }
+
+    .loading-content {
+        background: linear-gradient(135deg, #2d2d2d 0%, #3a3a3a 100%);
+        border-color: #555;
+    }
+
+    .loading-text {
+        color: #ccc;
+    }
+
+    .cancel-button {
+        background: #444;
+        color: #ccc;
+    }
+
+    .cancel-button:hover {
+        background: #555;
+    }
+}

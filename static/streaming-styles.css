@@ -1,0 +1,377 @@
+/**
+ * Streaming Visualization Styles
+ * Styles for typing indicators, progress bars, and streaming stats
+ */
+
+/* Base Streaming Indicator */
+.streaming-indicator {
+    margin: 12px 0;
+    padding: 14px 18px;
+    border-radius: 10px;
+    animation: fadeInSlide 0.3s ease-out;
+    transition: all 0.3s ease;
+    position: relative;
+    z-index: 100;
+}
+
+/* Typing Indicator (Initial State) */
+.typing-indicator {
+    background: linear-gradient(135deg, #e6f2ff 0%, #d6e9ff 100%);
+    border: 2px solid #4299e1;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    box-shadow: 0 2px 8px rgba(66, 153, 225, 0.15);
+}
+
+.typing-dots {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+
+.typing-dots span {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #3182ce 0%, #2c5282 100%);
+    animation: typingBounce 1.4s infinite ease-in-out;
+    box-shadow: 0 2px 4px rgba(49, 130, 206, 0.3);
+}
+
+.typing-dots span:nth-child(1) {
+    animation-delay: 0s;
+}
+
+.typing-dots span:nth-child(2) {
+    animation-delay: 0.2s;
+}
+
+.typing-dots span:nth-child(3) {
+    animation-delay: 0.4s;
+}
+
+.status-text {
+    color: #1a365d;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+/* Progress Indicator (Streaming State) */
+.progress-indicator {
+    background: linear-gradient(135deg, #ebf8ff 0%, #d6e9ff 100%);
+    border: 1px solid #bee3f8;
+    border-left: 4px solid #4299e1;
+    box-shadow: 0 2px 8px rgba(66, 153, 225, 0.1);
+}
+
+.progress-content {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.progress-info {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.progress-icon {
+    font-size: 24px;
+    animation: pulse 2s infinite;
+}
+
+.progress-details {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.progress-text {
+    color: #2d3748;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.progress-stats {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #718096;
+    font-size: 13px;
+}
+
+.token-count {
+    color: #4299e1;
+    font-weight: 600;
+    font-size: 14px;
+}
+
+.elapsed-time {
+    color: #718096;
+    font-weight: 500;
+}
+
+.separator {
+    color: #cbd5e0;
+}
+
+/* Progress Bar */
+.progress-bar-container {
+    width: 100%;
+    height: 6px;
+    background: #e2e8f0;
+    border-radius: 3px;
+    overflow: hidden;
+    position: relative;
+}
+
+.progress-bar {
+    height: 100%;
+    background: linear-gradient(90deg, #4299e1 0%, #667eea 100%);
+    border-radius: 3px;
+    transition: width 0.3s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+.progress-bar::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(
+        90deg,
+        transparent 0%,
+        rgba(255, 255, 255, 0.3) 50%,
+        transparent 100%
+    );
+    animation: shimmer 1.5s infinite;
+}
+
+/* Completion State */
+.streaming-indicator.completed {
+    border-color: #48bb78;
+    background: linear-gradient(135deg, #f0fff4 0%, #c6f6d5 100%);
+}
+
+.streaming-indicator.completed .progress-bar {
+    background: linear-gradient(90deg, #48bb78 0%, #38a169 100%);
+}
+
+.streaming-indicator.completed .progress-icon {
+    filter: grayscale(0);
+}
+
+/* Error State */
+.error-indicator {
+    background: linear-gradient(135deg, #fff5f5 0%, #fed7d7 100%);
+    border: 1px solid #fc8181;
+    border-left: 4px solid #f56565;
+}
+
+.error-content {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.error-icon {
+    font-size: 20px;
+    animation: shake 0.5s;
+}
+
+.error-text {
+    color: #c53030;
+    font-size: 14px;
+    font-weight: 500;
+}
+
+/* Animations */
+@keyframes fadeInSlide {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes typingBounce {
+    0%, 60%, 100% {
+        transform: translateY(0);
+        opacity: 0.7;
+    }
+    30% {
+        transform: translateY(-10px);
+        opacity: 1;
+    }
+}
+
+@keyframes pulse {
+    0%, 100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 0.8;
+        transform: scale(1.05);
+    }
+}
+
+@keyframes shimmer {
+    0% {
+        transform: translateX(-100%);
+    }
+    100% {
+        transform: translateX(200%);
+    }
+}
+
+@keyframes shake {
+    0%, 100% {
+        transform: translateX(0);
+    }
+    25% {
+        transform: translateX(-5px);
+    }
+    75% {
+        transform: translateX(5px);
+    }
+}
+
+/* Mobile Responsive */
+@media (max-width: 600px) {
+    .streaming-indicator {
+        padding: 12px 14px;
+    }
+
+    .progress-info {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+    }
+
+    .progress-icon {
+        font-size: 20px;
+    }
+
+    .progress-stats {
+        flex-wrap: wrap;
+        font-size: 12px;
+    }
+
+    .token-count {
+        font-size: 13px;
+    }
+}
+
+/* Dark Mode Support - Manual Toggle Only */
+[data-theme="dark"] .streaming-indicator {
+    background: #2d3748;
+    border-color: #4a5568;
+}
+
+[data-theme="dark"] .typing-indicator {
+    background: linear-gradient(135deg, #2d3748 0%, #1a202c 100%);
+    border-color: #4299e1;
+    box-shadow: 0 2px 8px rgba(66, 153, 225, 0.25);
+}
+
+[data-theme="dark"] .typing-dots span {
+    background: linear-gradient(135deg, #63b3ed 0%, #4299e1 100%);
+    box-shadow: 0 2px 4px rgba(99, 179, 237, 0.3);
+}
+
+[data-theme="dark"] .status-text {
+    color: #e2e8f0;
+}
+
+[data-theme="dark"] .progress-indicator {
+    background: linear-gradient(135deg, #2d3748 0%, #1a202c 100%);
+    border-color: #4a5568;
+    border-left-color: #4299e1;
+    box-shadow: 0 2px 8px rgba(66, 153, 225, 0.2);
+}
+
+[data-theme="dark"] .progress-text {
+    color: #e2e8f0;
+}
+
+[data-theme="dark"] .progress-stats {
+    color: #a0aec0;
+}
+
+[data-theme="dark"] .token-count {
+    color: #63b3ed;
+}
+
+[data-theme="dark"] .elapsed-time {
+    color: #a0aec0;
+}
+
+[data-theme="dark"] .separator {
+    color: #718096;
+}
+
+[data-theme="dark"] .progress-bar-container {
+    background: #1a202c;
+}
+
+[data-theme="dark"] .progress-bar {
+    background: linear-gradient(90deg, #4299e1 0%, #667eea 100%);
+}
+
+[data-theme="dark"] .streaming-indicator.completed {
+    border-color: #48bb78;
+    background: linear-gradient(135deg, #22543d 0%, #1c4532 100%);
+}
+
+[data-theme="dark"] .streaming-indicator.completed .progress-bar {
+    background: linear-gradient(90deg, #48bb78 0%, #38a169 100%);
+}
+
+[data-theme="dark"] .error-indicator {
+    background: linear-gradient(135deg, #742a2a 0%, #63171b 100%);
+    border-color: #fc8181;
+    border-left-color: #f56565;
+}
+
+[data-theme="dark"] .error-text {
+    color: #feb2b2;
+}
+
+/* High Contrast Mode */
+@media (prefers-contrast: high) {
+    .streaming-indicator {
+        border-width: 2px;
+    }
+
+    .progress-bar {
+        background: #0066cc;
+    }
+
+    .typing-dots span {
+        background: #0066cc;
+    }
+}
+
+/* Reduced Motion */
+@media (prefers-reduced-motion: reduce) {
+    .typing-dots span,
+    .progress-icon,
+    .progress-bar::after,
+    .error-icon {
+        animation: none;
+    }
+
+    .streaming-indicator {
+        animation: none;
+    }
+}
