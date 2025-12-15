@@ -1152,7 +1152,7 @@ async function uploadFile(file) {
             // Reload documents
             setTimeout(() => {
                 loadDocuments();
-                updateStatus();
+                checkStatus();
             }, 1000);
         } else {
             showUploadStatus(`✗ 업로드 실패: ${result.detail}`, 'error');
@@ -1242,7 +1242,7 @@ async function deleteDocument(filename) {
         if (response.ok) {
             showUploadStatus(`✓ ${filename} 삭제 완료`, 'success');
             loadDocuments();
-            updateStatus();
+            checkStatus();
         } else {
             showUploadStatus(`✗ 삭제 실패: ${result.detail}`, 'error');
         }
