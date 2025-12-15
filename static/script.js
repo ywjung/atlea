@@ -1149,9 +1149,10 @@ async function uploadFile(file) {
                 'success'
             );
             fileInput.value = '';
-            // Reload documents
+            // Reload documents and filter list
             setTimeout(() => {
                 loadDocuments();
+                loadFilterDocuments();  // Refresh search scope filter
                 checkStatus();
             }, 1000);
         } else {
@@ -1242,6 +1243,7 @@ async function deleteDocument(filename) {
         if (response.ok) {
             showUploadStatus(`✓ ${filename} 삭제 완료`, 'success');
             loadDocuments();
+            loadFilterDocuments();  // Refresh search scope filter
             checkStatus();
         } else {
             showUploadStatus(`✗ 삭제 실패: ${result.detail}`, 'error');
