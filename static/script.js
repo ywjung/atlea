@@ -253,7 +253,7 @@ async function checkStatus() {
         if (data.status === 'ready') {
             statusEl.textContent = '준비됨';
             statusEl.style.color = '#4ade80';
-            docCountEl.textContent = `📄 PDF ${data.pdf_count}개 (청크 ${data.chunk_count}개)`;
+            docCountEl.textContent = `📄 문서 ${data.pdf_count}개 (청크 ${data.chunk_count}개)`;
             sendBtn.disabled = false;
         } else {
             statusEl.textContent = '초기화 중...';
@@ -1113,10 +1113,14 @@ uploadArea.addEventListener('drop', (e) => {
 
     if (e.dataTransfer.files.length > 0) {
         const file = e.dataTransfer.files[0];
-        if (file.type === 'application/pdf') {
+        const fileName = file.name.toLowerCase();
+        const isPDF = file.type === 'application/pdf' || fileName.endsWith('.pdf');
+        const isHWP = fileName.endsWith('.hwp');
+
+        if (isPDF || isHWP) {
             uploadFile(file);
         } else {
-            showUploadStatus('PDF 파일만 업로드 가능합니다.', 'error');
+            showUploadStatus('PDF 또는 HWP 파일만 업로드 가능합니다.', 'error');
         }
     }
 });
