@@ -210,12 +210,16 @@ async def generate_questions_pool():
         import random
         from mlx_lm import generate
 
-        # Get list of PDF files
+        # Get list of PDF and HWP files
         data_path = Path(DATA_DIR)
         if not data_path.exists():
             return
 
-        pdf_files = list(data_path.glob("*.pdf"))
+        import itertools
+        pdf_files = list(itertools.chain(
+            data_path.glob("*.pdf"),
+            data_path.glob("*.hwp")
+        ))
         if not pdf_files:
             return
 
@@ -642,7 +646,7 @@ async def clear_cache():
 @app.get("/api/documents")
 async def list_documents():
     """
-    List all indexed PDF documents with metadata
+    List all indexed PDF and HWP documents with metadata
     """
     try:
         data_path = Path(DATA_DIR)
@@ -651,8 +655,14 @@ async def list_documents():
 
         documents = []
 
-        # Get all PDF files
-        for pdf_file in data_path.glob("*.pdf"):
+        # Get all PDF and HWP files
+        import itertools
+        all_files = itertools.chain(
+            data_path.glob("*.pdf"),
+            data_path.glob("*.hwp")
+        )
+
+        for pdf_file in all_files:
             # Get file stats
             stat = pdf_file.stat()
 
