@@ -359,6 +359,19 @@ async function sendMessage(regenerate = false) {
         // Hide suggested questions after first user message
         hideSuggestedQuestions();
 
+        // Collapse search scope filter panel after sending message
+        const filterContent = document.getElementById('filterContent');
+        const toggleBtn = document.querySelector('.toggle-filter-btn');
+        if (filterContent && !filterContent.classList.contains('collapsed')) {
+            filterContent.classList.add('collapsed');
+            if (toggleBtn) {
+                const toggleIcon = toggleBtn.querySelector('svg');
+                if (toggleIcon) {
+                    toggleIcon.style.transform = 'rotate(0deg)';
+                }
+            }
+        }
+
         // Save to localStorage
         saveHistory();
 
