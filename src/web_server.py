@@ -18,6 +18,7 @@ from dotenv import load_dotenv
 
 from .embeddings import EmbeddingModel
 from .pdf_processor import PDFProcessor
+from .document_processor import DocumentProcessor
 from .vector_db import VectorDB
 from .llm import LLM, RAGSystem
 from .document_tracker import DocumentTracker
@@ -692,12 +693,12 @@ async def list_documents():
 @app.post("/api/documents/upload")
 async def upload_document(file: UploadFile = File(...)):
     """
-    Upload a new PDF document and automatically index it
+    Upload a new PDF or HWP document and automatically index it
     """
     try:
         # Validate file type
-        if not file.filename.endswith('.pdf'):
-            raise HTTPException(status_code=400, detail="Only PDF files are allowed")
+        if not (file.filename.endswith('.pdf') or file.filename.endswith('.hwp')):
+            raise HTTPException(status_code=400, detail="Only PDF and HWP files are allowed")
 
         # Create data directory if it doesn't exist
         data_path = Path(DATA_DIR)
@@ -710,7 +711,7 @@ async def upload_document(file: UploadFile = File(...)):
         file_hash = hashlib.md5(file_content).hexdigest()
 
         # Check for duplicate content using Redis
-        hash_key = f"pdf:hash:{file_hash}"
+        hash_key = f"doc:hash:{file_hash}"
         existing_filename = vector_db.client.get(hash_key)
 
         if existing_filename:
@@ -736,15 +737,15 @@ async def upload_document(file: UploadFile = File(...)):
 
         logger.info(f"Uploaded file: {file.filename}")
 
-        # Process and index the new PDF
+        # Process and index the new document (PDF or HWP)
         try:
-            pdf_processor = PDFProcessor(
+            doc_processor = DocumentProcessor(
                 chunk_size=CHUNK_SIZE,
                 chunk_overlap=CHUNK_OVERLAP
             )
 
-            # Process single file
-            chunks = pdf_processor.process_pdf(str(file_path))
+            # Process single file (automatically detects PDF or HWP)
+            chunks = doc_processor.process_document(str(file_path))
 
             if not chunks:
                 logger.warning(f"No chunks created from {file.filename}")
@@ -817,7 +818,7 @@ async def delete_document(filename: str):
         try:
             with file_path.open("rb") as f:
                 file_hash = hashlib.md5(f.read()).hexdigest()
-                hash_key = f"pdf:hash:{file_hash}"
+                hash_key = f"doc:hash:{file_hash}"
                 vector_db.client.delete(hash_key)
                 logger.info(f"Removed file hash from registry: {file_hash[:8]}...")
         except Exception as e:
