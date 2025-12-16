@@ -700,6 +700,46 @@ async def list_documents():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/documents/{filename}/chunks")
+async def get_document_chunks(filename: str):
+    """
+    Get all chunks for a specific document
+    """
+    try:
+        if not vector_db:
+            raise HTTPException(status_code=500, detail="Vector database not available")
+
+        # Get chunks for this document from vector DB
+        chunks = vector_db.get_chunks_by_filename(filename)
+
+        if not chunks:
+            return {
+                "filename": filename,
+                "chunks": [],
+                "total_count": 0,
+                "message": "No chunks found for this document"
+            }
+
+        # Format chunks for display
+        formatted_chunks = []
+        for i, chunk in enumerate(chunks, 1):
+            formatted_chunks.append({
+                "index": i,
+                "text": chunk.get("text", ""),
+                "page": chunk.get("page", "N/A"),
+                "metadata": chunk.get("metadata", {})
+            })
+
+        return {
+            "filename": filename,
+            "chunks": formatted_chunks,
+            "total_count": len(formatted_chunks)
+        }
+    except Exception as e:
+        logger.error(f"Failed to get chunks for {filename}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/documents/upload")
 async def upload_document(file: UploadFile = File(...)):
     """

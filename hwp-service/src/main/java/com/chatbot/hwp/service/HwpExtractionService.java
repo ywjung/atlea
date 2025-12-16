@@ -7,6 +7,8 @@ import kr.dogfoot.hwplib.object.bodytext.paragraph.Paragraph;
 import kr.dogfoot.hwplib.object.bodytext.paragraph.text.ParaText;
 import kr.dogfoot.hwplib.reader.HWPReader;
 import kr.dogfoot.hwplib.tool.paragraphadder.ParagraphCopier;
+import kr.dogfoot.hwplib.tool.textextractor.TextExtractMethod;
+import kr.dogfoot.hwplib.tool.textextractor.TextExtractor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.io.FileUtils;
 import org.springframework.stereotype.Service;
@@ -129,7 +131,7 @@ public class HwpExtractionService {
     }
 
     /**
-     * Extract text from HWP file using hwplib
+     * Extract text from HWP file using hwplib TextExtractor
      *
      * @param file HWP file
      * @return Extracted text content
@@ -143,50 +145,14 @@ public class HwpExtractionService {
             throw new IOException("Failed to read HWP file");
         }
 
-        StringBuilder textBuilder = new StringBuilder();
+        // Use TextExtractor utility for proper text extraction
+        String extractedText = TextExtractor.extract(hwpFile, TextExtractMethod.InsertControlTextBetweenParagraphText);
 
-        // Extract text from all sections
-        for (Section section : hwpFile.getBodyText().getSectionList()) {
-            for (Paragraph paragraph : section.getParagraphs()) {
-                String paragraphText = extractParagraphText(paragraph);
-                if (paragraphText != null && !paragraphText.trim().isEmpty()) {
-                    textBuilder.append(paragraphText).append("\n");
-                }
-            }
-        }
-
-        String extractedText = textBuilder.toString().trim();
-
-        if (extractedText.isEmpty()) {
+        if (extractedText == null || extractedText.trim().isEmpty()) {
             throw new IOException("No text content found in HWP file");
         }
 
-        return extractedText;
-    }
-
-    /**
-     * Extract text from a single paragraph
-     *
-     * @param paragraph HWP paragraph object
-     * @return Extracted text
-     */
-    private String extractParagraphText(Paragraph paragraph) {
-        if (paragraph == null || paragraph.getText() == null) {
-            return "";
-        }
-
-        ParaText paraText = paragraph.getText();
-        if (paraText == null) {
-            return "";
-        }
-
-        // Get normal text
-        String normalText = paraText.toString();
-        if (normalText != null) {
-            return normalText.trim();
-        }
-
-        return "";
+        return extractedText.trim();
     }
 
     /**

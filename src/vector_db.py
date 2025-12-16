@@ -272,6 +272,54 @@ class VectorDB:
             logger.error(f"Failed to count documents for {filename}: {e}")
             return 0
 
+    def get_chunks_by_filename(self, filename: str) -> List[Dict]:
+        """
+        Get all chunks for a specific filename
+
+        Args:
+            filename: Name of the file to get chunks for
+
+        Returns:
+            List of chunks with their text and metadata
+        """
+        try:
+            # Escape special characters in filename for Redis search
+            escaped_filename = filename.replace('"', '\\"')
+
+            # Query all chunks for this filename, sorted by chunk_index
+            query = (
+                Query(f'@filename:"{escaped_filename}"')
+                .return_fields("text", "filename", "source", "chunk_index")
+                .sort_by("chunk_index", asc=True)
+                .paging(0, 10000)  # Get up to 10000 chunks
+                .dialect(2)
+            )
+
+            results = self.client.ft(self.index_name).search(query)
+
+            # Parse results
+            chunks = []
+            for doc in results.docs:
+                chunk_data = {
+                    "text": doc.text if hasattr(doc, 'text') else "",
+                    "filename": doc.filename if hasattr(doc, 'filename') else filename,
+                    "source": doc.source if hasattr(doc, 'source') else "",
+                    "chunk_index": int(doc.chunk_index) if hasattr(doc, 'chunk_index') else 0,
+                    "page": doc.source if hasattr(doc, 'source') else "N/A",
+                    "metadata": {
+                        "chunk_index": int(doc.chunk_index) if hasattr(doc, 'chunk_index') else 0,
+                        "source": doc.source if hasattr(doc, 'source') else ""
+                    }
+                }
+                chunks.append(chunk_data)
+
+            logger.info(f"Retrieved {len(chunks)} chunks for {filename}")
+            return chunks
+
+        except Exception as e:
+            logger.error(f"Failed to get chunks for {filename}: {e}")
+            return []
+
     def delete_by_filename(self, filename: str) -> int:
         """
         Delete all chunks associated with a filename
