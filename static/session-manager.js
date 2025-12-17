@@ -23,15 +23,11 @@ class SessionManager {
             };
 
             localStorage.setItem(this.SESSION_KEY, JSON.stringify(session));
-            console.log('Session saved successfully');
             return true;
         } catch (error) {
-            console.error('Failed to save session:', error);
-
             // Handle quota exceeded error
             if (error.name === 'QuotaExceededError') {
                 this.clearOldSessions();
-                console.warn('localStorage quota exceeded, cleared old sessions');
             }
             return false;
         }
@@ -46,7 +42,6 @@ class SessionManager {
             const saved = localStorage.getItem(this.SESSION_KEY);
 
             if (!saved) {
-                console.log('No saved session found');
                 return null;
             }
 
@@ -54,7 +49,6 @@ class SessionManager {
 
             // Check version compatibility
             if (session.version !== this.version) {
-                console.warn('Session version mismatch, clearing old session');
                 this.clearSession();
                 return null;
             }
@@ -64,16 +58,13 @@ class SessionManager {
             const now = Date.now();
 
             if (now - session.timestamp > expiryTime) {
-                console.log('Session expired, clearing');
                 this.clearSession();
                 return null;
             }
 
-            console.log('Session loaded successfully', session.history.length, 'messages');
             return session.history;
 
         } catch (error) {
-            console.error('Failed to load session:', error);
             this.clearSession(); // Clear corrupted session
             return null;
         }
@@ -85,10 +76,8 @@ class SessionManager {
     clearSession() {
         try {
             localStorage.removeItem(this.SESSION_KEY);
-            console.log('Session cleared');
             return true;
         } catch (error) {
-            console.error('Failed to clear session:', error);
             return false;
         }
     }
@@ -122,7 +111,6 @@ class SessionManager {
                 isExpired: age > (this.SESSION_EXPIRY_HOURS * 60 * 60 * 1000)
             };
         } catch (error) {
-            console.error('Failed to get session info:', error);
             return null;
         }
     }
@@ -146,17 +134,15 @@ class SessionManager {
                         if (!data.timestamp ||
                             Date.now() - data.timestamp > (this.SESSION_EXPIRY_HOURS * 60 * 60 * 1000)) {
                             localStorage.removeItem(key);
-                            console.log('Cleared old session:', key);
                         }
                     } catch (e) {
                         // Clear corrupted data
                         localStorage.removeItem(key);
-                        console.log('Cleared corrupted session:', key);
                     }
                 }
             });
         } catch (error) {
-            console.error('Failed to clear old sessions:', error);
+            // Silent fail
         }
     }
 

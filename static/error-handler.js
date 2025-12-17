@@ -18,8 +18,6 @@ class ErrorHandler {
      * @returns {Object} - Error details and suggested action
      */
     handleError(error, context = 'general') {
-        console.error(`[ErrorHandler] ${context}:`, error);
-
         const errorType = this.classifyError(error);
         const errorMessage = this.getErrorMessage(errorType, context);
 
@@ -120,7 +118,6 @@ class ErrorHandler {
 
                 // Calculate exponential backoff delay
                 const delay = this.baseDelay * Math.pow(2, attempt);
-                console.log(`[ErrorHandler] Retry ${attempt + 1}/${maxRetries} after ${delay}ms`);
 
                 // Show retry notification
                 this.showRetryNotification(attempt + 1, maxRetries, delay);

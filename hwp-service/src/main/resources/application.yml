@@ -13,6 +13,7 @@ spring:
       max-request-size: 50MB
   main:
     banner-mode: off
+    allow-bean-definition-overriding: true
 
 logging:
   level:
@@ -29,3 +30,12 @@ management:
   endpoint:
     health:
       show-details: always
+
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    enabled: true
+    display-request-duration: true
+    operations-sorter: method

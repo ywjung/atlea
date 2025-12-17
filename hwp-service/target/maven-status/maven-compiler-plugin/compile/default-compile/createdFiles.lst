@@ -1,3 +1,10 @@
 com/chatbot/hwp/config/WebConfig.class
-com/chatbot/hwp/HwpServiceApplication.class
 com/chatbot/hwp/model/HwpExtractionResponse.class
+com/chatbot/hwp/model/HwpExtractionResponse$HwpExtractionResponseBuilder.class
+com/chatbot/hwp/model/HwpExtractionRequest.class
+com/chatbot/hwp/service/HwpExtractionService.class
+com/chatbot/hwp/HwpServiceApplication.class
+com/chatbot/hwp/config/OpenApiConfig.class
+com/chatbot/hwp/model/ErrorResponse.class
+com/chatbot/hwp/controller/HwpController.class
+com/chatbot/hwp/model/ErrorResponse$ErrorResponseBuilder.class

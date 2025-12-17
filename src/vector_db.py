@@ -7,6 +7,7 @@ import numpy as np
 from typing import List, Dict, Optional
 from loguru import logger
 import redis
+from redis import ConnectionPool
 from redis.commands.search.field import TextField, VectorField, NumericField
 from redis.commands.search.indexDefinition import IndexDefinition, IndexType
 from redis.commands.search.query import Query
@@ -37,14 +38,20 @@ class VectorDB:
         self.embedding_dim = embedding_dim
 
         try:
-            self.client = redis.Redis(
+            # Create connection pool for better concurrent performance
+            pool = ConnectionPool(
                 host=host,
                 port=port,
                 db=db,
-                decode_responses=False
+                max_connections=20,  # Allow up to 20 concurrent connections
+                decode_responses=False,
+                socket_keepalive=True,
+                socket_connect_timeout=5,
+                retry_on_timeout=True
             )
+            self.client = redis.Redis(connection_pool=pool)
             self.client.ping()
-            logger.success(f"Connected to Redis at {host}:{port}")
+            logger.success(f"Connected to Redis at {host}:{port} (pool size: 20)")
         except Exception as e:
             logger.error(f"Failed to connect to Redis: {e}")
             raise

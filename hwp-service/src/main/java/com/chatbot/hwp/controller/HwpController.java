@@ -4,6 +4,13 @@ import com.chatbot.hwp.model.ErrorResponse;
 import com.chatbot.hwp.model.HwpExtractionRequest;
 import com.chatbot.hwp.model.HwpExtractionResponse;
 import com.chatbot.hwp.service.HwpExtractionService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -14,38 +21,46 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDateTime;
 
-/**
- * REST API Controller for HWP text extraction
- */
 @Slf4j
 @RestController
 @RequestMapping("/api/hwp")
 @RequiredArgsConstructor
+@Tag(name = "HWP Text Extraction", description = "API endpoints for extracting text from Korean HWP files")
 public class HwpController {
 
     private final HwpExtractionService hwpExtractionService;
 
-    /**
-     * Health check endpoint
-     *
-     * @return OK status
-     */
+    @Operation(
+            summary = "Health check",
+            description = "Check if the HWP service is running and healthy"
+    )
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Service is running",
+                    content = @Content(schema = @Schema(implementation = String.class)))
+    })
     @GetMapping("/health")
     public ResponseEntity<String> health() {
         return ResponseEntity.ok("HWP Service is running");
     }
 
-    /**
-     * Extract text from HWP file (multipart upload)
-     *
-     * @param file HWP file
-     * @return Extraction response
-     */
+    @Operation(
+            summary = "Extract text from HWP file",
+            description = "Upload an HWP file and extract its text content. Supports HWP files up to 50MB in size."
+    )
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Text extracted successfully",
+                    content = @Content(schema = @Schema(implementation = HwpExtractionResponse.class))),
+            @ApiResponse(responseCode = "400", description = "Invalid file format or size",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "500", description = "Extraction failed",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
     @PostMapping(value = "/extract", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ResponseEntity<?> extractText(@RequestParam("file") MultipartFile file) {
+    public ResponseEntity<?> extractText(
+            @Parameter(description = "HWP file to extract text from (*.hwp, max 50MB)", required = true)
+            @RequestParam("file") MultipartFile file) {
         log.info("Received HWP extraction request: {}", file.getOriginalFilename());
 
-        // Validate file
         if (!hwpExtractionService.isValidHwpFile(file)) {
             return ResponseEntity
                     .badRequest()
@@ -58,7 +73,6 @@ public class HwpController {
                             .build());
         }
 
-        // Extract text
         HwpExtractionResponse response = hwpExtractionService.extractText(file);
 
         if (!response.isSuccess()) {
@@ -76,14 +90,22 @@ public class HwpController {
         return ResponseEntity.ok(response);
     }
 
-    /**
-     * Extract text from HWP file (base64 encoded)
-     *
-     * @param request Extraction request with base64 content
-     * @return Extraction response
-     */
+    @Operation(
+            summary = "Extract text from base64-encoded HWP file",
+            description = "Send HWP file content as base64-encoded string and extract text. Useful for API integrations where file upload is not available."
+    )
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Text extracted successfully",
+                    content = @Content(schema = @Schema(implementation = HwpExtractionResponse.class))),
+            @ApiResponse(responseCode = "400", description = "Invalid request or missing fileContent",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "500", description = "Extraction failed",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
     @PostMapping(value = "/extract/base64", consumes = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<?> extractTextFromBase64(@RequestBody HwpExtractionRequest request) {
+    public ResponseEntity<?> extractTextFromBase64(
+            @Parameter(description = "Extraction request with base64-encoded HWP file content", required = true)
+            @RequestBody HwpExtractionRequest request) {
         log.info("Received base64 HWP extraction request: {}", request.getFilename());
 
         if (request.getFileContent() == null || request.getFileContent().isEmpty()) {
@@ -98,7 +120,6 @@ public class HwpController {
                             .build());
         }
 
-        // Extract text
         HwpExtractionResponse response = hwpExtractionService.extractTextFromBase64(
                 request.getFileContent(),
                 request.getFilename() != null ? request.getFilename() : "unknown.hwp"
@@ -119,9 +140,6 @@ public class HwpController {
         return ResponseEntity.ok(response);
     }
 
-    /**
-     * Exception handler for all exceptions
-     */
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleException(Exception e) {
         log.error("Unexpected error: {}", e.getMessage(), e);

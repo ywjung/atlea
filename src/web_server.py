@@ -6,6 +6,7 @@ import os
 import json
 import shutil
 import hashlib
+import asyncio
 from pathlib import Path
 from typing import Optional
 from datetime import datetime
@@ -188,28 +189,105 @@ async def startup_event():
             top_k=5
         )
 
-        # Pre-generate suggested questions pool
-        logger.info("Generating suggested questions pool...")
-        await generate_questions_pool()
-        logger.success(f"Generated {len(suggested_questions_pool)} questions in pool")
+        # Start question generation in background (non-blocking)
+        logger.info("Starting background question generation...")
+        asyncio.create_task(generate_questions_pool_background())
 
         logger.success("Application initialized successfully!")
+        logger.info("⚡ Server ready! Question pool generating in background...")
     except Exception as e:
         logger.error(f"Initialization failed: {e}")
         raise
 
 
+async def _generate_questions_for_document(filename: str) -> list:
+    """
+    Generate Korean questions for a single document
+
+    Args:
+        filename: Name of the document file
+
+    Returns:
+        List of generated Korean questions
+    """
+    from mlx_lm import generate
+
+    try:
+        # Sample chunks from document
+        docs = vector_db.sample_documents_by_filename(filename, limit=5)
+        if not docs:
+            return []
+
+        # Create context from chunks
+        context_text = "\n\n".join([
+            f"{doc['text'][:800]}"
+            for doc in docs[:5]
+        ])
+
+        # Generate questions using LLM
+        system_content = "You must respond ONLY in Korean language. Never use English in your response."
+        user_content = f"""다음은 "{filename}" 문서의 내용입니다. 이 문서를 읽고 한국어로 질문 12개를 생성하세요.
+
+문서 내용:
+{context_text}
+
+다양한 유형의 질문을 만드세요:
+1. 구체적 수치/기한: "임차보증금의 최대 한도는 얼마인가요?"
+2. 절차/방법: "이사회 안건은 어떻게 제출하나요?"
+3. 조건/기준: "징계 감경을 받을 수 있는 조건은 무엇인가요?"
+4. 비교/차이: "문서규칙과 인사규정의 차이는 무엇인가요?"
+5. 정의/개념: "전산업무관리지침에서 정의하는 시스템이란?"
+6. 책임/담당: "비품 관리를 담당하는 부서는 어디인가요?"
+7. 기한/기간: "연차 신청은 며칠 전까지 해야 하나요?"
+8. 범위/대상: "출장비 지급 대상은 누구인가요?"
+
+위 형식으로 한국어 질문 12개만 생성하세요 (번호 없이):"""
+
+        messages = [
+            {"role": "system", "content": system_content},
+            {"role": "user", "content": user_content}
+        ]
+
+        prompt = llm.tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=True
+        )
+
+        response = generate(
+            llm.model,
+            llm.tokenizer,
+            prompt=prompt,
+            max_tokens=1024
+        )
+
+        # Parse and filter questions
+        lines = response.strip().split('\n')
+        questions = []
+        for line in lines:
+            line = line.strip()
+            if line and (line[0].isdigit() or line.startswith('-') or '?' in line):
+                question = line.lstrip('0123456789.-) ').strip()
+                if question and len(question) > 10 and question.endswith('?'):
+                    # Filter: Only include questions with Korean characters
+                    if any('\uac00' <= char <= '\ud7a3' for char in question):
+                        questions.append(question)
+
+        return questions
+
+    except Exception as e:
+        logger.warning(f"Failed to generate questions for {filename}: {e}")
+        return []
+
+
 async def generate_questions_pool():
     """
-    Pre-generate a pool of 15-20 questions during startup
-    These will be randomly sampled when users request suggested questions
+    Generate 10+ Korean questions per PDF/HWP document
+    Questions are stored with document metadata for tracking
     """
     global suggested_questions_pool
 
     try:
-        import random
-        from mlx_lm import generate
-
         # Get list of PDF and HWP files
         data_path = Path(DATA_DIR)
         if not data_path.exists():
@@ -223,76 +301,19 @@ async def generate_questions_pool():
         if not pdf_files:
             return
 
-        # Generate 3-4 batches of questions for variety
+        logger.info(f"Generating questions for {len(pdf_files)} documents...")
         all_questions = []
-        for batch_num in range(3):
-            # Randomly select documents for this batch
-            random.shuffle(pdf_files)
-            all_docs = []
 
-            for pdf_file in pdf_files[:5]:
-                try:
-                    docs = vector_db.sample_documents_by_filename(pdf_file.name, limit=2)
-                    all_docs.extend(docs)
-                except:
-                    continue
-
-            if not all_docs:
-                continue
-
-            random.shuffle(all_docs)
-
-            # Create context
-            context_text = "\n\n".join([
-                f"[문서: {doc['filename']}]\n{doc['text'][:800]}..."
-                for doc in all_docs[:8]
-            ])
-
-            # Generate questions
-            system_content = "You must respond ONLY in Korean language. Never use English in your response."
-            user_content = f"""다음 문서 내용을 읽고 한국어로 질문 5개만 생성하세요.
-
-문서:
-{context_text}
-
-예시:
-1. 임차보증금의 최대 한도는 얼마인가요?
-2. 전산시스템은 몇 시간 운영되나요?
-3. 이사회 안건 제출 기한은 언제인가요?
-
-위 형식으로 질문 5개 (한국어만):"""
-
-            messages = [
-                {"role": "system", "content": system_content},
-                {"role": "user", "content": user_content}
-            ]
-
-            prompt = llm.tokenizer.apply_chat_template(
-                messages,
-                tokenize=False,
-                add_generation_prompt=True
-            )
-
-            response = generate(
-                llm.model,
-                llm.tokenizer,
-                prompt=prompt,
-                max_tokens=512
-            )
-
-            # Parse questions
-            lines = response.strip().split('\n')
-            for line in lines:
-                line = line.strip()
-                if line and (line[0].isdigit() or line.startswith('-')):
-                    question = line.lstrip('0123456789.-) ').strip()
-                    if question and len(question) > 10:
-                        # Filter: Only include questions with Korean characters
-                        if any('\uac00' <= char <= '\ud7a3' for char in question):
-                            all_questions.append(question)
+        # Generate questions for each document using helper function
+        for pdf_file in pdf_files:
+            doc_questions = await _generate_questions_for_document(pdf_file.name)
+            if doc_questions:
+                all_questions.extend(doc_questions)
+                logger.info(f"  • {pdf_file.name}: {len(doc_questions)} questions generated")
 
         # Store unique Korean-only questions in the pool
         suggested_questions_pool = list(set(all_questions))
+        logger.info(f"Total unique questions: {len(suggested_questions_pool)}")
 
     except Exception as e:
         logger.error(f"Failed to generate questions pool: {e}")
@@ -304,6 +325,50 @@ async def generate_questions_pool():
             "문서에서 다루는 핵심 주제는 무엇인가요?",
             "이 문서에서 얻을 수 있는 주요 정보는 무엇인가요?"
         ]
+
+
+async def generate_questions_pool_background():
+    """
+    Background task wrapper for question generation
+    Runs asynchronously without blocking server startup
+    """
+    try:
+        logger.info("📝 Background: Generating question pool for all documents...")
+        start_time = asyncio.get_event_loop().time()
+
+        await generate_questions_pool()
+
+        elapsed = asyncio.get_event_loop().time() - start_time
+        logger.success(f"✅ Question pool ready! Generated {len(suggested_questions_pool)} questions in {elapsed:.1f}s")
+    except Exception as e:
+        logger.error(f"❌ Background question generation failed: {e}")
+        logger.warning("App will continue with empty question pool")
+
+
+async def generate_questions_for_new_documents(new_files: list):
+    """
+    Generate questions for newly added documents
+    Called when new documents are detected and indexed
+    """
+    global suggested_questions_pool
+
+    try:
+        logger.info(f"Generating questions for {len(new_files)} new documents...")
+        new_questions = []
+
+        # Generate questions for each new document using helper function
+        for filename in new_files:
+            doc_questions = await _generate_questions_for_document(filename)
+            if doc_questions:
+                new_questions.extend(doc_questions)
+                logger.info(f"  • {filename}: {len(doc_questions)} new questions generated")
+
+        # Add new questions to existing pool (keep unique)
+        suggested_questions_pool = list(set(suggested_questions_pool + new_questions))
+        logger.success(f"Added {len(new_questions)} new questions. Total: {len(suggested_questions_pool)}")
+
+    except Exception as e:
+        logger.error(f"Failed to generate questions for new documents: {e}")
 
 
 async def check_and_index_pdfs():
@@ -335,8 +400,10 @@ async def check_and_index_pdfs():
 
         # Changes detected - show summary
         logger.warning("PDF changes detected:")
+        new_files_list = []
         if change_summary["new_files"]:
-            logger.info(f"  • New files ({len(change_summary['new_files'])}): {change_summary['new_files']}")
+            new_files_list = change_summary['new_files']
+            logger.info(f"  • New files ({len(new_files_list)}): {new_files_list}")
         if change_summary["modified_files"]:
             logger.info(f"  • Modified files ({len(change_summary['modified_files'])}): {change_summary['modified_files']}")
         if change_summary["deleted_files"]:
@@ -346,6 +413,11 @@ async def check_and_index_pdfs():
         logger.info("Reindexing required. Clearing old index...")
         vector_db.clear_index()
         await index_pdfs(doc_tracker)
+
+        # Generate questions for new documents
+        if new_files_list:
+            logger.info("Generating questions for new documents...")
+            await generate_questions_for_new_documents(new_files_list)
 
     except Exception as e:
         logger.error(f"Smart indexing failed: {e}")
@@ -1022,8 +1094,8 @@ async def get_suggested_questions():
                 ]
             }
 
-        # Sample 5 random questions from the pool
-        num_questions = min(5, len(suggested_questions_pool))
+        # Sample 50 random questions from the pool for better autocomplete coverage
+        num_questions = min(50, len(suggested_questions_pool))
         selected_questions = random.sample(suggested_questions_pool, num_questions)
 
         logger.info(f"Returning {num_questions} questions from pool of {len(suggested_questions_pool)}")

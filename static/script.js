@@ -87,7 +87,7 @@ async function initializeAutoComplete() {
             questionAutoComplete = new QuestionAutoComplete(userInput, questions);
         }
     } catch (error) {
-        console.error('Error initializing autocomplete:', error);
+        // Silent fail - autocomplete is optional feature
     }
 }
 
@@ -342,15 +342,11 @@ async function sendMessage(regenerate = false) {
     let question;
 
     if (regenerate) {
-        console.log('[REGENERATE] Regenerate button clicked');
-        console.log('[REGENERATE] lastUserQuestion:', lastUserQuestion);
         question = lastUserQuestion;
         if (!question) {
-            console.error('[REGENERATE] No last user question found! Cannot regenerate.');
             alert('재생성할 질문이 없습니다. 먼저 질문을 입력해주세요.');
             return;
         }
-        console.log('[REGENERATE] Using question:', question);
         // Remove last bot response for regeneration
         if (conversationHistory.length > 0 && conversationHistory[conversationHistory.length - 1].role === 'assistant') {
             conversationHistory.pop();
@@ -2043,7 +2039,6 @@ function toggleTheme() {
 function setTheme(theme, skipTransition = false) {
     // Validate theme value
     if (theme !== 'light' && theme !== 'dark') {
-        console.warn('Invalid theme:', theme, '- defaulting to light');
         theme = 'light';
     }
 
@@ -2109,11 +2104,7 @@ function setTheme(theme, skipTransition = false) {
                     }, 300);
                 }
             }
-        } else {
-            console.warn('Theme toggle icons not found');
         }
-    } else {
-        console.warn('Theme toggle button not found');
     }
 
     // Add visual feedback
@@ -2346,7 +2337,11 @@ async function loadSuggestedQuestions() {
 
         const data = await response.json();
         if (data.questions && data.questions.length > 0) {
-            displaySuggestedQuestions(data.questions);
+            try {
+                displaySuggestedQuestions(data.questions);
+            } catch (err) {
+                devWarn('Could not display suggested questions panel:', err);
+            }
 
             // Update AutoComplete with new questions
             if (questionAutoComplete) {
@@ -2402,12 +2397,12 @@ function displaySuggestedQuestions(questions) {
     const listElement = document.getElementById('suggestedQuestionsList');
 
     if (!container || !listElement) {
-        console.error('Suggested questions elements not found');
+        // Silently skip if elements are not in DOM (not an error condition)
+        devWarn('Suggested questions panel elements not found - skipping display');
         return;
     }
 
     if (!questions || questions.length === 0) {
-        console.warn('No questions to display');
         return;
     }
 
@@ -2434,7 +2429,6 @@ function displaySuggestedQuestions(questions) {
 
     // ALWAYS show the suggestions container when questions are added
     container.style.display = 'block';
-    console.log('Suggested questions displayed:', questions.length);
 }
 
 /**
@@ -2467,6 +2461,14 @@ function hideSuggestedQuestions() {
     }
 }
 
-// Start application
-init();
-initDocumentFilter();
+// Start application when DOM is ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        init();
+        initDocumentFilter();
+    });
+} else {
+    // DOM already loaded
+    init();
+    initDocumentFilter();
+}

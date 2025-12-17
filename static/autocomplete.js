@@ -15,7 +15,38 @@ class QuestionAutoComplete {
         this.maxResults = 5;
         this.debounceDelay = 300; // ms
 
+        // Build inverted index for O(1) search
+        this.buildIndex();
+
         this.init();
+    }
+
+    /**
+     * Build inverted index for fast word-based lookup
+     */
+    buildIndex() {
+        this.wordIndex = new Map();
+
+        this.suggestedQuestions.forEach((question, questionIdx) => {
+            const words = question.toLowerCase().split(/\s+/);
+
+            words.forEach(word => {
+                // Index each word
+                if (!this.wordIndex.has(word)) {
+                    this.wordIndex.set(word, new Set());
+                }
+                this.wordIndex.get(word).add(questionIdx);
+
+                // Also index prefixes for partial matching
+                for (let i = 2; i <= word.length; i++) {
+                    const prefix = word.substring(0, i);
+                    if (!this.wordIndex.has(prefix)) {
+                        this.wordIndex.set(prefix, new Set());
+                    }
+                    this.wordIndex.get(prefix).add(questionIdx);
+                }
+            });
+        });
     }
 
     /**
@@ -37,9 +68,10 @@ class QuestionAutoComplete {
         this.dropdownElement.className = 'autocomplete-dropdown';
         this.dropdownElement.id = 'autocompleteDropdown';
         this.dropdownElement.style.display = 'none';
+        this.dropdownElement.style.position = 'fixed'; // Use fixed positioning
 
-        // Insert after input
-        this.input.parentNode.insertBefore(this.dropdownElement, this.input.nextSibling);
+        // Append to body to avoid parent positioning issues
+        document.body.appendChild(this.dropdownElement);
     }
 
     /**
@@ -63,8 +95,21 @@ class QuestionAutoComplete {
             }
         });
 
-        // Window resize
+        // Window resize and scroll - reposition dropdown
         window.addEventListener('resize', () => {
+            if (this.isVisible) {
+                this.position();
+            }
+        });
+
+        window.addEventListener('scroll', () => {
+            if (this.isVisible) {
+                this.position();
+            }
+        });
+
+        // Focus event - ensure dropdown is positioned correctly
+        this.input.addEventListener('focus', () => {
             if (this.isVisible) {
                 this.position();
             }
@@ -127,59 +172,64 @@ class QuestionAutoComplete {
     }
 
     /**
-     * Find matching questions
+     * Find matching questions using inverted index
+     * O(1) lookup instead of O(n*m)
      * @param {string} query - Search query
      * @returns {Array} - Matched questions with scores
      */
     findMatches(query) {
         const lowerQuery = query.toLowerCase();
-        const results = [];
+        const queryWords = lowerQuery.split(/\s+/).filter(w => w.length >= 2);
 
-        for (const question of this.suggestedQuestions) {
-            const lowerQuestion = question.toLowerCase();
+        if (queryWords.length === 0) {
+            return [];
+        }
 
-            // Calculate similarity score
-            let score = 0;
+        // Use inverted index to find candidate questions
+        const candidateScores = new Map();
 
-            // Exact match (highest priority)
-            if (lowerQuestion === lowerQuery) {
-                score = 1000;
-            }
-            // Starts with query
-            else if (lowerQuestion.startsWith(lowerQuery)) {
-                score = 500;
-            }
-            // Contains query
-            else if (lowerQuestion.includes(lowerQuery)) {
-                score = 300;
-            }
-            // Fuzzy match (word-based)
-            else {
-                const queryWords = lowerQuery.split(/\s+/);
-                const questionWords = lowerQuestion.split(/\s+/);
+        queryWords.forEach(word => {
+            // Look up in index (O(1))
+            const questionIndices = this.wordIndex.get(word);
 
-                let matchedWords = 0;
-                for (const qWord of queryWords) {
-                    for (const aWord of questionWords) {
-                        if (aWord.includes(qWord) || qWord.includes(aWord)) {
-                            matchedWords++;
-                            break;
-                        }
+            if (questionIndices) {
+                questionIndices.forEach(idx => {
+                    const question = this.suggestedQuestions[idx];
+                    const lowerQuestion = question.toLowerCase();
+
+                    // Calculate score
+                    let score = candidateScores.get(idx) || 0;
+
+                    // Exact match (highest priority)
+                    if (lowerQuestion === lowerQuery) {
+                        score += 1000;
                     }
-                }
+                    // Starts with query
+                    else if (lowerQuestion.startsWith(lowerQuery)) {
+                        score += 500;
+                    }
+                    // Contains full query
+                    else if (lowerQuestion.includes(lowerQuery)) {
+                        score += 300;
+                    }
+                    // Word match
+                    else {
+                        score += 100;
+                    }
 
-                if (matchedWords > 0) {
-                    score = matchedWords * 100;
-                }
-            }
-
-            if (score > 0) {
-                results.push({
-                    question: question,
-                    score: score
+                    candidateScores.set(idx, score);
                 });
             }
-        }
+        });
+
+        // Convert to results array
+        const results = [];
+        candidateScores.forEach((score, idx) => {
+            results.push({
+                question: this.suggestedQuestions[idx],
+                score: score
+            });
+        });
 
         // Sort by score descending
         results.sort((a, b) => b.score - a.score);
@@ -240,9 +290,10 @@ class QuestionAutoComplete {
     position() {
         const inputRect = this.input.getBoundingClientRect();
 
+        // Use fixed positioning (no scroll offset needed)
         this.dropdownElement.style.width = `${inputRect.width}px`;
-        this.dropdownElement.style.top = `${inputRect.bottom + window.scrollY}px`;
-        this.dropdownElement.style.left = `${inputRect.left + window.scrollX}px`;
+        this.dropdownElement.style.top = `${inputRect.bottom}px`;
+        this.dropdownElement.style.left = `${inputRect.left}px`;
     }
 
     /**
@@ -318,6 +369,8 @@ class QuestionAutoComplete {
      */
     updateSuggestions(questions) {
         this.suggestedQuestions = questions;
+        // Rebuild index with new questions
+        this.buildIndex();
     }
 
     /**

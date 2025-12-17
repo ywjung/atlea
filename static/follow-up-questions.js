@@ -38,7 +38,6 @@ class FollowUpQuestions {
             return this.currentQuestions;
 
         } catch (error) {
-            console.error('Failed to generate follow-up questions:', error);
             // Return fallback questions
             return [
                 '이 내용과 관련된 추가 정보가 있나요?',

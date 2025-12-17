@@ -1,7 +1,8 @@
-/Users/jyw/works/ai/chatbot_redis/hwp-service/src/main/java/com/chatbot/hwp/config/WebConfig.java
-/Users/jyw/works/ai/chatbot_redis/hwp-service/src/main/java/com/chatbot/hwp/model/HwpExtractionResponse.java
-/Users/jyw/works/ai/chatbot_redis/hwp-service/src/main/java/com/chatbot/hwp/controller/HwpController.java
 /Users/jyw/works/ai/chatbot_redis/hwp-service/src/main/java/com/chatbot/hwp/HwpServiceApplication.java
-/Users/jyw/works/ai/chatbot_redis/hwp-service/src/main/java/com/chatbot/hwp/model/HwpExtractionRequest.java
+/Users/jyw/works/ai/chatbot_redis/hwp-service/src/main/java/com/chatbot/hwp/config/OpenApiConfig.java
+/Users/jyw/works/ai/chatbot_redis/hwp-service/src/main/java/com/chatbot/hwp/config/WebConfig.java
+/Users/jyw/works/ai/chatbot_redis/hwp-service/src/main/java/com/chatbot/hwp/controller/HwpController.java
 /Users/jyw/works/ai/chatbot_redis/hwp-service/src/main/java/com/chatbot/hwp/model/ErrorResponse.java
+/Users/jyw/works/ai/chatbot_redis/hwp-service/src/main/java/com/chatbot/hwp/model/HwpExtractionRequest.java
+/Users/jyw/works/ai/chatbot_redis/hwp-service/src/main/java/com/chatbot/hwp/model/HwpExtractionResponse.java
 /Users/jyw/works/ai/chatbot_redis/hwp-service/src/main/java/com/chatbot/hwp/service/HwpExtractionService.java
