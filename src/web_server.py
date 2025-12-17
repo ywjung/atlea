@@ -10,12 +10,14 @@ import asyncio
 from pathlib import Path
 from typing import Optional
 from datetime import datetime
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, Request, Response
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from loguru import logger
 from dotenv import load_dotenv
+from starlette.types import Scope, Receive, Send
 
 from .embeddings import EmbeddingModel
 from .pdf_processor import PDFProcessor
@@ -27,6 +29,32 @@ from .cache_manager import CacheManager
 
 # Load environment variables
 load_dotenv()
+
+
+# Custom StaticFiles with caching headers
+class CachedStaticFiles(StaticFiles):
+    """StaticFiles with aggressive browser caching for better performance"""
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        # Wrap the send function to add cache headers
+        async def send_wrapper(message):
+            if message["type"] == "http.response.start":
+                headers = message.get("headers", [])
+                # Add cache control headers for static assets
+                # Cache for 1 year (31536000 seconds) for versioned assets
+                # Cache for 1 hour (3600 seconds) for HTML files
+                path = scope.get("path", "")
+                if path.endswith(".html"):
+                    # Short cache for HTML (allow quick updates)
+                    headers.append((b"cache-control", b"public, max-age=3600"))
+                else:
+                    # Long cache for CSS, JS, images (use versioning for updates)
+                    headers.append((b"cache-control", b"public, max-age=31536000, immutable"))
+                message["headers"] = headers
+            await send(message)
+
+        await super().__call__(scope, receive, send_wrapper)
+
 
 # Configuration
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
@@ -42,12 +70,19 @@ CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", 50))
 app = FastAPI(
     title="PDF RAG Chatbot",
     description="PDF 문서 기반 질의응답 챗봇",
-    version="1.0.0"
+    version="2.0.1"
 )
 
-# Mount static files
+# Add GZip compression middleware for response compression (60-80% size reduction)
+app.add_middleware(
+    GZipMiddleware,
+    minimum_size=1000,  # Only compress responses larger than 1KB
+    compresslevel=6     # Balance between speed and compression ratio (1-9)
+)
+
+# Mount static files with caching headers
 static_path = Path(__file__).parent.parent / "static"
-app.mount("/static", StaticFiles(directory=str(static_path)), name="static")
+app.mount("/static", CachedStaticFiles(directory=str(static_path)), name="static")
 
 # Global instances (initialized on startup)
 embedding_model: Optional[EmbeddingModel] = None
@@ -301,12 +336,17 @@ async def generate_questions_pool():
         if not pdf_files:
             return
 
-        logger.info(f"Generating questions for {len(pdf_files)} documents...")
+        logger.info(f"Generating questions for {len(pdf_files)} documents in parallel...")
         all_questions = []
 
-        # Generate questions for each document using helper function
-        for pdf_file in pdf_files:
-            doc_questions = await _generate_questions_for_document(pdf_file.name)
+        # Generate questions for each document in parallel using asyncio.gather()
+        tasks = [_generate_questions_for_document(pdf_file.name) for pdf_file in pdf_files]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        for pdf_file, doc_questions in zip(pdf_files, results):
+            if isinstance(doc_questions, Exception):
+                logger.warning(f"  • {pdf_file.name}: Failed - {doc_questions}")
+                continue
             if doc_questions:
                 all_questions.extend(doc_questions)
                 logger.info(f"  • {pdf_file.name}: {len(doc_questions)} questions generated")
@@ -353,12 +393,17 @@ async def generate_questions_for_new_documents(new_files: list):
     global suggested_questions_pool
 
     try:
-        logger.info(f"Generating questions for {len(new_files)} new documents...")
+        logger.info(f"Generating questions for {len(new_files)} new documents in parallel...")
         new_questions = []
 
-        # Generate questions for each new document using helper function
-        for filename in new_files:
-            doc_questions = await _generate_questions_for_document(filename)
+        # Generate questions for each new document in parallel using asyncio.gather()
+        tasks = [_generate_questions_for_document(filename) for filename in new_files]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        for filename, doc_questions in zip(new_files, results):
+            if isinstance(doc_questions, Exception):
+                logger.warning(f"  • {filename}: Failed - {doc_questions}")
+                continue
             if doc_questions:
                 new_questions.extend(doc_questions)
                 logger.info(f"  • {filename}: {len(doc_questions)} new questions generated")
