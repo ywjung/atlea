@@ -88,6 +88,10 @@ PDF 문서를 기반으로 질의응답을 제공하는 AI 챗봇 시스템입�
 
 ### 1. 설치
 
+#### 자동 설치 (권장)
+
+개선된 설치 스크립트로 모든 환경에서 쉽게 설치할 수 있습니다:
+
 ```bash
 # 저장소 이동
 cd chatbot_redis
@@ -96,11 +100,58 @@ cd chatbot_redis
 ./setup.sh
 ```
 
-설치 스크립트는 자동으로:
-- Python 가상환경 생성
-- 필요한 패키지 설치
-- Redis 컨테이너 시작
-- 환경 설정 파일 생성
+#### 설치 스크립트 주요 기능
+
+**✅ 자동 시스템 요구사항 확인**
+- Python 3.10+ 버전 검증
+- Docker 및 Docker Compose 확인
+- Docker 데몬 실행 상태 확인
+- Apple Silicon (M1/M2/M3) 감지 및 MLX 최적화 안내
+- Java 17+ 및 Maven 확인 (HWP 처리용, 선택사항)
+
+**🎨 사용자 친화적 인터페이스**
+- 컬러 코드 로그 출력 (정보, 성공, 경고, 에러)
+- 단계별 진행 상황 표시
+- 명확한 에러 메시지 및 해결 방법 제시
+
+**🔧 자동 환경 구성**
+- Python 가상환경 자동 생성
+- 필요한 패키지 자동 설치
+- Redis 컨테이너 자동 시작
+- `.env` 환경 설정 파일 생성
+- 필수 디렉토리 구조 생성 (data, model, logs)
+
+**💬 대화형 설치**
+- HWP 파일 처리 서비스 설치 선택 (Java 필요)
+- AI 모델 자동 다운로드 옵션 (~15-20GB)
+- Redis 재시작 옵션 (기존 컨테이너가 있는 경우)
+
+**📊 설치 완료 요약**
+- 설치된 구성 요소 상태 표시
+- 다음 단계 안내 (문서 추가, 서버 시작)
+- 유용한 명령어 참고 자료
+
+#### 수동 설치
+
+자동 설치가 실패하거나 커스터마이징이 필요한 경우:
+
+```bash
+# 1. Python 가상환경 생성
+python3 -m venv venv
+source venv/bin/activate
+
+# 2. 패키지 설치
+pip install -r requirements.txt
+
+# 3. Redis 시작
+docker-compose up -d
+
+# 4. 환경 설정 파일 생성
+cp .env.example .env
+
+# 5. 필수 디렉토리 생성
+mkdir -p data model logs
+```
 
 ### 2. 문서 파일 추가
 
