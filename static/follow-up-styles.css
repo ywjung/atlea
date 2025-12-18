@@ -53,6 +53,8 @@
     left: -20px;
     opacity: 0;
     transition: all 0.2s ease;
+    color: var(--accent-color);
+    font-weight: bold;
 }
 
 .follow-up-question-item:hover {
@@ -60,6 +62,7 @@
     border-color: var(--accent-color);
     transform: translateX(4px);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    padding-left: 32px; /* Make room for the arrow */
 }
 
 .follow-up-question-item:hover::before {
