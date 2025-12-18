@@ -163,21 +163,45 @@ cp your_documents/*.hwp ./data/
 
 ### 3. 서버 관리
 
+#### Foreground 모드 (기본)
 ```bash
-# 서버 시작
+# 서버 시작 (터미널에서 실행, Ctrl+C로 종료)
 ./run.sh
 
-# 서버 중지
+# 별도 터미널에서 서버 중지
 ./stop.sh
+```
+
+#### Background 모드 (권장)
+```bash
+# 백그라운드에서 서버 시작
+./run.sh --background
+# 또는 단축형
+./run.sh -b
+
+# 서버 상태 확인
+./run.sh status
+
+# 로그 실시간 확인
+tail -f server.log
+
+# 서버 중지
+./run.sh stop
 
 # 서버 재시작
-./stop.sh && ./run.sh
+./run.sh stop && ./run.sh --background
 ```
+
+**Background 모드 장점**:
+- 터미널 종료해도 서버 계속 실행
+- 로그 파일(`server.log`)로 출력 저장
+- PID 파일로 프로세스 자동 관리
+- 쉬운 상태 확인 및 제어
 
 서버가 시작되면:
 - 웹 UI: http://localhost:8000
 - RedisInsight: http://localhost:8001 (Redis 관리 도구)
-- 서버 준비 시간: ~14초 (질문 생성은 백그라운드 처리)
+- 서버 준비 시간: ~1.2초 (질문 생성은 백그라운드 처리, 95% 개선)
 
 ## 📝 사용 방법
 
