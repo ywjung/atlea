@@ -197,14 +197,26 @@ class VectorDB:
     def count_unique_files(self) -> int:
         """Get total number of unique PDF files"""
         try:
-            # Get all document keys
-            keys = self.client.keys("doc:*")
-            if not keys:
+            # Get all document keys (only numeric doc:N keys, not doc:hash:xxx)
+            all_keys = self.client.keys("doc:*")
+            if not all_keys:
+                return 0
+
+            # Filter to only numeric document keys (doc:0, doc:1, etc.)
+            # Exclude doc:hash:xxx keys used for duplicate tracking
+            doc_keys = [k for k in all_keys if k.decode('utf-8').split(':')[-1].isdigit()]
+
+            if not doc_keys:
                 return 0
 
             # Get unique filenames
             filenames = set()
-            for key in keys:
+            for key in doc_keys:
+                # Check if key is a hash before trying hgetall
+                key_type = self.client.type(key)
+                if key_type != b'hash':
+                    continue
+
                 doc = self.client.hgetall(key)
                 if doc and b'filename' in doc:
                     filenames.add(doc[b'filename'].decode('utf-8'))
