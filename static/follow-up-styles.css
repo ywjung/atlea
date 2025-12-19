@@ -105,7 +105,7 @@
 }
 
 /* Dark theme variables */
-body.dark-theme {
+:root[data-theme="dark"] {
     --follow-up-bg: #2d333b;
     --follow-up-border: #444c56;
     --follow-up-item-bg: #22272e;
