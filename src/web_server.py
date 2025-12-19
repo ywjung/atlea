@@ -434,17 +434,17 @@ async def check_and_index_pdfs():
             return
 
         # Database has documents - check for changes
-        logger.info("Checking for PDF changes...")
+        logger.info("Checking for document changes...")
         change_summary = doc_tracker.get_change_summary()
 
         if not change_summary["needs_reindex"]:
             # No changes detected
             doc_count = vector_db.count_documents()
-            logger.success(f"No PDF changes detected. Using existing index ({doc_count} documents)")
+            logger.success(f"No document changes detected. Using existing index ({doc_count} documents)")
             return
 
         # Changes detected - show summary
-        logger.warning("PDF changes detected:")
+        logger.warning("Document changes detected:")
         new_files_list = []
         if change_summary["new_files"]:
             new_files_list = change_summary['new_files']
@@ -474,23 +474,23 @@ async def check_and_index_pdfs():
 
 async def index_pdfs(doc_tracker: DocumentTracker):
     """
-    Process and index PDF documents
+    Process and index all documents (PDF and HWP)
 
     Args:
         doc_tracker: DocumentTracker instance
     """
     try:
-        logger.info(f"Processing PDFs from {DATA_DIR}...")
+        logger.info(f"Processing documents from {DATA_DIR}...")
 
-        # Process PDFs
-        pdf_processor = PDFProcessor(
+        # Process all documents (PDF and HWP)
+        doc_processor = DocumentProcessor(
             chunk_size=CHUNK_SIZE,
             chunk_overlap=CHUNK_OVERLAP
         )
-        chunks = pdf_processor.process_directory(DATA_DIR)
+        chunks = doc_processor.process_directory(DATA_DIR)
 
         if not chunks:
-            logger.warning("No chunks created from PDFs")
+            logger.warning("No chunks created from documents")
             return
 
         # Create embeddings
@@ -515,9 +515,9 @@ async def index_pdfs(doc_tracker: DocumentTracker):
         }
         vector_db.save_index_state(index_state)
 
-        logger.success(f"Indexed {len(chunks)} chunks from PDF documents")
+        logger.success(f"Indexed {len(chunks)} chunks from {len(set(chunk['filename'] for chunk in chunks))} documents (PDF + HWP)")
     except Exception as e:
-        logger.error(f"Failed to index PDFs: {e}")
+        logger.error(f"Failed to index documents: {e}")
         raise
 
 
