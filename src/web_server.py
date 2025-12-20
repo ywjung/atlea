@@ -1526,35 +1526,48 @@ async def generate_follow_up_questions(request: FollowUpRequest):
         if not llm:
             raise HTTPException(status_code=503, detail="LLM not initialized")
 
-        # Create messages for follow-up question generation
-        # Simple, direct prompt without room for thinking
-        simple_prompt = f"""사용자 질문: {request.question}
-AI 답변: {request.answer[:500]}
-
-위 내용을 바탕으로 후속 질문 3개를 한국어로 작성하세요 (각 질문은 한 줄, '?'로 끝남):"""
-
-        # Generate follow-up questions using MLX
+        # Use direct mlx_lm.generate for more deterministic output
         from mlx_lm import generate as mlx_generate
 
+        # Create simple completion prompt - pattern-based
+        prompt = f"""다음 예시를 참고하여 관련 질문 3개를 한국어로 생성하세요.
+
+질문: 계약서 작성 방법은?
+답변: 계약서는 양식에 따라 작성하며 필요 서류를 첨부합니다.
+관련 질문:
+- 계약 기간은 얼마나 되나요?
+- 계약 해지 시 절차는 어떻게 되나요?
+- 계약서 양식은 어디서 받을 수 있나요?
+
+질문: 출장비 신청 절차는?
+답변: 출장비는 사전에 신청하며 견적서를 제출합니다.
+관련 질문:
+- 출장비 지급 기준은 무엇인가요?
+- 출장 후 정산 기한은 언제까지인가요?
+- 해외 출장비는 별도 규정이 있나요?
+
+질문: {request.question}
+답변: {request.answer[:300]}
+관련 질문:
+-"""
+
+        # Generate using direct MLX
         response = mlx_generate(
             llm.model,
             llm.tokenizer,
-            prompt=simple_prompt,
-            max_tokens=150
+            prompt=prompt,
+            max_tokens=200,
+            verbose=False
         )
 
-        # Debug: Log raw response
-        logger.debug(f"Raw LLM response: {response[:500]}")
-
-        # Clean response: remove <think> tags and their content
+        # Clean response - remove <think> tags if present
         import re
-        cleaned = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL)
-        cleaned = re.sub(r'</?think>', '', cleaned)  # Remove orphaned tags
+        response = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL)
 
-        logger.debug(f"Cleaned response: {cleaned[:500]}")
+        logger.debug(f"LLM response for follow-up questions: {response[:300]}")
 
-        # Parse response into list of questions
-        lines = cleaned.strip().split('\n')
+        # Parse response into questions - handle bullet point format
+        lines = response.strip().split('\n')
         questions = []
 
         for line in lines:
@@ -1562,36 +1575,31 @@ AI 답변: {request.answer[:500]}
             if not line:
                 continue
 
-            # Remove numbering (1., 2., 3., -, *, etc.)
-            original_line = line
-            line = re.sub(r'^[\d\-\*\.\)]+\s*', '', line)
+            # Remove bullet points, numbering, and markdown
+            line = re.sub(r'^[\-\*\•\d\.\)\]]+\s*', '', line)
+            line = re.sub(r'^\*\*|\*\*$', '', line)  # Remove bold
             line = line.strip()
 
-            # Debug: Check each validation step
-            ends_with_q = line.endswith('?')
-            has_korean = bool(re.search(r'[가-힣]', line))
-            long_enough = len(line) >= 5
-            no_english = not re.search(r'[a-z]{3,}', line)
+            # Skip non-question lines (metadata, labels, etc.)
+            if not line or '질문' in line or '답변' in line or '예시' in line or '관련' in line:
+                continue
 
-            logger.debug(f"Line: '{line[:50]}' | ends_with_q={ends_with_q}, has_korean={has_korean}, long_enough={long_enough}, no_english={no_english}")
-
-            # Only keep lines that:
-            # 1. End with '?'
-            # 2. Contain Korean characters (가-힣)
-            # 3. Are not too short (at least 5 chars)
-            # 4. Don't contain English explanations (no lowercase English letters)
-            if (ends_with_q and has_korean and long_enough and no_english):
+            # Validate: must end with ?, contain Korean, min length 5
+            if (line.endswith('?') and
+                re.search(r'[가-힣]', line) and
+                len(line) >= 5):
                 questions.append(line)
+                logger.debug(f"Valid question found: {line}")
 
             if len(questions) >= 3:
                 break
 
-        # If we got questions, return them; otherwise use fallback
-        if questions:
-            logger.info(f"Generated {len(questions)} follow-up questions")
-            return {"questions": questions}
+        # Return questions or fallback
+        if len(questions) >= 3:
+            logger.info(f"Successfully generated {len(questions)} follow-up questions")
+            return {"questions": questions[:3]}
         else:
-            logger.warning("No valid questions generated, using fallback")
+            logger.warning(f"Only generated {len(questions)} questions, using fallback")
             return {
                 "questions": [
                     "이 내용과 관련된 추가 정보가 있나요?",
@@ -1601,8 +1609,7 @@ AI 답변: {request.answer[:500]}
             }
 
     except Exception as e:
-        logger.error(f"Failed to generate follow-up questions: {e}")
-        # Fallback questions
+        logger.error(f"Failed to generate follow-up questions: {e}", exc_info=True)
         return {
             "questions": [
                 "이 내용과 관련된 추가 정보가 있나요?",
