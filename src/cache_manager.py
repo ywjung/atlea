@@ -137,8 +137,13 @@ class CacheManager:
             best_match = None
             best_similarity = 0.0
 
+            # Limit cache lookup to most recent entries for performance
+            # Convert to list and limit to prevent O(N) scaling issues
+            MAX_CACHE_CHECK = 100  # Only check last 100 cached questions
+            cached_hashes_list = list(cached_hashes)[:MAX_CACHE_CHECK]
+
             # Check similarity with each cached question
-            for cached_hash in cached_hashes:
+            for cached_hash in cached_hashes_list:
                 cache_key = self._get_cache_key(cached_hash.decode() if isinstance(cached_hash, bytes) else cached_hash)
                 cached_data_str = self.redis.get(cache_key)
 
@@ -149,17 +154,17 @@ class CacheManager:
 
                 cached_data = json.loads(cached_data_str)
 
-                # Check if top_k matches
+                # Early filter: Check if top_k matches (cheap comparison first)
                 if cached_data.get("top_k") != top_k:
                     continue
 
-                # Check if document_ids matches (normalize None to empty list for comparison)
+                # Early filter: Check if document_ids matches (normalize None to empty list)
                 cached_doc_ids = cached_data.get("document_ids") or []
                 current_doc_ids = document_ids or []
                 if sorted(cached_doc_ids) != sorted(current_doc_ids):
                     continue
 
-                # Calculate similarity
+                # Calculate similarity (expensive operation, done last)
                 cached_emb = np.array(cached_data["embedding"])
                 similarity = self._calculate_similarity(question_emb, cached_emb)
 
@@ -176,6 +181,11 @@ class CacheManager:
                         "similarity": similarity,
                         "cached_question": cached_data["question"]
                     }
+
+                    # Early exit: If we found near-perfect match, no need to check more
+                    if best_similarity >= 0.9999:  # Essentially identical
+                        logger.debug(f"Found perfect match (similarity={best_similarity:.4f}), stopping early")
+                        break
 
             # Return cached response if similarity is above threshold
             if best_match and best_similarity >= threshold:

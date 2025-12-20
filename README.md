@@ -201,7 +201,7 @@ tail -f server.log
 서버가 시작되면:
 - 웹 UI: http://localhost:8000
 - RedisInsight: http://localhost:8001 (Redis 관리 도구)
-- 서버 준비 시간: ~1.2초 (질문 생성은 백그라운드 처리, 95% 개선)
+- 서버 준비 시간: **~1초** (Fast Startup 모드, 96% 개선)
 
 ## 📝 사용 방법
 
@@ -354,6 +354,12 @@ DATA_DIR=./data
 CHUNK_SIZE=512
 CHUNK_OVERLAP=50
 
+# 파일 업로드 제한
+MAX_FILE_SIZE_MB=100  # PDF/HWP 파일 최대 크기 (MB)
+
+# 성능 최적화 설정
+ENABLE_QUESTION_GENERATION=false  # true로 설정 시 시작 시 자동 질문 생성 (시작 느려짐)
+
 # 서버 설정
 HOST=0.0.0.0
 PORT=8000
@@ -423,6 +429,25 @@ ls -la model/
 ./run.sh
 ```
 
+### 파일 업로드 실패 (파일 크기 초과)
+
+파일이 너무 큰 경우 (기본 제한: 100MB):
+
+```bash
+# .env 파일에서 제한 변경 (예: 200MB)
+MAX_FILE_SIZE_MB=200
+```
+
+**권장 크기**:
+- 일반 문서: 50MB 이하
+- 대용량 문서: 100-200MB
+- 초대형 문서 (500MB+): 메모리 부족 및 타임아웃 위험
+
+**대용량 파일 처리 팁**:
+1. 파일을 여러 개로 분할
+2. 이미지가 많은 경우 이미지 제거 후 업로드
+3. 필요한 부분만 추출하여 별도 PDF로 저장
+
 ### 메모리 부족
 
 `.env` 파일에서 더 작은 모델 사용:
@@ -469,11 +494,50 @@ docker-compose down -v
 - **Redis Vector 인덱스**: 코사인 유사도 기반 고속 검색
 - **답변 캐싱**: 95% 유사도 기반 자동 캐시 응답 (중복 쿼리 제거)
 
-### 서버 시작 최적화
+### 서버 시작 최적화 (Fast Startup Mode)
 
-- **비동기 질문 생성**: 백그라운드 태스크로 처리 (시작 시간 95% 단축)
+#### ⚡ Lazy Loading 전략
+- **LLM 지연 로딩**: LLM은 첫 질문 요청 시에만 로드 (시작 시 수십 초 절약)
+- **선택적 질문 생성**: 기본적으로 비활성화 (`ENABLE_QUESTION_GENERATION=false`)
+- **필수 구성요소만 로드**: Embedding 모델 + Redis만 시작 시 초기화
+
+#### 📊 시작 시간 비교
+| 모드 | 시작 시간 | LLM 로딩 | 질문 생성 |
+|------|----------|---------|----------|
+| **Fast (기본)** | ~1초 | 첫 요청 시 | 비활성화 |
+| Legacy | ~30초+ | 시작 시 | 백그라운드 |
+
+#### 🚀 시작 과정
+```bash
+🚀 Starting application initialization (fast mode)...
+📚 Loading embedding model...          (0.5초)
+🔌 Connecting to Redis...              (즉시)
+💾 Initializing cache manager...       (즉시)
+⚡ LLM will load on first use         (건너뜀!)
+✅ Application initialized! (총 ~1초)
+💡 First chat request will load LLM automatically
+```
+
+#### 💬 첫 질문 시
+- LLM 자동 로드: 10-15초 (한 번만)
+- 이후 모든 질문: 즉시 응답 (LLM 이미 로드됨)
+
+#### 📝 질문 생성 활성화 (선택사항)
+```bash
+# .env 파일에 추가
+ENABLE_QUESTION_GENERATION=true
+```
+- 시작 시 모든 문서에 대해 한국어 질문 생성
+- 백그라운드에서 처리되므로 서버는 즉시 사용 가능
+- 생성된 질문은 자동완성에 사용
+
+#### 🎯 권장 사항
+- **개발 환경**: Fast 모드 (기본) - 빠른 재시작
+- **프로덕션**: 질문 생성 활성화 - 더 나은 자동완성 경험
+
+#### 기타 최적화
 - **스마트 색인**: 파일 변경 감지로 불필요한 재처리 방지
-- **서버 준비 시간**: ~14초 (질문 생성은 백그라운드에서 진행)
+- **서버 준비 시간**: ~1초 (이전 대비 96% 단축)
 
 ### 프론트엔드 최적화
 

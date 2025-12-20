@@ -16,9 +16,13 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermission;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.Base64;
+import java.util.Set;
 
 /**
  * Service for extracting text from HWP files
@@ -30,25 +34,36 @@ public class HwpExtractionService {
     /**
      * Extract text from HWP file (MultipartFile)
      *
+     * Security: Uses try-finally for guaranteed temp file cleanup, restricts file permissions
+     *
      * @param file HWP file
      * @return Extraction response with text content
      */
     public HwpExtractionResponse extractText(MultipartFile file) {
         long startTime = System.currentTimeMillis();
         String filename = file.getOriginalFilename();
+        Path tempFile = null;
 
         try {
             log.info("Starting HWP extraction for file: {}", filename);
 
-            // Create temporary file
-            Path tempFile = Files.createTempFile("hwp_", ".hwp");
+            // Security: Create temp file with unique name
+            tempFile = Files.createTempFile("hwp_", ".hwp");
+
+            // Security: Set restrictive permissions (owner read/write only)
+            try {
+                Set<PosixFilePermission> permissions = PosixFilePermissions.fromString("rw-------");
+                Files.setPosixFilePermissions(tempFile, permissions);
+            } catch (UnsupportedOperationException e) {
+                // Windows doesn't support POSIX permissions, skip
+                log.debug("POSIX permissions not supported on this system");
+            }
+
+            // Transfer file atomically
             file.transferTo(tempFile.toFile());
 
             // Extract text
             String extractedText = extractTextFromFile(tempFile.toFile());
-
-            // Clean up
-            Files.deleteIfExists(tempFile);
 
             int paragraphCount = extractedText.split("\n").length;
             long processingTime = System.currentTimeMillis() - startTime;
@@ -70,15 +85,27 @@ public class HwpExtractionService {
 
             return HwpExtractionResponse.builder()
                     .success(false)
-                    .error(e.getMessage())
+                    .error("Extraction failed")  // Security: Don't expose internal details
                     .filename(filename)
                     .processingTimeMs(processingTime)
                     .build();
+
+        } finally {
+            // Security: Ensure cleanup happens even on exception
+            if (tempFile != null) {
+                try {
+                    Files.deleteIfExists(tempFile);
+                } catch (IOException e) {
+                    log.error("Failed to delete temp file: {}", tempFile, e);
+                }
+            }
         }
     }
 
     /**
      * Extract text from HWP file (Base64 encoded)
+     *
+     * Security: Uses try-finally for guaranteed temp file cleanup, restricts file permissions
      *
      * @param base64Content Base64 encoded HWP file content
      * @param filename      Original filename
@@ -86,6 +113,7 @@ public class HwpExtractionService {
      */
     public HwpExtractionResponse extractTextFromBase64(String base64Content, String filename) {
         long startTime = System.currentTimeMillis();
+        Path tempFile = null;
 
         try {
             log.info("Starting HWP extraction from base64 for file: {}", filename);
@@ -93,15 +121,23 @@ public class HwpExtractionService {
             // Decode base64
             byte[] fileBytes = Base64.getDecoder().decode(base64Content);
 
-            // Create temporary file
-            Path tempFile = Files.createTempFile("hwp_", ".hwp");
+            // Security: Create temp file with unique name
+            tempFile = Files.createTempFile("hwp_", ".hwp");
+
+            // Security: Set restrictive permissions (owner read/write only)
+            try {
+                Set<PosixFilePermission> permissions = PosixFilePermissions.fromString("rw-------");
+                Files.setPosixFilePermissions(tempFile, permissions);
+            } catch (UnsupportedOperationException e) {
+                // Windows doesn't support POSIX permissions, skip
+                log.debug("POSIX permissions not supported on this system");
+            }
+
+            // Write decoded bytes to temp file
             Files.write(tempFile, fileBytes);
 
             // Extract text
             String extractedText = extractTextFromFile(tempFile.toFile());
-
-            // Clean up
-            Files.deleteIfExists(tempFile);
 
             int paragraphCount = extractedText.split("\n").length;
             long processingTime = System.currentTimeMillis() - startTime;
@@ -123,10 +159,20 @@ public class HwpExtractionService {
 
             return HwpExtractionResponse.builder()
                     .success(false)
-                    .error(e.getMessage())
+                    .error("Extraction failed")  // Security: Don't expose internal details
                     .filename(filename)
                     .processingTimeMs(processingTime)
                     .build();
+
+        } finally {
+            // Security: Ensure cleanup happens even on exception
+            if (tempFile != null) {
+                try {
+                    Files.deleteIfExists(tempFile);
+                } catch (IOException e) {
+                    log.error("Failed to delete temp file: {}", tempFile, e);
+                }
+            }
         }
     }
 
@@ -156,7 +202,9 @@ public class HwpExtractionService {
     }
 
     /**
-     * Validate HWP file format
+     * Validate HWP file format (extension + magic bytes)
+     *
+     * Security: Validates both extension and file signature to prevent malicious file uploads
      *
      * @param file File to validate
      * @return true if valid HWP file
@@ -178,6 +226,47 @@ public class HwpExtractionService {
             return false;
         }
 
-        return true;
+        // Security: Validate HWP magic bytes (prevents file extension spoofing)
+        // HWP files use OLE2/CFBF format with signature: D0 CF 11 E0 A1 B1 1A E1
+        try (InputStream is = file.getInputStream()) {
+            byte[] header = new byte[8];
+            int read = is.read(header);
+
+            if (read < 8) {
+                log.warn("File too small to be valid HWP: {} bytes", read);
+                return false;
+            }
+
+            // Validate OLE2/CFBF magic bytes
+            if (header[0] != (byte)0xD0 || header[1] != (byte)0xCF ||
+                header[2] != (byte)0x11 || header[3] != (byte)0xE0 ||
+                header[4] != (byte)0xA1 || header[5] != (byte)0xB1 ||
+                header[6] != (byte)0x1A || header[7] != (byte)0xE1) {
+
+                log.warn("Invalid HWP magic bytes for file: {}", filename);
+
+                // Check if it's an executable or other dangerous file type
+                if (header[0] == (byte)0x4D && header[1] == (byte)0x5A) {
+                    log.error("Detected Windows executable disguised as HWP: {}", filename);
+                    return false;
+                } else if (header[0] == (byte)0x7F && header[1] == (byte)0x45 &&
+                          header[2] == (byte)0x4C && header[3] == (byte)0x46) {
+                    log.error("Detected ELF executable disguised as HWP: {}", filename);
+                    return false;
+                } else if (header[0] == (byte)0x50 && header[1] == (byte)0x4B &&
+                          header[2] == (byte)0x03 && header[3] == (byte)0x04) {
+                    log.error("Detected ZIP file disguised as HWP: {}", filename);
+                    return false;
+                }
+
+                return false;
+            }
+
+            return true;
+
+        } catch (IOException e) {
+            log.error("Error validating HWP file: {}", e.getMessage());
+            return false;
+        }
     }
 }

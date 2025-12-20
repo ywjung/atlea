@@ -431,6 +431,12 @@ async function sendMessage(regenerate = false) {
     // Track response time
     const startTime = Date.now();
 
+    // Abort any previous request before starting a new one
+    if (currentAbortController) {
+        console.log('Aborting previous request');
+        currentAbortController.abort();
+    }
+
     // Create AbortController for this request
     currentAbortController = new AbortController();
 

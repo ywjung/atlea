@@ -690,11 +690,13 @@ body {
 .sources {
     margin-top: 0;
     margin-bottom: var(--space-md);
-    padding: var(--space-md) var(--space-lg);
+    padding: 16px 24px;  /* Fixed pixel values instead of CSS variables */
     background: rgba(102, 126, 234, 0.04);
     border-left: 2px solid var(--primary-400);
     border-radius: var(--radius-sm);
     transition: background 0.3s ease;
+    /* Force consistent layout - do NOT use flex to avoid calculation differences */
+    display: block;
 }
 
 :root[data-theme="dark"] .sources {
@@ -715,32 +717,36 @@ body {
 }
 
 .source-tag {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 12px;
+    display: inline-block;  /* Changed from inline-flex for better consistency */
+    vertical-align: top;
+    padding: 6px 12px 6px 6px;  /* Adjusted for icon space */
     background: var(--source-tag-bg);
     border: 1.5px solid var(--source-tag-border);
-    border-radius: var(--radius-full);
+    border-radius: 9999px;  /* Fixed value instead of var */
     margin: 0 6px 6px 0;
-    font-size: 0.8125rem;
+    font-size: 13px;  /* Fixed pixel value instead of rem */
+    line-height: 1.4;  /* Explicit line-height */
     color: var(--source-tag-text);
     cursor: pointer;
     transition: all 0.2s ease;
     font-weight: 500;
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+    white-space: nowrap;
+    box-sizing: border-box;  /* Explicit box-sizing */
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
 }
 
 .source-tag::before {
-    content: "📄";
-    font-size: 0.875rem;
-    /* Light mode: darker icon for visibility on white background */
-    filter: grayscale(0.3) brightness(0.7);
+    content: "📄 ";  /* Added space after icon */
+    font-size: 14px;  /* Fixed pixel value */
+    line-height: 1;
+    opacity: 0.8;  /* Subtle dimming without filter to avoid rendering differences */
 }
 
-/* Dark mode: brighter icon */
+/* Dark mode: slightly brighter icon */
 :root[data-theme="dark"] .source-tag::before {
-    filter: brightness(1.2) contrast(1.1);
+    opacity: 1;  /* Full opacity in dark mode */
 }
 
 .source-tag:hover {

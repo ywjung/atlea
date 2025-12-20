@@ -362,13 +362,57 @@
     }
 }
 
+/* Loading Dots Animation for "실시간 생성 중..." - Wave Effect */
+.loading-dots {
+    display: inline-flex;
+    gap: 2px;
+    align-items: center;
+    margin-left: 2px;
+    height: 1em;
+}
+
+.loading-dots span {
+    display: inline-block;
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: currentColor;
+    animation: loadingWave 1.4s ease-in-out infinite;
+}
+
+.loading-dots span:nth-child(1) {
+    animation-delay: 0s;
+}
+
+.loading-dots span:nth-child(2) {
+    animation-delay: 0.2s;
+}
+
+.loading-dots span:nth-child(3) {
+    animation-delay: 0.4s;
+}
+
+@keyframes loadingWave {
+    0%, 60%, 100% {
+        transform: translateY(0);
+        opacity: 0.7;
+    }
+    30% {
+        transform: translateY(-8px);
+        opacity: 1;
+    }
+}
+
 /* Reduced Motion */
 @media (prefers-reduced-motion: reduce) {
     .typing-dots span,
     .progress-icon,
     .progress-bar::after,
-    .error-icon {
+    .error-icon,
+    .loading-dots span {
         animation: none;
+        transform: translateY(0);
+        opacity: 0.7;
     }
 
     .streaming-indicator {

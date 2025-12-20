@@ -16,6 +16,43 @@ from redis.commands.search.query import Query
 class VectorDB:
     """Redis Vector Database with semantic search"""
 
+    @staticmethod
+    def escape_redis_query(value: str) -> str:
+        """
+        Properly escape Redis search query values to prevent injection
+
+        Args:
+            value: String value to escape
+
+        Returns:
+            Escaped string safe for Redis search queries
+        """
+        # Redis search special characters that need escaping
+        special_chars = [
+            '\\',  # Backslash must be escaped first
+            '"',   # Double quotes
+            '@',   # Field selector
+            '|',   # OR operator
+            '{',   # Tag delimiter
+            '}',   # Tag delimiter
+            '[',   # Numeric range
+            ']',   # Numeric range
+            '(',   # Grouping
+            ')',   # Grouping
+            '*',   # Wildcard
+            '~',   # Fuzzy match
+            '-',   # NOT operator (when at start)
+            ':',   # Field separator
+            ';',   # Command separator
+            ',',   # List separator
+        ]
+
+        escaped = value
+        for char in special_chars:
+            escaped = escaped.replace(char, f'\\{char}')
+
+        return escaped
+
     def __init__(
         self,
         host: str = "localhost",
@@ -195,36 +232,71 @@ class VectorDB:
             return 0
 
     def count_unique_files(self) -> int:
-        """Get total number of unique PDF files"""
+        """
+        Get total number of unique PDF files (optimized with SCAN + pipeline)
+
+        Performance improvements:
+        - Uses SCAN instead of KEYS to avoid blocking Redis
+        - Batches operations with pipeline to reduce round trips
+        - Only fetches filename field instead of entire document
+        """
         try:
-            # Get all document keys (only numeric doc:N keys, not doc:hash:xxx)
-            all_keys = self.client.keys("doc:*")
-            if not all_keys:
-                return 0
-
-            # Filter to only numeric document keys (doc:0, doc:1, etc.)
-            # Exclude doc:hash:xxx keys used for duplicate tracking
-            doc_keys = [k for k in all_keys if k.decode('utf-8').split(':')[-1].isdigit()]
-
-            if not doc_keys:
-                return 0
-
-            # Get unique filenames
             filenames = set()
-            for key in doc_keys:
-                # Check if key is a hash before trying hgetall
-                key_type = self.client.type(key)
-                if key_type != b'hash':
+            batch_size = 100  # Process keys in batches
+            key_batch = []
+
+            # Use SCAN to iterate keys without blocking Redis
+            # Only scan numeric doc:N keys (doc:0, doc:1, etc.)
+            for key in self.client.scan_iter(match="doc:*", count=batch_size):
+                key_str = key.decode('utf-8')
+
+                # Filter to only numeric document keys (doc:0, doc:1, etc.)
+                # Exclude doc:hash:xxx keys used for duplicate tracking
+                if not key_str.split(':')[-1].isdigit():
                     continue
 
-                doc = self.client.hgetall(key)
-                if doc and b'filename' in doc:
-                    filenames.add(doc[b'filename'].decode('utf-8'))
+                key_batch.append(key)
+
+                # Process batch when it reaches batch_size
+                if len(key_batch) >= batch_size:
+                    self._process_key_batch(key_batch, filenames)
+                    key_batch = []
+
+            # Process remaining keys
+            if key_batch:
+                self._process_key_batch(key_batch, filenames)
 
             return len(filenames)
         except Exception as e:
             logger.error(f"Error counting unique files: {e}")
             return 0
+
+    def _process_key_batch(self, keys: List[bytes], filenames: set):
+        """
+        Process a batch of keys using Redis pipeline for efficiency
+
+        Args:
+            keys: List of Redis keys to process
+            filenames: Set to add unique filenames to
+        """
+        if not keys:
+            return
+
+        # Use pipeline to batch all operations
+        pipe = self.client.pipeline()
+        for key in keys:
+            pipe.type(key)
+            pipe.hget(key, 'filename')
+        results = pipe.execute()
+
+        # Process results (pairs of type and filename)
+        for i in range(0, len(results), 2):
+            key_type = results[i]
+            filename = results[i + 1]
+
+            # Only process hash keys with filename field
+            if key_type == b'hash' and filename:
+                filenames.add(filename.decode('utf-8'))
 
     def is_indexed(self) -> bool:
         """
@@ -281,15 +353,97 @@ class VectorDB:
             Number of chunks for the specified filename
         """
         try:
-            # Escape special characters in filename for Redis search
-            # Use exact match with quotes for TextField
-            escaped_filename = filename.replace('"', '\\"')
+            # Escape special characters in filename for Redis search (prevent injection)
+            escaped_filename = self.escape_redis_query(filename)
             query = Query(f'@filename:"{escaped_filename}"').return_fields("filename").dialect(2)
             results = self.client.ft(self.index_name).search(query)
             return results.total
         except Exception as e:
             logger.error(f"Failed to count documents for {filename}: {e}")
             return 0
+
+    def batch_count_documents_by_filenames(self, filenames: List[str]) -> Dict[str, int]:
+        """
+        Count number of chunks for multiple filenames in a single efficient operation
+
+        This avoids N+1 queries by batching all counts together.
+
+        Args:
+            filenames: List of filenames to count chunks for
+
+        Returns:
+            Dictionary mapping filename to chunk count
+        """
+        if not filenames:
+            return {}
+
+        try:
+            # Initialize result dictionary with all filenames
+            result = {filename: 0 for filename in filenames}
+
+            # For batch counting, we need to query each filename but can optimize
+            # by using async operations or by getting all docs and grouping
+            # Since Redis search doesn't support OR queries efficiently for this use case,
+            # we'll use a different approach: get all indexed documents once and group by filename
+
+            # Get all document keys efficiently using SCAN
+            filename_counts = {}
+            batch_size = 100
+            key_batch = []
+
+            for key in self.client.scan_iter(match="doc:*", count=batch_size):
+                key_str = key.decode('utf-8')
+
+                # Filter to only numeric document keys (doc:0, doc:1, etc.)
+                if not key_str.split(':')[-1].isdigit():
+                    continue
+
+                key_batch.append(key)
+
+                # Process batch when it reaches batch_size
+                if len(key_batch) >= batch_size:
+                    self._count_filenames_in_batch(key_batch, filename_counts, set(filenames))
+                    key_batch = []
+
+            # Process remaining keys
+            if key_batch:
+                self._count_filenames_in_batch(key_batch, filename_counts, set(filenames))
+
+            # Update result with actual counts
+            for filename in filenames:
+                result[filename] = filename_counts.get(filename, 0)
+
+            return result
+        except Exception as e:
+            logger.error(f"Failed to batch count documents: {e}")
+            # Return zero counts for all filenames on error
+            return {filename: 0 for filename in filenames}
+
+    def _count_filenames_in_batch(self, keys: List[bytes], filename_counts: Dict[str, int], target_filenames: set):
+        """
+        Count occurrences of filenames in a batch of keys
+
+        Args:
+            keys: List of Redis keys to process
+            filename_counts: Dictionary to update with counts
+            target_filenames: Set of filenames we're interested in (for filtering)
+        """
+        if not keys:
+            return
+
+        # Use pipeline to batch all operations
+        pipe = self.client.pipeline()
+        for key in keys:
+            pipe.hget(key, 'filename')
+        results = pipe.execute()
+
+        # Count filenames
+        for filename_bytes in results:
+            if filename_bytes:
+                filename = filename_bytes.decode('utf-8')
+                # Only count if this is one of the target filenames
+                if filename in target_filenames:
+                    filename_counts[filename] = filename_counts.get(filename, 0) + 1
 
     def get_chunks_by_filename(self, filename: str) -> List[Dict]:
         """
@@ -302,8 +456,8 @@ class VectorDB:
             List of chunks with their text and metadata
         """
         try:
-            # Escape special characters in filename for Redis search
-            escaped_filename = filename.replace('"', '\\"')
+            # Escape special characters in filename for Redis search (prevent injection)
+            escaped_filename = self.escape_redis_query(filename)
 
             # Query all chunks for this filename, sorted by chunk_index
             query = (
@@ -382,8 +536,8 @@ class VectorDB:
             List of sampled documents
         """
         try:
-            # Escape special characters in filename for Redis search
-            escaped_filename = filename.replace('"', '\\"')
+            # Escape special characters in filename for Redis search (prevent injection)
+            escaped_filename = self.escape_redis_query(filename)
             query = Query(f'@filename:"{escaped_filename}"').return_fields("text", "filename", "source", "chunk_index").paging(0, limit).dialect(2)
             results = self.client.ft(self.index_name).search(query)
 

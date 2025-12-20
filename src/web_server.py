@@ -14,7 +14,7 @@ from fastapi import FastAPI, HTTPException, UploadFile, File, Request, Response
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, validator
 from loguru import logger
 from dotenv import load_dotenv
 from starlette.types import Scope, Receive, Send
@@ -65,6 +65,11 @@ MODEL_DIR = os.getenv("MODEL_DIR", "./model")
 DATA_DIR = os.getenv("DATA_DIR", "./data")
 CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", 512))
 CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", 50))
+# Performance optimization: disable slow startup tasks
+ENABLE_QUESTION_GENERATION = os.getenv("ENABLE_QUESTION_GENERATION", "false").lower() == "true"
+# File upload size limit (in MB)
+MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", 100))
+MAX_FILE_SIZE = MAX_FILE_SIZE_MB * 1024 * 1024  # Convert to bytes
 
 # Initialize FastAPI
 app = FastAPI(
@@ -72,6 +77,51 @@ app = FastAPI(
     description="PDF 문서 기반 질의응답 챗봇",
     version="2.0.1"
 )
+
+# Security Headers Middleware
+from starlette.middleware.base import BaseHTTPMiddleware
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Add security headers to all HTTP responses"""
+
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+
+        # Prevent clickjacking attacks
+        response.headers["X-Frame-Options"] = "DENY"
+
+        # Prevent MIME type sniffing
+        response.headers["X-Content-Type-Options"] = "nosniff"
+
+        # Enable XSS filter in browsers
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+
+        # Control referrer information
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+
+        # Restrict feature permissions
+        response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+
+        # Content Security Policy (moderate policy allowing CDNs for external libraries)
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "  # Allow marked.js and highlight.js from trusted CDNs
+            "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; "  # Allow highlight.js CSS from CDN
+            "img-src 'self' data:; "  # Allow data URIs for images
+            "font-src 'self'; "
+            "connect-src 'self'; "
+            "frame-ancestors 'none';"  # Prevent embedding in iframes
+        )
+
+        # HSTS only for HTTPS connections (uncomment in production with HTTPS)
+        # if request.url.scheme == "https":
+        #     response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+
+        return response
+
+
+# Add security headers middleware (must be before GZip to affect all responses)
+app.add_middleware(SecurityHeadersMiddleware)
 
 # Add GZip compression middleware for response compression (60-80% size reduction)
 app.add_middleware(
@@ -92,64 +142,185 @@ rag_system: Optional[RAGSystem] = None
 cache_manager: Optional[CacheManager] = None
 suggested_questions_pool: list = []  # Pre-generated question pool
 
+# Status endpoint cache (to avoid rescanning on every request)
+status_cache = {
+    "data": None,
+    "timestamp": 0,
+    "ttl": 5  # Cache for 5 seconds
+}
 
-# Error message helper
-def create_error_response(error: Exception, context: str = "") -> dict:
+
+def invalidate_status_cache():
+    """Invalidate status cache when documents change"""
+    global status_cache
+    status_cache["data"] = None
+    status_cache["timestamp"] = 0
+
+
+# Security: File content validation to prevent malicious uploads
+async def validate_file_content(file: UploadFile, max_header_bytes: int = 1024) -> bool:
     """
-    Create user-friendly error response with helpful suggestions
+    Validate file content by checking magic bytes (file signature)
+
+    Args:
+        file: Uploaded file object
+        max_header_bytes: Number of bytes to read for validation
+
+    Returns:
+        True if file is valid
+
+    Raises:
+        HTTPException: If file content is invalid or malicious
+    """
+    # Read first bytes for magic number validation
+    header = await file.read(max_header_bytes)
+    await file.seek(0)  # Reset file pointer
+
+    # PDF magic bytes: %PDF
+    pdf_signature = b'%PDF'
+
+    # HWP magic bytes: HWP Document File
+    hwp_signature = b'HWP Document File'
+    hwp_signature_alt = b'\xd0\xcf\x11\xe0'  # OLE2/CFB container (used by HWP 5.0+)
+
+    # Check if file starts with valid signature
+    is_pdf = header.startswith(pdf_signature)
+    is_hwp = header.startswith(hwp_signature) or header.startswith(hwp_signature_alt)
+
+    if not (is_pdf or is_hwp):
+        # Try to detect what it actually is
+        if header.startswith(b'MZ') or header.startswith(b'\x7fELF'):
+            raise HTTPException(
+                status_code=400,
+                detail="실행 파일은 업로드할 수 없습니다. PDF 또는 HWP 파일만 허용됩니다."
+            )
+        elif header.startswith(b'PK\x03\x04'):
+            raise HTTPException(
+                status_code=400,
+                detail="ZIP 파일은 업로드할 수 없습니다. PDF 또는 HWP 파일만 허용됩니다."
+            )
+        elif b'<script' in header.lower() or b'<html' in header.lower():
+            raise HTTPException(
+                status_code=400,
+                detail="HTML 파일은 업로드할 수 없습니다. PDF 또는 HWP 파일만 허용됩니다."
+            )
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="파일 형식이 올바르지 않습니다. 유효한 PDF 또는 HWP 파일을 업로드해주세요."
+            )
+
+    return True
+
+
+# Security: Filename validation to prevent path traversal
+def validate_filename(filename: str) -> str:
+    """
+    Validate and sanitize filename to prevent path traversal attacks
+
+    Args:
+        filename: User-provided filename
+
+    Returns:
+        Sanitized filename safe for file operations
+
+    Raises:
+        HTTPException: If filename contains malicious patterns
+    """
+    import re
+
+    # Remove any path components (get basename only)
+    safe_name = os.path.basename(filename)
+
+    # Block directory traversal attempts
+    if '..' in safe_name or '/' in safe_name or '\\' in safe_name:
+        raise HTTPException(
+            status_code=400,
+            detail="파일명에 허용되지 않는 경로 문자가 포함되어 있습니다."
+        )
+
+    # Block null bytes (path truncation attack)
+    if '\x00' in safe_name:
+        raise HTTPException(
+            status_code=400,
+            detail="파일명에 허용되지 않는 문자가 포함되어 있습니다."
+        )
+
+    # Only allow safe characters: alphanumeric, dash, underscore, dot, space, Korean
+    # Korean Unicode range: \uAC00-\uD7A3 (Hangul syllables)
+    if not re.match(r'^[\w\-. \uAC00-\uD7A3]+$', safe_name, re.UNICODE):
+        raise HTTPException(
+            status_code=400,
+            detail="파일명에 허용되지 않는 특수문자가 포함되어 있습니다."
+        )
+
+    # Check filename length
+    if len(safe_name) > 255:
+        raise HTTPException(
+            status_code=400,
+            detail="파일명이 너무 깁니다 (최대 255자)."
+        )
+
+    # Must have an extension
+    if '.' not in safe_name:
+        raise HTTPException(
+            status_code=400,
+            detail="파일 확장자가 필요합니다."
+        )
+
+    return safe_name
+
+
+# Security: Sanitized error response helper
+def get_safe_error_message(error: Exception, context: str = "") -> str:
+    """
+    Get sanitized error message for user display (prevents information disclosure)
+
+    Security: Never expose internal details like:
+    - File paths or directory structure
+    - Database connection strings or queries
+    - Stack traces or exception details
+    - Internal system information
+
+    All detailed errors are logged server-side only.
+
+    Args:
+        error: The exception that occurred
+        context: Context description for logging (not exposed to user)
+
+    Returns:
+        Generic, safe error message for user display
     """
     error_type = type(error).__name__
-    error_msg = str(error)
 
-    # User-friendly error messages with solutions
-    error_responses = {
-        "FileNotFoundError": {
-            "message": "파일을 찾을 수 없습니다",
-            "detail": f"요청한 파일이 존재하지 않습니다: {error_msg}",
-            "solution": "파일 경로를 확인하거나 문서를 다시 업로드해주세요."
-        },
-        "PermissionError": {
-            "message": "권한 오류가 발생했습니다",
-            "detail": f"파일에 대한 접근 권한이 없습니다: {error_msg}",
-            "solution": "파일 권한을 확인하거나 관리자에게 문의하세요."
-        },
-        "ValueError": {
-            "message": "잘못된 값이 입력되었습니다",
-            "detail": f"입력값 오류: {error_msg}",
-            "solution": "입력 형식을 확인하고 다시 시도해주세요."
-        },
-        "ConnectionError": {
-            "message": "연결 오류가 발생했습니다",
-            "detail": f"서비스 연결 실패: {error_msg}",
-            "solution": "잠시 후 다시 시도하거나 네트워크 연결을 확인해주세요."
-        },
-        "TimeoutError": {
-            "message": "요청 시간이 초과되었습니다",
-            "detail": f"처리 시간 초과: {error_msg}",
-            "solution": "문서 크기가 큰 경우 시간이 걸릴 수 있습니다. 잠시 후 다시 시도해주세요."
-        },
-        "KeyError": {
-            "message": "필수 정보가 누락되었습니다",
-            "detail": f"누락된 키: {error_msg}",
-            "solution": "요청 형식을 확인하고 다시 시도해주세요."
-        }
+    # Log full error details server-side for debugging
+    logger.error(f"Error in {context}: {error_type}: {str(error)}")
+
+    # Map exception types to generic user-friendly messages
+    # Security: DO NOT include error details or internal information
+    error_messages = {
+        "FileNotFoundError": "요청한 파일을 찾을 수 없습니다.",
+        "PermissionError": "파일에 대한 접근 권한이 없습니다.",
+        "ValueError": "잘못된 입력값입니다.",
+        "ConnectionError": "서비스 연결에 실패했습니다. 잠시 후 다시 시도해주세요.",
+        "TimeoutError": "요청 처리 시간이 초과되었습니다. 잠시 후 다시 시도해주세요.",
+        "KeyError": "필수 정보가 누락되었습니다.",
+        "TypeError": "잘못된 데이터 형식입니다.",
+        "AttributeError": "요청을 처리하는 중 오류가 발생했습니다.",
+        "IndexError": "유효하지 않은 인덱스입니다.",
+        "KeyboardInterrupt": "작업이 취소되었습니다.",
+        "MemoryError": "메모리가 부족합니다.",
+        "OSError": "시스템 오류가 발생했습니다.",
+        "IOError": "입출력 오류가 발생했습니다.",
     }
 
-    # Get specific error response or use generic
-    if error_type in error_responses:
-        response = error_responses[error_type]
-    else:
-        response = {
-            "message": "예상치 못한 오류가 발생했습니다",
-            "detail": f"{error_type}: {error_msg}",
-            "solution": "문제가 지속되면 관리자에게 문의하세요."
-        }
+    # Return generic safe message (no internal details exposed)
+    safe_message = error_messages.get(
+        error_type,
+        "요청을 처리하는 중 오류가 발생했습니다."  # Generic fallback for unknown errors
+    )
 
-    # Add context if provided
-    if context:
-        response["context"] = context
-
-    return response
+    return safe_message
 
 
 # Request/Response models
@@ -164,6 +335,79 @@ class QueryRequest(BaseModel):
     document_ids: Optional[list] = None  # Filter by specific document IDs/filenames
     history: Optional[list] = None  # Conversation history [{"role": "user/assistant", "content": "..."}]
 
+    @validator('question')
+    def sanitize_question(cls, v):
+        """Validate and sanitize question input to prevent XSS and injection"""
+        import re
+        import html
+
+        # Check if empty
+        if not v or not v.strip():
+            raise ValueError("질문을 입력해주세요.")
+
+        # Check length
+        if len(v) > 10000:
+            raise ValueError("질문이 너무 깁니다 (최대 10,000자).")
+
+        # HTML escape to prevent XSS
+        sanitized = html.escape(v)
+
+        # Block obvious malicious patterns
+        dangerous_patterns = [
+            r'<script[^>]*>',
+            r'javascript:',
+            r'onerror\s*=',
+            r'onload\s*=',
+            r'onclick\s*=',
+            r'eval\s*\(',
+            r'document\.cookie',
+            r'<iframe[^>]*>',
+            r'<embed[^>]*>',
+            r'<object[^>]*>'
+        ]
+
+        for pattern in dangerous_patterns:
+            if re.search(pattern, sanitized, re.IGNORECASE):
+                raise ValueError("입력에 허용되지 않는 패턴이 포함되어 있습니다.")
+
+        return sanitized
+
+    @validator('system_prompt')
+    def sanitize_system_prompt(cls, v):
+        """Sanitize system prompt if provided"""
+        import html
+
+        if v is None:
+            return v
+
+        # Check length
+        if len(v) > 5000:
+            raise ValueError("시스템 프롬프트가 너무 깁니다 (최대 5,000자).")
+
+        # HTML escape
+        return html.escape(v)
+
+    @validator('top_k')
+    def validate_top_k(cls, v):
+        """Validate top_k parameter"""
+        if v < 1 or v > 50:
+            raise ValueError("top_k는 1-50 사이의 값이어야 합니다.")
+        return v
+
+    @validator('temperature')
+    def validate_temperature(cls, v):
+        """Validate temperature parameter"""
+        if v < 0 or v > 2:
+            raise ValueError("temperature는 0-2 사이의 값이어야 합니다.")
+        return v
+
+    @validator('max_tokens')
+    def validate_max_tokens(cls, v):
+        """Validate max_tokens parameter"""
+        if v < 1 or v > 8192:
+            raise ValueError("max_tokens는 1-8192 사이의 값이어야 합니다.")
+        return v
+
 
 class QueryResponse(BaseModel):
     answer: str
@@ -175,23 +419,52 @@ class LLMChangeRequest(BaseModel):
     llm_model: str
 
 
+# Lazy loading functions for LLM (only load when needed)
+async def get_llm() -> LLM:
+    """Get LLM instance, loading it lazily on first use"""
+    global llm
+    if llm is None:
+        logger.info("⚡ Loading LLM on first use (lazy loading)...")
+        llm = LLM(
+            model_name=LLM_MODEL,
+            model_dir=MODEL_DIR
+        )
+        logger.success("✅ LLM loaded successfully!")
+    return llm
+
+
+async def get_rag_system() -> RAGSystem:
+    """Get RAG system instance, initializing it lazily on first use"""
+    global rag_system
+    if rag_system is None:
+        logger.info("⚡ Initializing RAG system on first use...")
+        llm_instance = await get_llm()
+        rag_system = RAGSystem(
+            vector_db=vector_db,
+            llm=llm_instance,
+            top_k=5
+        )
+        logger.success("✅ RAG system ready!")
+    return rag_system
+
+
 @app.on_event("startup")
 async def startup_event():
-    """Initialize models and database on startup"""
-    global embedding_model, vector_db, llm, rag_system, cache_manager, suggested_questions_pool
+    """Initialize models and database on startup (fast startup with lazy loading)"""
+    global embedding_model, vector_db, cache_manager, suggested_questions_pool
 
     try:
-        logger.info("Starting application initialization...")
+        logger.info("🚀 Starting application initialization (fast mode)...")
 
-        # Initialize embedding model
-        logger.info("Loading embedding model...")
+        # Initialize embedding model (required for search)
+        logger.info("📚 Loading embedding model...")
         embedding_model = EmbeddingModel(
             model_name=EMBEDDING_MODEL,
             model_dir=MODEL_DIR
         )
 
         # Initialize vector database
-        logger.info("Connecting to Redis...")
+        logger.info("🔌 Connecting to Redis...")
         vector_db = VectorDB(
             host=REDIS_HOST,
             port=REDIS_PORT,
@@ -199,7 +472,7 @@ async def startup_event():
         )
 
         # Initialize cache manager
-        logger.info("Initializing cache manager...")
+        logger.info("💾 Initializing cache manager...")
         cache_manager = CacheManager(
             redis_client=vector_db.client,
             embedding_model=embedding_model.model,
@@ -210,28 +483,20 @@ async def startup_event():
         # Smart indexing: check if reindexing is needed
         await check_and_index_pdfs()
 
-        # Initialize LLM
-        logger.info("Loading LLM...")
-        llm = LLM(
-            model_name=LLM_MODEL,
-            model_dir=MODEL_DIR
-        )
+        # LLM will be loaded lazily on first chat request
+        logger.info("⚡ LLM will load on first use (lazy loading enabled)")
 
-        # Initialize RAG system
-        rag_system = RAGSystem(
-            vector_db=vector_db,
-            llm=llm,
-            top_k=5
-        )
+        # Optional: Start question generation in background (only if enabled)
+        if ENABLE_QUESTION_GENERATION:
+            logger.info("📝 Starting background question generation (enabled in config)...")
+            asyncio.create_task(generate_questions_pool_background())
+        else:
+            logger.info("⏭️  Question generation disabled (set ENABLE_QUESTION_GENERATION=true to enable)")
 
-        # Start question generation in background (non-blocking)
-        logger.info("Starting background question generation...")
-        asyncio.create_task(generate_questions_pool_background())
-
-        logger.success("Application initialized successfully!")
-        logger.info("⚡ Server ready! Question pool generating in background...")
+        logger.success("✅ Application initialized successfully! (Fast startup mode)")
+        logger.info("💡 First chat request will load LLM automatically")
     except Exception as e:
-        logger.error(f"Initialization failed: {e}")
+        logger.error(f"❌ Initialization failed: {e}")
         raise
 
 
@@ -533,17 +798,17 @@ async def root():
 @app.post("/api/query", response_model=QueryResponse)
 async def query(request: QueryRequest):
     """
-    Query endpoint for chatbot
+    Query endpoint for chatbot (with lazy LLM loading)
     """
     try:
-        if not rag_system:
-            raise HTTPException(status_code=503, detail="System not initialized")
+        # Lazy load RAG system on first use
+        rag = await get_rag_system()
 
         # Create query embedding
         query_embedding = embedding_model.encode(request.question)[0]
 
         # Query RAG system
-        result = rag_system.query(
+        result = rag.query(
             question=request.question,
             query_embedding=query_embedding,
             top_k=request.top_k,
@@ -564,18 +829,22 @@ async def query(request: QueryRequest):
             ]
         )
     except Exception as e:
-        logger.error(f"Query failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        # Security: Use sanitized error message (prevents information disclosure)
+        safe_message = get_safe_error_message(e, "query endpoint")
+        raise HTTPException(status_code=500, detail=safe_message)
 
 
 @app.post("/api/query/stream")
 async def query_stream(request: QueryRequest):
     """
-    Streaming query endpoint for chatbot with caching
+    Streaming query endpoint for chatbot with caching (with lazy LLM loading)
     """
     try:
-        if not rag_system or not cache_manager:
-            raise HTTPException(status_code=503, detail="System not initialized")
+        # Lazy load RAG system on first use
+        rag = await get_rag_system()
+
+        if not cache_manager:
+            raise HTTPException(status_code=503, detail="Cache manager not initialized")
 
         # Check cache first
         cached_response = cache_manager.get_cached_response(
@@ -630,7 +899,7 @@ async def query_stream(request: QueryRequest):
         query_embedding = embedding_model.encode(request.question)[0]
 
         # Query RAG system with streaming
-        result = rag_system.query(
+        result = rag.query(
             question=request.question,
             query_embedding=query_embedding,
             top_k=request.top_k,
@@ -694,8 +963,9 @@ async def query_stream(request: QueryRequest):
             }
         )
     except Exception as e:
-        logger.error(f"Streaming query failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        # Security: Use sanitized error message (prevents information disclosure)
+        safe_message = get_safe_error_message(e, "streaming query endpoint")
+        raise HTTPException(status_code=500, detail=safe_message)
 
 
 @app.post("/api/reindex")
@@ -716,13 +986,17 @@ async def reindex():
         # Reindex
         await index_pdfs(doc_tracker)
 
+        # Invalidate status cache (documents reindexed)
+        invalidate_status_cache()
+
         return {
             "message": "Reindexing completed successfully",
             "document_count": vector_db.count_documents()
         }
     except Exception as e:
-        logger.error(f"Reindex failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        # Security: Use sanitized error message (prevents information disclosure)
+        safe_message = get_safe_error_message(e, "reindex endpoint")
+        raise HTTPException(status_code=500, detail=safe_message)
 
 
 @app.get("/api/cache/stats")
@@ -737,8 +1011,9 @@ async def get_cache_stats():
         stats = cache_manager.get_cache_stats()
         return stats
     except Exception as e:
-        logger.error(f"Failed to get cache stats: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        # Security: Use sanitized error message (prevents information disclosure)
+        safe_message = get_safe_error_message(e, "cache stats endpoint")
+        raise HTTPException(status_code=500, detail=safe_message)
 
 
 @app.post("/api/cache/clear")
@@ -756,42 +1031,50 @@ async def clear_cache():
             "entries_cleared": count
         }
     except Exception as e:
-        logger.error(f"Failed to clear cache: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        # Security: Use sanitized error message (prevents information disclosure)
+        safe_message = get_safe_error_message(e, "clear cache endpoint")
+        raise HTTPException(status_code=500, detail=safe_message)
 
 
 @app.get("/api/documents")
 async def list_documents():
     """
-    List all indexed PDF and HWP documents with metadata
+    List all indexed PDF and HWP documents with metadata (optimized with batch queries)
     """
     try:
         data_path = Path(DATA_DIR)
         if not data_path.exists():
             return {"documents": []}
 
-        documents = []
-
         # Get all PDF and HWP files
         import itertools
-        all_files = itertools.chain(
+        all_files = list(itertools.chain(
             data_path.glob("*.pdf"),
             data_path.glob("*.hwp")
-        )
+        ))
 
+        if not all_files:
+            return {"documents": [], "total_count": 0}
+
+        # Batch count chunks for all files at once (avoids N+1 queries)
+        filenames = [f.name for f in all_files]
+        chunk_counts = {}
+        if vector_db:
+            try:
+                chunk_counts = vector_db.batch_count_documents_by_filenames(filenames)
+            except Exception as e:
+                logger.error(f"Failed to batch count documents: {e}")
+                # Fall back to zero counts
+                chunk_counts = {filename: 0 for filename in filenames}
+
+        # Build document list with pre-fetched chunk counts
+        documents = []
         for pdf_file in all_files:
             # Get file stats
             stat = pdf_file.stat()
 
-            # Count chunks in vector DB for this document
-            chunk_count = 0
-            if vector_db:
-                try:
-                    # Query to count chunks for this filename
-                    # This is a rough estimate - you might need to adjust based on your VectorDB implementation
-                    chunk_count = vector_db.count_documents_by_filename(pdf_file.name)
-                except:
-                    chunk_count = 0
+            # Get chunk count from batch result
+            chunk_count = chunk_counts.get(pdf_file.name, 0)
 
             documents.append({
                 "id": pdf_file.name,  # Use filename as ID for filtering
@@ -813,8 +1096,9 @@ async def list_documents():
             "total_count": len(documents)
         }
     except Exception as e:
-        logger.error(f"Failed to list documents: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        # Security: Use sanitized error message (prevents information disclosure)
+        safe_message = get_safe_error_message(e, "list documents endpoint")
+        raise HTTPException(status_code=500, detail=safe_message)
 
 
 @app.get("/api/documents/{filename}/chunks")
@@ -823,15 +1107,18 @@ async def get_document_chunks(filename: str):
     Get all chunks for a specific document
     """
     try:
+        # Security: Validate and sanitize filename
+        safe_filename = validate_filename(filename)
+
         if not vector_db:
             raise HTTPException(status_code=500, detail="Vector database not available")
 
         # Get chunks for this document from vector DB
-        chunks = vector_db.get_chunks_by_filename(filename)
+        chunks = vector_db.get_chunks_by_filename(safe_filename)
 
         if not chunks:
             return {
-                "filename": filename,
+                "filename": safe_filename,
                 "chunks": [],
                 "total_count": 0,
                 "message": "No chunks found for this document"
@@ -848,61 +1135,102 @@ async def get_document_chunks(filename: str):
             })
 
         return {
-            "filename": filename,
+            "filename": safe_filename,
             "chunks": formatted_chunks,
             "total_count": len(formatted_chunks)
         }
     except Exception as e:
-        logger.error(f"Failed to get chunks for {filename}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        # Security: Use sanitized error message (prevents information disclosure)
+        safe_message = get_safe_error_message(e, "get document chunks endpoint")
+        raise HTTPException(status_code=500, detail=safe_message)
 
 
 @app.post("/api/documents/upload")
 async def upload_document(file: UploadFile = File(...)):
     """
     Upload a new PDF or HWP document and automatically index it
+    (Max file size: configurable via MAX_FILE_SIZE_MB, default 100MB)
     """
     try:
-        # Validate file type
-        if not (file.filename.endswith('.pdf') or file.filename.endswith('.hwp')):
+        # Security: Validate and sanitize filename
+        safe_filename = validate_filename(file.filename)
+
+        # Validate file type (extension check)
+        if not (safe_filename.endswith('.pdf') or safe_filename.endswith('.hwp')):
             raise HTTPException(status_code=400, detail="Only PDF and HWP files are allowed")
+
+        # Security: Validate file content (magic bytes check)
+        await validate_file_content(file)
 
         # Create data directory if it doesn't exist
         data_path = Path(DATA_DIR)
         data_path.mkdir(parents=True, exist_ok=True)
 
-        # Read file content for hash calculation and duplicate detection
-        file_content = await file.read()
+        # Save uploaded file path (using validated filename)
+        file_path = data_path / safe_filename
 
-        # Calculate MD5 hash of file content
-        file_hash = hashlib.md5(file_content).hexdigest()
+        # Check if file already exists (filename collision)
+        if file_path.exists():
+            raise HTTPException(
+                status_code=409,
+                detail=f"File '{safe_filename}' already exists. Please delete it first or rename your file."
+            )
+
+        # Stream file to disk while calculating hash (memory-efficient)
+        # Uses chunked reading to avoid loading entire file into memory
+        file_hash = hashlib.md5()
+        file_size = 0
+        chunk_size = 8192  # 8KB chunks
+
+        try:
+            with file_path.open("wb") as buffer:
+                while True:
+                    chunk = await file.read(chunk_size)
+                    if not chunk:
+                        break
+
+                    # Check file size limit during streaming
+                    file_size += len(chunk)
+                    if file_size > MAX_FILE_SIZE:
+                        # Remove partial file
+                        file_path.unlink(missing_ok=True)
+                        file_size_mb = file_size / 1024 / 1024
+                        raise HTTPException(
+                            status_code=413,
+                            detail=f"파일 크기({file_size_mb:.1f}MB)가 너무 큽니다. 최대 {MAX_FILE_SIZE_MB}MB까지 업로드 가능합니다."
+                        )
+
+                    # Write chunk and update hash
+                    buffer.write(chunk)
+                    file_hash.update(chunk)
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            # Clean up partial file on error
+            file_path.unlink(missing_ok=True)
+            logger.error(f"Failed to save file: {e}")
+            # Security: Use sanitized error message (prevents information disclosure)
+            safe_message = get_safe_error_message(e, "file save operation")
+            raise HTTPException(status_code=500, detail=safe_message)
+
+        # Get final hash
+        file_hash_hex = file_hash.hexdigest()
 
         # Check for duplicate content using Redis
-        hash_key = f"doc:hash:{file_hash}"
+        hash_key = f"doc:hash:{file_hash_hex}"
         existing_filename = vector_db.client.get(hash_key)
 
         if existing_filename:
+            # Remove the newly uploaded file (it's a duplicate)
+            file_path.unlink(missing_ok=True)
             existing_filename = existing_filename.decode('utf-8') if isinstance(existing_filename, bytes) else existing_filename
             raise HTTPException(
                 status_code=409,
                 detail=f"이 파일과 동일한 내용의 문서가 이미 업로드되어 있습니다: '{existing_filename}'. 같은 파일을 다시 업로드할 필요가 없습니다."
             )
 
-        # Save uploaded file
-        file_path = data_path / file.filename
-
-        # Check if file already exists (filename collision)
-        if file_path.exists():
-            raise HTTPException(
-                status_code=409,
-                detail=f"File '{file.filename}' already exists. Please delete it first or rename your file."
-            )
-
-        # Save file
-        with file_path.open("wb") as buffer:
-            buffer.write(file_content)
-
-        logger.info(f"Uploaded file: {file.filename}")
+        logger.info(f"Uploaded file: {safe_filename}")
 
         # Process and index the new document (PDF or HWP)
         try:
@@ -915,15 +1243,15 @@ async def upload_document(file: UploadFile = File(...)):
             chunks = doc_processor.process_document(str(file_path))
 
             if not chunks:
-                logger.warning(f"No chunks created from {file.filename}")
+                logger.warning(f"No chunks created from {safe_filename}")
                 return {
                     "message": "File uploaded but no content could be extracted",
-                    "filename": file.filename,
+                    "filename": safe_filename,
                     "indexed": False
                 }
 
             # Create embeddings
-            logger.info(f"Creating embeddings for {len(chunks)} chunks from {file.filename}...")
+            logger.info(f"Creating embeddings for {len(chunks)} chunks from {safe_filename}...")
             texts = [chunk["text"] for chunk in chunks]
             embeddings = embedding_model.encode(texts, batch_size=32, show_progress_bar=False)
 
@@ -934,18 +1262,21 @@ async def upload_document(file: UploadFile = File(...)):
             doc_tracker = DocumentTracker(data_dir=DATA_DIR)
             doc_tracker.update_metadata()
 
-            logger.success(f"Indexed {len(chunks)} chunks from {file.filename}")
+            logger.success(f"Indexed {len(chunks)} chunks from {safe_filename}")
 
             # Store file hash to prevent future duplicates
-            vector_db.client.set(hash_key, file.filename)
-            logger.info(f"Stored file hash for duplicate detection: {file_hash[:8]}...")
+            vector_db.client.set(hash_key, safe_filename)
+            logger.info(f"Stored file hash for duplicate detection: {file_hash_hex[:8]}...")
+
+            # Invalidate status cache (document set changed)
+            invalidate_status_cache()
 
             # Get file stats
             stat = file_path.stat()
 
             return {
                 "message": "File uploaded and indexed successfully",
-                "filename": file.filename,
+                "filename": safe_filename,
                 "size_mb": round(stat.st_size / (1024 * 1024), 2),
                 "chunk_count": len(chunks),
                 "indexed": True
@@ -953,19 +1284,19 @@ async def upload_document(file: UploadFile = File(...)):
 
         except Exception as e:
             # If indexing fails, remove the uploaded file
-            logger.error(f"Failed to index {file.filename}: {e}")
+            logger.error(f"Failed to index {safe_filename}: {e}")
             if file_path.exists():
                 file_path.unlink()
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to process PDF: {str(e)}"
-            )
+            # Security: Use sanitized error message (prevents information disclosure)
+            safe_message = get_safe_error_message(e, "document indexing")
+            raise HTTPException(status_code=500, detail=safe_message)
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Upload failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        # Security: Use sanitized error message (prevents information disclosure)
+        safe_message = get_safe_error_message(e, "upload endpoint")
+        raise HTTPException(status_code=500, detail=safe_message)
 
 
 @app.delete("/api/documents/{filename}")
@@ -974,12 +1305,15 @@ async def delete_document(filename: str):
     Delete a PDF document and remove it from the index
     """
     try:
+        # Security: Validate and sanitize filename
+        safe_filename = validate_filename(filename)
+
         data_path = Path(DATA_DIR)
-        file_path = data_path / filename
+        file_path = data_path / safe_filename
 
         # Check if file exists
         if not file_path.exists():
-            raise HTTPException(status_code=404, detail=f"File '{filename}' not found")
+            raise HTTPException(status_code=404, detail=f"File '{safe_filename}' not found")
 
         # Calculate hash before deletion to remove from hash registry
         try:
@@ -995,15 +1329,15 @@ async def delete_document(filename: str):
         # Delete from vector database
         if vector_db:
             try:
-                deleted_count = vector_db.delete_by_filename(filename)
-                logger.info(f"Deleted {deleted_count} chunks for {filename} from vector DB")
+                deleted_count = vector_db.delete_by_filename(safe_filename)
+                logger.info(f"Deleted {deleted_count} chunks for {safe_filename} from vector DB")
             except Exception as e:
                 logger.error(f"Failed to delete from vector DB: {e}")
                 # Continue with file deletion even if vector DB deletion fails
 
         # Delete file
         file_path.unlink()
-        logger.info(f"Deleted file: {filename}")
+        logger.info(f"Deleted file: {safe_filename}")
 
         # Update document tracker
         try:
@@ -1020,25 +1354,40 @@ async def delete_document(filename: str):
             except Exception as e:
                 logger.error(f"Failed to clear cache: {e}")
 
+        # Invalidate status cache (document set changed)
+        invalidate_status_cache()
+
         return {
-            "message": f"Document '{filename}' deleted successfully",
-            "filename": filename,
+            "message": f"Document '{safe_filename}' deleted successfully",
+            "filename": safe_filename,
             "chunks_removed": deleted_count if vector_db else 0
         }
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Delete failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        # Security: Use sanitized error message (prevents information disclosure)
+        safe_message = get_safe_error_message(e, "delete endpoint")
+        raise HTTPException(status_code=500, detail=safe_message)
 
 
 @app.get("/api/status")
 async def status():
     """
-    Get system status with detailed information
+    Get system status with detailed information (cached for performance)
     """
+    global status_cache
+
     try:
+        # Check if cache is valid
+        import time
+        current_time = time.time()
+        if (status_cache["data"] is not None and
+            current_time - status_cache["timestamp"] < status_cache["ttl"]):
+            # Return cached response
+            return status_cache["data"]
+
+        # Cache miss or expired - recalculate status
         chunk_count = vector_db.count_documents() if vector_db else 0
         pdf_count = vector_db.count_unique_files() if vector_db else 0
 
@@ -1072,6 +1421,10 @@ async def status():
 
         if change_info:
             response["changes"] = change_info
+
+        # Update cache
+        status_cache["data"] = response
+        status_cache["timestamp"] = current_time
 
         return response
     except Exception as e:
@@ -1112,8 +1465,9 @@ async def change_llm(request: LLMChangeRequest):
             "message": "LLM model changed successfully"
         }
     except Exception as e:
-        logger.error(f"Failed to change LLM model: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to change LLM model: {str(e)}")
+        # Security: Use sanitized error message (prevents information disclosure)
+        safe_message = get_safe_error_message(e, "change model endpoint")
+        raise HTTPException(status_code=500, detail=safe_message)
 
 
 @app.get("/api/suggested-questions")
@@ -1173,53 +1527,78 @@ async def generate_follow_up_questions(request: FollowUpRequest):
             raise HTTPException(status_code=503, detail="LLM not initialized")
 
         # Create messages for follow-up question generation
-        messages = [
-            {
-                "role": "system",
-                "content": "당신은 유용한 후속 질문을 생성하는 AI입니다. 사용자의 이해를 돕기 위해 적절한 질문을 생성합니다."
-            },
-            {
-                "role": "user",
-                "content": f"""이전 대화 내용을 바탕으로 사용자가 궁금해할 만한 후속 질문 3개를 생성해주세요.
+        # Simple, direct prompt without room for thinking
+        simple_prompt = f"""사용자 질문: {request.question}
+AI 답변: {request.answer[:500]}
 
-사용자 질문: {request.question}
-AI 답변: {request.answer[:500]}...
-
-다음 가이드라인을 따라 후속 질문을 생성하세요:
-1. 답변 내용을 더 깊이 이해하기 위한 질문
-2. 관련된 다른 주제로 확장하는 질문
-3. 실제 적용이나 절차를 묻는 질문
-
-각 질문은 한 줄로 작성하고, 번호 없이 질문만 작성하세요.
-질문1
-질문2
-질문3"""
-            }
-        ]
+위 내용을 바탕으로 후속 질문 3개를 한국어로 작성하세요 (각 질문은 한 줄, '?'로 끝남):"""
 
         # Generate follow-up questions using MLX
         from mlx_lm import generate as mlx_generate
-        prompt = llm.tokenizer.apply_chat_template(
-            messages,
-            tokenize=False,
-            add_generation_prompt=True
-        )
 
         response = mlx_generate(
             llm.model,
             llm.tokenizer,
-            prompt=prompt,
-            max_tokens=200,
-            temp=0.7,
-            verbose=False
+            prompt=simple_prompt,
+            max_tokens=150
         )
 
-        # Parse response into list of questions
-        questions = [q.strip() for q in response.strip().split('\n') if q.strip()]
-        questions = questions[:3]  # Limit to 3 questions
+        # Debug: Log raw response
+        logger.debug(f"Raw LLM response: {response[:500]}")
 
-        logger.info(f"Generated {len(questions)} follow-up questions")
-        return {"questions": questions}
+        # Clean response: remove <think> tags and their content
+        import re
+        cleaned = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL)
+        cleaned = re.sub(r'</?think>', '', cleaned)  # Remove orphaned tags
+
+        logger.debug(f"Cleaned response: {cleaned[:500]}")
+
+        # Parse response into list of questions
+        lines = cleaned.strip().split('\n')
+        questions = []
+
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+
+            # Remove numbering (1., 2., 3., -, *, etc.)
+            original_line = line
+            line = re.sub(r'^[\d\-\*\.\)]+\s*', '', line)
+            line = line.strip()
+
+            # Debug: Check each validation step
+            ends_with_q = line.endswith('?')
+            has_korean = bool(re.search(r'[가-힣]', line))
+            long_enough = len(line) >= 5
+            no_english = not re.search(r'[a-z]{3,}', line)
+
+            logger.debug(f"Line: '{line[:50]}' | ends_with_q={ends_with_q}, has_korean={has_korean}, long_enough={long_enough}, no_english={no_english}")
+
+            # Only keep lines that:
+            # 1. End with '?'
+            # 2. Contain Korean characters (가-힣)
+            # 3. Are not too short (at least 5 chars)
+            # 4. Don't contain English explanations (no lowercase English letters)
+            if (ends_with_q and has_korean and long_enough and no_english):
+                questions.append(line)
+
+            if len(questions) >= 3:
+                break
+
+        # If we got questions, return them; otherwise use fallback
+        if questions:
+            logger.info(f"Generated {len(questions)} follow-up questions")
+            return {"questions": questions}
+        else:
+            logger.warning("No valid questions generated, using fallback")
+            return {
+                "questions": [
+                    "이 내용과 관련된 추가 정보가 있나요?",
+                    "다른 규정과의 차이점은 무엇인가요?",
+                    "실제 적용 사례는 어떻게 되나요?"
+                ]
+            }
 
     except Exception as e:
         logger.error(f"Failed to generate follow-up questions: {e}")

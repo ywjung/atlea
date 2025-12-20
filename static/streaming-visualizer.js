@@ -57,7 +57,7 @@ class StreamingVisualizer {
                 <div class="progress-info">
                     <span class="progress-icon">✍️</span>
                     <div class="progress-details">
-                        <span class="progress-text">실시간 생성 중</span>
+                        <span class="progress-text">실시간 생성 중<span class="loading-dots"><span></span><span></span><span></span></span></span>
                         <div class="progress-stats">
                             <span class="token-count" id="tokenCount">0</span> 토큰 생성됨
                             <span class="separator">•</span>

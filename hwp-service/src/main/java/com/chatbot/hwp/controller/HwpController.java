@@ -11,6 +11,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -20,6 +21,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDateTime;
+import java.util.Base64;
 
 @Slf4j
 @RestController
@@ -82,7 +84,7 @@ public class HwpController {
                             .timestamp(LocalDateTime.now())
                             .status(HttpStatus.INTERNAL_SERVER_ERROR.value())
                             .error("Extraction failed")
-                            .message(response.getError())
+                            .message("Failed to process HWP file")  // Security: Generic error
                             .path("/api/hwp/extract")
                             .build());
         }
@@ -105,17 +107,48 @@ public class HwpController {
     @PostMapping(value = "/extract/base64", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<?> extractTextFromBase64(
             @Parameter(description = "Extraction request with base64-encoded HWP file content", required = true)
-            @RequestBody HwpExtractionRequest request) {
+            @Valid @RequestBody HwpExtractionRequest request) {  // Added @Valid
         log.info("Received base64 HWP extraction request: {}", request.getFilename());
 
-        if (request.getFileContent() == null || request.getFileContent().isEmpty()) {
+        // Security: Validate base64 content size before processing
+        if (request.getFileContent().length() > 70000000) {
             return ResponseEntity
                     .badRequest()
                     .body(ErrorResponse.builder()
                             .timestamp(LocalDateTime.now())
                             .status(HttpStatus.BAD_REQUEST.value())
-                            .error("Invalid request")
-                            .message("fileContent is required")
+                            .error("Payload too large")
+                            .message("Base64 content exceeds maximum size of 50MB")
+                            .path("/api/hwp/extract/base64")
+                            .build());
+        }
+
+        // Security: Validate decoded size (prevent memory exhaustion DoS)
+        byte[] fileBytes;
+        try {
+            fileBytes = Base64.getDecoder().decode(request.getFileContent());
+
+            // Check decoded file size (50MB limit)
+            if (fileBytes.length > 50 * 1024 * 1024) {
+                return ResponseEntity
+                        .badRequest()
+                        .body(ErrorResponse.builder()
+                                .timestamp(LocalDateTime.now())
+                                .status(HttpStatus.BAD_REQUEST.value())
+                                .error("File too large")
+                                .message("Decoded file size exceeds 50MB limit")
+                                .path("/api/hwp/extract/base64")
+                                .build());
+            }
+        } catch (IllegalArgumentException e) {
+            log.error("Invalid base64 encoding: {}", e.getMessage());
+            return ResponseEntity
+                    .badRequest()
+                    .body(ErrorResponse.builder()
+                            .timestamp(LocalDateTime.now())
+                            .status(HttpStatus.BAD_REQUEST.value())
+                            .error("Invalid base64")
+                            .message("Invalid base64 encoding")
                             .path("/api/hwp/extract/base64")
                             .build());
         }
@@ -132,7 +165,7 @@ public class HwpController {
                             .timestamp(LocalDateTime.now())
                             .status(HttpStatus.INTERNAL_SERVER_ERROR.value())
                             .error("Extraction failed")
-                            .message(response.getError())
+                            .message("Failed to process HWP file")  // Security: Generic error
                             .path("/api/hwp/extract/base64")
                             .build());
         }
@@ -140,17 +173,23 @@ public class HwpController {
         return ResponseEntity.ok(response);
     }
 
+    /**
+     * Security: Sanitized error handler (prevents information disclosure)
+     * Logs full error details server-side, returns generic message to client
+     */
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleException(Exception e) {
+        // Log full error details server-side for debugging
         log.error("Unexpected error: {}", e.getMessage(), e);
 
+        // Security: Return generic error message (no stack traces or internal details)
         return ResponseEntity
                 .status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(ErrorResponse.builder()
                         .timestamp(LocalDateTime.now())
                         .status(HttpStatus.INTERNAL_SERVER_ERROR.value())
                         .error("Internal Server Error")
-                        .message(e.getMessage())
+                        .message("An unexpected error occurred while processing your request")
                         .path("/api/hwp")
                         .build());
     }
