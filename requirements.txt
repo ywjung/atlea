@@ -13,8 +13,7 @@ sentence-transformers>=3.2.0
 huggingface-hub>=0.26.0
 einops>=0.8.0
 
-# PDF Processing
-pypdf>=3.17.0
+# Text Processing
 langchain>=0.3.7
 langchain-community>=0.3.6
 

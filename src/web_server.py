@@ -20,7 +20,6 @@ from dotenv import load_dotenv
 from starlette.types import Scope, Receive, Send
 
 from .embeddings import EmbeddingModel
-from .pdf_processor import PDFProcessor
 from .document_processor import DocumentProcessor
 from .vector_db import VectorDB
 from .llm import LLM, RAGSystem

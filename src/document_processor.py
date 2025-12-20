@@ -8,17 +8,18 @@ import zlib
 from pathlib import Path
 from typing import List, Dict, Optional
 from loguru import logger
-from pypdf import PdfReader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 import olefile
 
 from .hwp_processor import HWPProcessor
+from .pdf_service import PDFService
 
 
 class DocumentProcessor:
     """Process documents (PDF, HWP) and create chunks"""
 
-    def __init__(self, chunk_size: int = 512, chunk_overlap: int = 50, hwp_service_url: str = None):
+    def __init__(self, chunk_size: int = 512, chunk_overlap: int = 50,
+                 hwp_service_url: str = None, pdf_service_url: str = None):
         """
         Initialize document processor
 
@@ -26,6 +27,7 @@ class DocumentProcessor:
             chunk_size: Size of text chunks
             chunk_overlap: Overlap between chunks
             hwp_service_url: URL of Java HWP service (optional)
+            pdf_service_url: URL of Java PDF service (optional)
         """
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
@@ -47,11 +49,22 @@ class DocumentProcessor:
         else:
             logger.warning("Java HWP service not available - falling back to Python extraction")
 
+        # Initialize PDF service with Java service
+        self.pdf_service = PDFService(pdf_service_url)
+        self.use_java_pdf = False  # Default to Python fallback
+
+        # Check if Java PDF service is available
+        if self.pdf_service.check_service_health():
+            self.use_java_pdf = True
+            logger.success("Java PDF service is available - using Java-based extraction")
+        else:
+            logger.warning("Java PDF service not available - Python extraction not available")
+
         logger.info(f"Document Processor initialized (chunk_size={chunk_size}, overlap={chunk_overlap})")
 
     def extract_text_from_pdf(self, pdf_path: str) -> str:
         """
-        Extract text from PDF file
+        Extract text from PDF file using Java PDF service
 
         Args:
             pdf_path: Path to PDF file
@@ -59,21 +72,23 @@ class DocumentProcessor:
         Returns:
             Extracted text
         """
-        try:
-            reader = PdfReader(pdf_path)
-            text_parts = []
-
-            for page_num, page in enumerate(reader.pages, 1):
-                text = page.extract_text()
-                if text.strip():
-                    text_parts.append(text)
-
-            full_text = "\n\n".join(text_parts)
-            logger.debug(f"Extracted {len(full_text)} characters from {pdf_path}")
-            return full_text
-        except Exception as e:
-            logger.error(f"Failed to extract text from PDF {pdf_path}: {e}")
-            raise
+        # Use Java-based extraction
+        if self.use_java_pdf:
+            try:
+                logger.info(f"Using Java PDF service for {Path(pdf_path).name}")
+                result = self.pdf_service.extract_text_from_file(pdf_path)
+                if result and result.get('text'):
+                    text = result['text']
+                    logger.success(f"Java extraction successful: {len(text)} characters")
+                    return text
+                else:
+                    logger.error("Java extraction returned no text")
+                    raise RuntimeError(f"Failed to extract text from PDF: {pdf_path}")
+            except Exception as e:
+                logger.error(f"Java extraction failed: {e}")
+                raise
+        else:
+            raise RuntimeError("PDF extraction not available - Java PDF service is not running")
 
     def extract_text_from_hwp(self, hwp_path: str) -> str:
         """
