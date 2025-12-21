@@ -31,20 +31,6 @@ public class PdfExtractionRequest {
     @Size(max = 255, message = "Filename too long")
     private String filename;
 
-    @Schema(
-            description = "Chunk size for text splitting (default: 512)",
-            example = "512",
-            required = false
-    )
-    private Integer chunkSize = 512;
-
-    @Schema(
-            description = "Chunk overlap for text splitting (default: 50)",
-            example = "50",
-            required = false
-    )
-    private Integer chunkOverlap = 50;
-
     /**
      * Security: Sanitize filename to prevent path traversal and log injection
      */

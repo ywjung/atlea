@@ -108,19 +108,42 @@ echo "🔧 가상환경 활성화..."
 source venv/bin/activate
 
 # Check if Redis is running
-echo "🐳 Redis 상태 확인..."
-if ! docker-compose ps | grep -q "redis.*Up"; then
-    echo "📦 Redis 시작 중..."
-    docker-compose up -d
-    echo "⏳ Redis 준비 대기..."
-    sleep 5
-fi
+echo "🔍 Redis 상태 확인..."
 
-if docker-compose ps | grep -q "redis.*Up"; then
-    echo "✅ Redis가 실행 중입니다"
+# Try to ping Redis directly first
+if redis-cli ping > /dev/null 2>&1; then
+    echo "✅ Redis가 실행 중입니다 (네이티브)"
 else
-    echo "❌ Redis를 시작할 수 없습니다"
-    exit 1
+    # Check if running in Docker Compose
+    if command -v docker-compose > /dev/null 2>&1 && docker-compose ps 2>/dev/null | grep -q "redis.*Up"; then
+        echo "✅ Redis가 실행 중입니다 (Docker)"
+    else
+        # Try to start Redis via docker-compose
+        if command -v docker-compose > /dev/null 2>&1 && [ -f "docker-compose.yml" ]; then
+            echo "📦 Docker Compose로 Redis 시작 중..."
+            docker-compose up -d redis
+            echo "⏳ Redis 준비 대기..."
+            sleep 5
+
+            if redis-cli ping > /dev/null 2>&1; then
+                echo "✅ Redis가 시작되었습니다"
+            else
+                echo "❌ Redis를 시작할 수 없습니다"
+                echo "💡 Redis를 수동으로 시작하세요:"
+                echo "   - Linux: sudo systemctl start redis-server"
+                echo "   - Mac: brew services start redis"
+                echo "   - Docker: docker-compose up -d"
+                exit 1
+            fi
+        else
+            echo "❌ Redis가 실행 중이지 않습니다"
+            echo "💡 Redis를 먼저 시작하세요:"
+            echo "   - Linux: sudo systemctl start redis-server"
+            echo "   - Mac: brew services start redis"
+            echo "   - Docker: docker-compose up -d"
+            exit 1
+        fi
+    fi
 fi
 
 # Load environment variables

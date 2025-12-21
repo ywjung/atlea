@@ -11,7 +11,7 @@ from loguru import logger
 
 
 class HWPProcessor:
-    """Process HWP files by calling Java HWP extraction service"""
+    """Process HWP files by calling Java HWP extraction service with connection pooling"""
 
     def __init__(self, hwp_service_url: str = None):
         """
@@ -24,6 +24,17 @@ class HWPProcessor:
             "HWP_SERVICE_URL", "http://localhost:8081"
         )
         self.api_url = f"{self.hwp_service_url}/api/hwp"
+
+        # Connection pooling for better performance
+        self.session = requests.Session()
+        adapter = requests.adapters.HTTPAdapter(
+            pool_connections=5,
+            pool_maxsize=10,
+            max_retries=2
+        )
+        self.session.mount('http://', adapter)
+        self.session.mount('https://', adapter)
+
         logger.info(f"HWP Processor initialized with service URL: {self.hwp_service_url}")
 
     def check_service_health(self) -> bool:
@@ -34,18 +45,18 @@ class HWPProcessor:
             True if service is healthy, False otherwise
         """
         try:
-            response = requests.get(
+            response = self.session.get(
                 f"{self.api_url}/health",
                 timeout=5
             )
             if response.status_code == 200:
-                logger.info("HWP service is healthy")
+                logger.debug("HWP service is healthy")
                 return True
             else:
                 logger.warning(f"HWP service health check failed: {response.status_code}")
                 return False
         except requests.exceptions.RequestException as e:
-            logger.error(f"Failed to connect to HWP service: {e}")
+            logger.debug(f"Failed to connect to HWP service: {e}")
             return False
 
     def extract_text_from_file(self, file_path: str) -> Optional[str]:
@@ -74,7 +85,7 @@ class HWPProcessor:
             # Read file and send as multipart
             with open(file_path, 'rb') as f:
                 files = {'file': (file_path.name, f, 'application/octet-stream')}
-                response = requests.post(
+                response = self.session.post(
                     f"{self.api_url}/extract",
                     files=files,
                     timeout=60
@@ -127,7 +138,7 @@ class HWPProcessor:
             base64_content = base64.b64encode(file_bytes).decode('utf-8')
 
             # Send to service
-            response = requests.post(
+            response = self.session.post(
                 f"{self.api_url}/extract/base64",
                 json={
                     'fileContent': base64_content,

@@ -19,7 +19,10 @@ class VectorDB:
     @staticmethod
     def escape_redis_query(value: str) -> str:
         """
-        Properly escape Redis search query values to prevent injection
+        Escape Redis search query values for TextField phrase searches (with quotes)
+
+        For TextField with quote-based phrase matching, only backslash and quotes
+        need to be escaped. Other characters are treated as literals inside quotes.
 
         Args:
             value: String value to escape
@@ -27,30 +30,10 @@ class VectorDB:
         Returns:
             Escaped string safe for Redis search queries
         """
-        # Redis search special characters that need escaping
-        special_chars = [
-            '\\',  # Backslash must be escaped first
-            '"',   # Double quotes
-            '@',   # Field selector
-            '|',   # OR operator
-            '{',   # Tag delimiter
-            '}',   # Tag delimiter
-            '[',   # Numeric range
-            ']',   # Numeric range
-            '(',   # Grouping
-            ')',   # Grouping
-            '*',   # Wildcard
-            '~',   # Fuzzy match
-            '-',   # NOT operator (when at start)
-            ':',   # Field separator
-            ';',   # Command separator
-            ',',   # List separator
-        ]
-
-        escaped = value
-        for char in special_chars:
-            escaped = escaped.replace(char, f'\\{char}')
-
+        # For TextField phrase searches with quotes, only escape:
+        # 1. Backslash (must be first)
+        # 2. Double quotes
+        escaped = value.replace('\\', '\\\\').replace('"', '\\"')
         return escaped
 
     def __init__(
@@ -106,7 +89,7 @@ class VectorDB:
             logger.info(f"Creating new index '{self.index_name}'")
             schema = (
                 TextField("text"),
-                TextField("filename"),
+                TextField("filename", sortable=True),  # Use TextField with tokenization
                 TextField("source"),
                 NumericField("chunk_index"),
                 VectorField(
@@ -146,9 +129,11 @@ class VectorDB:
         if len(documents) != len(embeddings):
             raise ValueError("Number of documents must match number of embeddings")
 
+        import uuid
         pipe = self.client.pipeline()
         for idx, (doc, embedding) in enumerate(zip(documents, embeddings)):
-            doc_id = f"doc:{idx}"
+            # Generate unique document ID using UUID to avoid overwriting
+            doc_id = f"doc:{uuid.uuid4().hex}"
 
             # Convert embedding to bytes
             embedding_bytes = np.array(embedding, dtype=np.float32).tobytes()
@@ -246,13 +231,15 @@ class VectorDB:
             key_batch = []
 
             # Use SCAN to iterate keys without blocking Redis
-            # Only scan numeric doc:N keys (doc:0, doc:1, etc.)
+            # Scan all doc:* keys (both numeric doc:N and UUID doc:xxxxx)
             for key in self.client.scan_iter(match="doc:*", count=batch_size):
                 key_str = key.decode('utf-8')
 
-                # Filter to only numeric document keys (doc:0, doc:1, etc.)
                 # Exclude doc:hash:xxx keys used for duplicate tracking
-                if not key_str.split(':')[-1].isdigit():
+                # Accept both numeric IDs (doc:0, doc:1) and UUID IDs (doc:abc123...)
+                parts = key_str.split(':')
+                if len(parts) != 2 or parts[0] != 'doc' or parts[1] == 'hash':
+                    # Skip doc:hash:xxx or other invalid patterns
                     continue
 
                 key_batch.append(key)
@@ -394,8 +381,9 @@ class VectorDB:
             for key in self.client.scan_iter(match="doc:*", count=batch_size):
                 key_str = key.decode('utf-8')
 
-                # Filter to only numeric document keys (doc:0, doc:1, etc.)
-                if not key_str.split(':')[-1].isdigit():
+                # Exclude doc:hash:xxx keys, accept both numeric and UUID document IDs
+                parts = key_str.split(':')
+                if len(parts) != 2 or parts[0] != 'doc' or parts[1] == 'hash':
                     continue
 
                 key_batch.append(key)
@@ -447,44 +435,44 @@ class VectorDB:
 
     def get_chunks_by_filename(self, filename: str) -> List[Dict]:
         """
-        Get all chunks for a specific filename
+        Get all chunks for a specific filename by scanning all documents
+
+        Due to RedisSearch limitations with special characters in filenames,
+        we scan all doc:* keys and filter by filename in Python.
 
         Args:
             filename: Name of the file to get chunks for
 
         Returns:
-            List of chunks with their text and metadata
+            List of chunks with their text and metadata, sorted by chunk_index
         """
         try:
-            # Escape special characters in filename for Redis search (prevent injection)
-            escaped_filename = self.escape_redis_query(filename)
-
-            # Query all chunks for this filename, sorted by chunk_index
-            query = (
-                Query(f'@filename:"{escaped_filename}"')
-                .return_fields("text", "filename", "source", "chunk_index")
-                .sort_by("chunk_index", asc=True)
-                .paging(0, 10000)  # Get up to 10000 chunks
-                .dialect(2)
-            )
-
-            results = self.client.ft(self.index_name).search(query)
-
-            # Parse results
             chunks = []
-            for doc in results.docs:
-                chunk_data = {
-                    "text": doc.text if hasattr(doc, 'text') else "",
-                    "filename": doc.filename if hasattr(doc, 'filename') else filename,
-                    "source": doc.source if hasattr(doc, 'source') else "",
-                    "chunk_index": int(doc.chunk_index) if hasattr(doc, 'chunk_index') else 0,
-                    "page": doc.source if hasattr(doc, 'source') else "N/A",
-                    "metadata": {
-                        "chunk_index": int(doc.chunk_index) if hasattr(doc, 'chunk_index') else 0,
-                        "source": doc.source if hasattr(doc, 'source') else ""
-                    }
-                }
-                chunks.append(chunk_data)
+            batch_size = 100
+            key_batch = []
+
+            # Scan all document keys
+            for key in self.client.scan_iter(match="doc:*", count=batch_size):
+                key_str = key.decode('utf-8')
+
+                # Skip non-document keys (like doc:hash:xxx)
+                parts = key_str.split(':')
+                if len(parts) != 2 or parts[0] != 'doc' or parts[1] == 'hash':
+                    continue
+
+                key_batch.append(key)
+
+                # Process batch
+                if len(key_batch) >= batch_size:
+                    self._extract_chunks_from_batch(key_batch, filename, chunks)
+                    key_batch = []
+
+            # Process remaining keys
+            if key_batch:
+                self._extract_chunks_from_batch(key_batch, filename, chunks)
+
+            # Sort chunks by chunk_index
+            chunks.sort(key=lambda x: x['chunk_index'])
 
             logger.info(f"Retrieved {len(chunks)} chunks for {filename}")
             return chunks
@@ -493,9 +481,51 @@ class VectorDB:
             logger.error(f"Failed to get chunks for {filename}: {e}")
             return []
 
+    def _extract_chunks_from_batch(self, keys: List[bytes], target_filename: str, chunks: List[Dict]):
+        """
+        Extract chunks from a batch of keys that match the target filename
+
+        Args:
+            keys: List of Redis keys to process
+            target_filename: Filename to match
+            chunks: List to append matching chunks to
+        """
+        if not keys:
+            return
+
+        # Use pipeline to batch all operations
+        pipe = self.client.pipeline()
+        for key in keys:
+            pipe.hgetall(key)
+        results = pipe.execute()
+
+        # Filter and extract chunks
+        for key, doc_data in zip(keys, results):
+            if not doc_data:
+                continue
+
+            # Decode document data
+            doc = {k.decode('utf-8'): v.decode('utf-8') if isinstance(v, bytes) else v
+                   for k, v in doc_data.items() if k != b'embedding'}
+
+            # Check if filename matches
+            if doc.get('filename') == target_filename:
+                chunk_data = {
+                    "text": doc.get("text", ""),
+                    "filename": doc.get("filename", target_filename),
+                    "source": doc.get("source", ""),
+                    "chunk_index": int(doc.get("chunk_index", 0)),
+                    "page": doc.get("source", "N/A"),
+                    "metadata": {
+                        "chunk_index": int(doc.get("chunk_index", 0)),
+                        "source": doc.get("source", "")
+                    }
+                }
+                chunks.append(chunk_data)
+
     def delete_by_filename(self, filename: str) -> int:
         """
-        Delete all chunks associated with a filename
+        Delete all chunks associated with a filename by scanning
 
         Args:
             filename: Name of the file whose chunks should be deleted
@@ -504,25 +534,65 @@ class VectorDB:
             Number of chunks deleted
         """
         try:
-            # Find all document IDs for this filename
-            query = Query(f"@filename:{{{filename}}}").return_fields("filename").dialect(2)
-            results = self.client.ft(self.index_name).search(query)
+            deleted_keys = []
+            batch_size = 100
+            key_batch = []
 
-            deleted_count = 0
-            pipe = self.client.pipeline()
+            # Scan all document keys
+            for key in self.client.scan_iter(match="doc:*", count=batch_size):
+                key_str = key.decode('utf-8')
 
-            for doc in results.docs:
-                pipe.delete(doc.id)
-                deleted_count += 1
+                # Skip non-document keys
+                parts = key_str.split(':')
+                if len(parts) != 2 or parts[0] != 'doc' or parts[1] == 'hash':
+                    continue
 
-            if deleted_count > 0:
+                key_batch.append(key)
+
+                # Process batch
+                if len(key_batch) >= batch_size:
+                    self._find_keys_to_delete(key_batch, filename, deleted_keys)
+                    key_batch = []
+
+            # Process remaining keys
+            if key_batch:
+                self._find_keys_to_delete(key_batch, filename, deleted_keys)
+
+            # Delete all matching keys
+            if deleted_keys:
+                pipe = self.client.pipeline()
+                for key in deleted_keys:
+                    pipe.delete(key)
                 pipe.execute()
-                logger.info(f"Deleted {deleted_count} chunks for {filename}")
+                logger.info(f"Deleted {len(deleted_keys)} chunks for {filename}")
 
-            return deleted_count
+            return len(deleted_keys)
         except Exception as e:
             logger.error(f"Failed to delete documents for {filename}: {e}")
             return 0
+
+    def _find_keys_to_delete(self, keys: List[bytes], target_filename: str, deleted_keys: List[bytes]):
+        """
+        Find keys in batch that match the target filename
+
+        Args:
+            keys: List of Redis keys to check
+            target_filename: Filename to match
+            deleted_keys: List to append matching keys to
+        """
+        if not keys:
+            return
+
+        # Use pipeline to batch all operations
+        pipe = self.client.pipeline()
+        for key in keys:
+            pipe.hget(key, 'filename')
+        results = pipe.execute()
+
+        # Find matching keys
+        for key, filename_bytes in zip(keys, results):
+            if filename_bytes and filename_bytes.decode('utf-8') == target_filename:
+                deleted_keys.append(key)
 
     def sample_documents_by_filename(self, filename: str, limit: int = 3) -> List[Dict]:
         """

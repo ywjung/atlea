@@ -60,14 +60,9 @@ public class PdfController {
     @PostMapping(value = "/extract", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<?> extractText(
             @Parameter(description = "PDF file to extract text from (*.pdf, max 50MB)", required = true)
-            @RequestParam("file") MultipartFile file,
-            @Parameter(description = "Chunk size for text splitting (optional, default: no chunking)")
-            @RequestParam(value = "chunkSize", required = false, defaultValue = "0") int chunkSize,
-            @Parameter(description = "Chunk overlap for text splitting (optional, default: 50)")
-            @RequestParam(value = "chunkOverlap", required = false, defaultValue = "50") int chunkOverlap) {
+            @RequestParam("file") MultipartFile file) {
 
-        log.info("Received PDF extraction request: {} (chunkSize: {}, overlap: {})",
-                file.getOriginalFilename(), chunkSize, chunkOverlap);
+        log.info("Received PDF extraction request: {}", file.getOriginalFilename());
 
         if (!pdfExtractionService.isValidPdfFile(file)) {
             return ResponseEntity
@@ -81,7 +76,7 @@ public class PdfController {
                             .build());
         }
 
-        PdfExtractionResponse response = pdfExtractionService.extractText(file, chunkSize, chunkOverlap);
+        PdfExtractionResponse response = pdfExtractionService.extractText(file);
 
         if (!response.isSuccess()) {
             return ResponseEntity
@@ -115,8 +110,7 @@ public class PdfController {
             @Parameter(description = "Extraction request with base64-encoded PDF file content", required = true)
             @Valid @RequestBody PdfExtractionRequest request) {
 
-        log.info("Received base64 PDF extraction request: {} (chunkSize: {}, overlap: {})",
-                request.getFilename(), request.getChunkSize(), request.getChunkOverlap());
+        log.info("Received base64 PDF extraction request: {}", request.getFilename());
 
         // Security: Validate base64 content size before processing
         if (request.getFileContent().length() > 70000000) {
@@ -161,14 +155,9 @@ public class PdfController {
                             .build());
         }
 
-        int chunkSize = request.getChunkSize() != null ? request.getChunkSize() : 0;
-        int chunkOverlap = request.getChunkOverlap() != null ? request.getChunkOverlap() : 50;
-
         PdfExtractionResponse response = pdfExtractionService.extractTextFromBase64(
                 request.getFileContent(),
-                request.getFilename() != null ? request.getFilename() : "unknown.pdf",
-                chunkSize,
-                chunkOverlap
+                request.getFilename() != null ? request.getFilename() : "unknown.pdf"
         );
 
         if (!response.isSuccess()) {

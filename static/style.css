@@ -1592,6 +1592,30 @@ textarea:focus {
     border-color: var(--primary-400);
 }
 
+/* Embedding model select - same style as LLM select */
+.embedding-select {
+    width: 100%;
+    padding: var(--space-md);
+    border: 2px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    font-family: var(--font-sans);
+    font-size: 0.95rem;
+    background: var(--container-bg);
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.embedding-select:focus {
+    outline: none;
+    border-color: var(--primary-500);
+    box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.1);
+}
+
+.embedding-select:hover {
+    border-color: var(--primary-400);
+}
+
 .settings-footer {
     padding: var(--space-xl);
     border-top: 1px solid var(--border-color);

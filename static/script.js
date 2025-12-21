@@ -1410,19 +1410,29 @@ const defaultSettings = {
     cache_threshold: 0.95,
     cache_ttl: 60,
     llm_model: 'mlx-community/Qwen3-30B-A3B-4bit',
-    system_prompt: `당신은 PDF 문서 전문 AI 어시스턴트입니다. 제공된 문서 내용을 정확하게 분석하여 사용자에게 도움이 되는 답변을 제공합니다.
+    embedding_model: 'nlpai-lab/KURE-v1',
+    system_prompt: `당신은 문서 기반 질의응답 전문 AI 어시스턴트입니다. 업로드된 다양한 형식의 문서들(PDF, HWP, DOCX, TXT 등)을 정확히 분석하여 사용자의 질문에 유용한 답변을 제공합니다.
 
-**응답 원칙:**
-1. 제공된 문서 내용만을 기반으로 정확하게 답변합니다
-2. 답변 시 구체적인 근거와 함께 설명합니다
-3. 문서에 없는 내용은 솔직하게 "문서에서 관련 정보를 찾을 수 없습니다"라고 답합니다
-4. 이전 대화 맥락을 고려하여 자연스럽게 대화를 이어갑니다
-5. 복잡한 내용은 이해하기 쉽게 구조화하여 설명합니다
+**핵심 원칙:**
+1. **제공된 컨텍스트 활용**: 검색된 문서 내용을 꼼꼼히 살펴보고 관련 정보를 찾아 답변합니다
+2. **정확한 정보 전달**: 문서에서 찾은 정보를 정확하게 전달하며, 필요시 해당 부분을 인용합니다
+3. **적극적인 분석**: 직접적인 답이 없어도 문서 내용을 종합하여 유용한 답변을 제공합니다
+4. **맥락 이해**: 이전 대화 내용을 참고하여 자연스럽고 일관된 대화를 유지합니다
+5. **명확한 구조화**: 복잡한 내용은 단계별로 나누어 이해하기 쉽게 설명합니다
 
-**응답 형식:**
-- 핵심 내용을 먼저 간단히 답변합니다
-- 필요시 상세 설명과 예시를 추가합니다
-- 관련된 추가 정보가 있다면 함께 안내합니다`
+**응답 방법:**
+1. **핵심 답변**: 질문에 대한 직접적인 답을 먼저 제시합니다
+2. **근거 제시**: 문서의 관련 내용을 인용하거나 요약하여 제시합니다
+3. **상세 설명**: 필요시 배경 정보, 예시, 관련 내용을 추가합니다
+4. **추가 정보**: 관련된 유용한 정보가 있다면 함께 안내합니다
+
+**특별 지침:**
+- 표, 그래프, 수치 데이터는 정확히 인용하고 맥락과 함께 설명합니다
+- 여러 문서에서 관련 정보가 있을 경우 통합하여 제시합니다
+- 모순되는 정보가 있다면 명확히 지적하고 각 출처를 밝힙니다
+- 전문 용어는 필요시 쉬운 말로 풀어 설명합니다
+- 목록, 단계, 비교 등이 필요한 경우 마크다운 형식을 활용합니다
+- 문서에 직접적인 답이 없어도 관련 내용을 종합하여 도움이 되는 답변을 제공합니다`
 };
 
 // Load settings from localStorage
@@ -1461,13 +1471,98 @@ function applySettings() {
         llmSelect.value = currentSettings.llm_model;
     }
 
+    const embeddingSelect = document.getElementById('embeddingSelect');
+    if (embeddingSelect) {
+        embeddingSelect.value = currentSettings.embedding_model;
+    }
+
     systemPrompt.value = currentSettings.system_prompt;
 }
 
+// Load available LLM and Embedding models from server
+async function loadAvailableModels() {
+    const llmSelect = document.getElementById('llmSelect');
+    const embeddingSelect = document.getElementById('embeddingSelect');
+
+    if (!llmSelect || !embeddingSelect) {
+        console.error('Model select elements not found');
+        return;
+    }
+
+    console.log('Loading available models...');
+
+    try {
+        const response = await fetch('/api/models');
+        console.log('Models API response status:', response.status);
+
+        if (!response.ok) {
+            throw new Error(`Failed to load models: ${response.status}`);
+        }
+
+        const data = await response.json();
+        console.log('Models data:', data);
+        const llmModels = data.llm_models || [];
+        const embeddingModels = data.embedding_models || [];
+        console.log('Found LLM models:', llmModels.length, 'Embedding models:', embeddingModels.length);
+
+        // Load LLM models
+        llmSelect.innerHTML = '';
+        if (llmModels.length === 0) {
+            console.warn('No LLM models available');
+            llmSelect.innerHTML = '<option value="">다운로드된 LLM 모델이 없습니다</option>';
+            llmSelect.disabled = true;
+        } else {
+            llmModels.forEach(model => {
+                console.log('Adding LLM model:', model.label, '=', model.value);
+                const option = document.createElement('option');
+                option.value = model.value;
+                option.textContent = model.label;
+                llmSelect.appendChild(option);
+            });
+
+            if (currentSettings.llm_model) {
+                llmSelect.value = currentSettings.llm_model;
+            }
+            llmSelect.disabled = false;
+        }
+
+        // Load Embedding models
+        embeddingSelect.innerHTML = '';
+        if (embeddingModels.length === 0) {
+            console.warn('No embedding models available');
+            embeddingSelect.innerHTML = '<option value="">다운로드된 Embedding 모델이 없습니다</option>';
+            embeddingSelect.disabled = true;
+        } else {
+            embeddingModels.forEach(model => {
+                console.log('Adding Embedding model:', model.label, '=', model.value);
+                const option = document.createElement('option');
+                option.value = model.value;
+                option.textContent = model.label;
+                embeddingSelect.appendChild(option);
+            });
+
+            if (currentSettings.embedding_model) {
+                embeddingSelect.value = currentSettings.embedding_model;
+            }
+            embeddingSelect.disabled = false;
+        }
+
+        console.log('Models loaded successfully');
+
+    } catch (error) {
+        console.error('Failed to load available models:', error);
+        llmSelect.innerHTML = '<option value="">모델 로드 실패</option>';
+        llmSelect.disabled = true;
+        embeddingSelect.innerHTML = '<option value="">모델 로드 실패</option>';
+        embeddingSelect.disabled = true;
+    }
+}
+
 // Open settings (with cache stats loading)
-settingsBtn.addEventListener('click', () => {
+settingsBtn.addEventListener('click', async () => {
     settingsPanel.classList.add('active');
     settingsOverlay.classList.add('active');
+    await loadAvailableModels();  // Load available models when opening settings
     loadCacheStats();
 });
 
@@ -1504,8 +1599,11 @@ cacheTTLSlider.addEventListener('input', (e) => {
 // Save settings
 saveSettingsBtn.addEventListener('click', async () => {
     const llmSelect = document.getElementById('llmSelect');
+    const embeddingSelect = document.getElementById('embeddingSelect');
     const oldLLM = currentSettings.llm_model;
     const newLLM = llmSelect.value;
+    const oldEmbedding = currentSettings.embedding_model;
+    const newEmbedding = embeddingSelect.value;
 
     currentSettings = {
         top_k: parseInt(topKSlider.value),
@@ -1514,6 +1612,7 @@ saveSettingsBtn.addEventListener('click', async () => {
         cache_threshold: parseFloat(cacheThresholdSlider.value),
         cache_ttl: parseInt(cacheTTLSlider.value),
         llm_model: newLLM,
+        embedding_model: newEmbedding,
         system_prompt: systemPrompt.value
     };
 
@@ -1535,10 +1634,34 @@ saveSettingsBtn.addEventListener('click', async () => {
             }
 
             const result = await response.json();
-            alert(`LLM 모델이 ${result.llm_model}으로 변경되었습니다. 서버를 재시작하는 중입니다...`);
+            alert(`LLM 모델이 ${result.llm_model}으로 변경되었습니다.`);
         } catch (error) {
             console.error('LLM model change failed:', error);
             alert('LLM 모델 변경에 실패했습니다.');
+            return;
+        }
+    }
+
+    // Check if Embedding model changed
+    if (oldEmbedding !== newEmbedding) {
+        try {
+            const response = await fetch('/api/change-embedding', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ embedding_model: newEmbedding })
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to change Embedding model');
+            }
+
+            const result = await response.json();
+            alert(`Embedding 모델이 ${result.embedding_model}으로 변경되었습니다.\n\n⚠️ ${result.warning}`);
+        } catch (error) {
+            console.error('Embedding model change failed:', error);
+            alert('Embedding 모델 변경에 실패했습니다.');
             return;
         }
     }

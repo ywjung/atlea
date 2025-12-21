@@ -25,6 +25,7 @@ from .vector_db import VectorDB
 from .llm import LLM, RAGSystem
 from .document_tracker import DocumentTracker
 from .cache_manager import CacheManager
+from .model_manager import ModelManager
 
 # Load environment variables
 load_dotenv()
@@ -140,6 +141,8 @@ llm: Optional[LLM] = None
 rag_system: Optional[RAGSystem] = None
 cache_manager: Optional[CacheManager] = None
 suggested_questions_pool: list = []  # Pre-generated question pool
+is_reindexing: bool = False  # Flag to track reindexing status
+reindex_event: Optional[asyncio.Event] = None  # Event to signal reindex completion
 
 # Status endpoint cache (to avoid rescanning on every request)
 status_cache = {
@@ -160,6 +163,7 @@ def invalidate_status_cache():
 async def validate_file_content(file: UploadFile, max_header_bytes: int = 1024) -> bool:
     """
     Validate file content by checking magic bytes (file signature)
+    Supports: PDF, HWP, HWPX, DOC, DOCX, XLS, XLSX, PPT, PPTX
 
     Args:
         file: Uploaded file object
@@ -175,38 +179,52 @@ async def validate_file_content(file: UploadFile, max_header_bytes: int = 1024) 
     header = await file.read(max_header_bytes)
     await file.seek(0)  # Reset file pointer
 
-    # PDF magic bytes: %PDF
-    pdf_signature = b'%PDF'
+    # Get file extension
+    filename = file.filename or ""
+    file_ext = filename.lower().split('.')[-1] if '.' in filename else ""
 
-    # HWP magic bytes: HWP Document File
-    hwp_signature = b'HWP Document File'
-    hwp_signature_alt = b'\xd0\xcf\x11\xe0'  # OLE2/CFB container (used by HWP 5.0+)
+    # Define magic bytes for each format
+    PDF_SIGNATURE = b'%PDF'
+    OLE2_SIGNATURE = b'\xd0\xcf\x11\xe0'  # Used by HWP, DOC, XLS, PPT
+    ZIP_SIGNATURE = b'PK\x03\x04'  # Used by HWPX, DOCX, XLSX, PPTX
+    HWP_SIGNATURE = b'HWP Document File'
 
     # Check if file starts with valid signature
-    is_pdf = header.startswith(pdf_signature)
-    is_hwp = header.startswith(hwp_signature) or header.startswith(hwp_signature_alt)
+    is_pdf = header.startswith(PDF_SIGNATURE)
+    is_ole2 = header.startswith(OLE2_SIGNATURE)  # HWP, DOC, XLS, PPT
+    is_zip = header.startswith(ZIP_SIGNATURE)  # HWPX, DOCX, XLSX, PPTX
+    is_hwp_legacy = header.startswith(HWP_SIGNATURE)
 
-    if not (is_pdf or is_hwp):
-        # Try to detect what it actually is
+    # Validate based on extension and signature combination
+    valid = False
+
+    if file_ext == 'pdf' and is_pdf:
+        valid = True
+    elif file_ext == 'hwp' and (is_ole2 or is_hwp_legacy):
+        valid = True
+    elif file_ext == 'hwpx' and is_zip:
+        valid = True
+    elif file_ext in ['doc', 'xls', 'ppt'] and is_ole2:
+        valid = True
+    elif file_ext in ['docx', 'xlsx', 'pptx'] and is_zip:
+        valid = True
+
+    if not valid:
+        # Try to detect malicious content
         if header.startswith(b'MZ') or header.startswith(b'\x7fELF'):
             raise HTTPException(
                 status_code=400,
-                detail="실행 파일은 업로드할 수 없습니다. PDF 또는 HWP 파일만 허용됩니다."
-            )
-        elif header.startswith(b'PK\x03\x04'):
-            raise HTTPException(
-                status_code=400,
-                detail="ZIP 파일은 업로드할 수 없습니다. PDF 또는 HWP 파일만 허용됩니다."
+                detail="실행 파일은 업로드할 수 없습니다."
             )
         elif b'<script' in header.lower() or b'<html' in header.lower():
             raise HTTPException(
                 status_code=400,
-                detail="HTML 파일은 업로드할 수 없습니다. PDF 또는 HWP 파일만 허용됩니다."
+                detail="HTML 파일은 업로드할 수 없습니다."
             )
         else:
             raise HTTPException(
                 status_code=400,
-                detail="파일 형식이 올바르지 않습니다. 유효한 PDF 또는 HWP 파일을 업로드해주세요."
+                detail=f"파일 형식이 올바르지 않습니다. 지원 형식: PDF, HWP, HWPX, DOC, DOCX, XLS, XLSX, PPT, PPTX"
             )
 
     return True
@@ -418,6 +436,10 @@ class LLMChangeRequest(BaseModel):
     llm_model: str
 
 
+class EmbeddingChangeRequest(BaseModel):
+    embedding_model: str
+
+
 # Lazy loading functions for LLM (only load when needed)
 async def get_llm() -> LLM:
     """Get LLM instance, loading it lazily on first use"""
@@ -450,10 +472,14 @@ async def get_rag_system() -> RAGSystem:
 @app.on_event("startup")
 async def startup_event():
     """Initialize models and database on startup (fast startup with lazy loading)"""
-    global embedding_model, vector_db, cache_manager, suggested_questions_pool
+    global embedding_model, vector_db, cache_manager, suggested_questions_pool, reindex_event
 
     try:
         logger.info("🚀 Starting application initialization (fast mode)...")
+
+        # Initialize reindex event
+        reindex_event = asyncio.Event()
+        reindex_event.set()  # Initially set (not reindexing)
 
         # Initialize embedding model (required for search)
         logger.info("📚 Loading embedding model...")
@@ -779,7 +805,7 @@ async def index_pdfs(doc_tracker: DocumentTracker):
         }
         vector_db.save_index_state(index_state)
 
-        logger.success(f"Indexed {len(chunks)} chunks from {len(set(chunk['filename'] for chunk in chunks))} documents (PDF + HWP)")
+        logger.success(f"Indexed {len(chunks)} chunks from {len(set(chunk['filename'] for chunk in chunks))} documents")
     except Exception as e:
         logger.error(f"Failed to index documents: {e}")
         raise
@@ -799,6 +825,12 @@ async def query(request: QueryRequest):
     """
     Query endpoint for chatbot (with lazy LLM loading)
     """
+    # Wait for reindexing to complete if in progress
+    if is_reindexing:
+        logger.info(f"⏳ Query waiting for reindex to complete...")
+        await reindex_event.wait()
+        logger.info(f"✅ Reindex complete, processing query")
+
     try:
         # Lazy load RAG system on first use
         rag = await get_rag_system()
@@ -838,6 +870,12 @@ async def query_stream(request: QueryRequest):
     """
     Streaming query endpoint for chatbot with caching (with lazy LLM loading)
     """
+    # Wait for reindexing to complete if in progress
+    if is_reindexing:
+        logger.info(f"⏳ Streaming query waiting for reindex to complete...")
+        await reindex_event.wait()
+        logger.info(f"✅ Reindex complete, processing streaming query")
+
     try:
         # Lazy load RAG system on first use
         rag = await get_rag_system()
@@ -972,8 +1010,14 @@ async def reindex():
     """
     Force reindex all PDFs
     """
+    global is_reindexing, reindex_event
+
     try:
-        logger.info("Force reindexing PDFs...")
+        # Set reindexing flag and clear event to block search requests
+        is_reindexing = True
+        reindex_event.clear()  # Clear event to signal reindexing in progress
+        logger.info("🔄 Force reindexing PDFs... (search requests will wait)")
+
         doc_tracker = DocumentTracker(data_dir=DATA_DIR)
 
         # Clear existing index
@@ -988,6 +1032,8 @@ async def reindex():
         # Invalidate status cache (documents reindexed)
         invalidate_status_cache()
 
+        logger.success("✅ Reindexing completed (search enabled)")
+
         return {
             "message": "Reindexing completed successfully",
             "document_count": vector_db.count_documents()
@@ -996,6 +1042,11 @@ async def reindex():
         # Security: Use sanitized error message (prevents information disclosure)
         safe_message = get_safe_error_message(e, "reindex endpoint")
         raise HTTPException(status_code=500, detail=safe_message)
+    finally:
+        # Always clear the flag and set the event, even if reindexing fails
+        is_reindexing = False
+        reindex_event.set()  # Signal completion to waiting queries
+        logger.info("🔓 Reindex completed, releasing waiting queries")
 
 
 @app.get("/api/cache/stats")
@@ -1147,7 +1198,8 @@ async def get_document_chunks(filename: str):
 @app.post("/api/documents/upload")
 async def upload_document(file: UploadFile = File(...)):
     """
-    Upload a new PDF or HWP document and automatically index it
+    Upload a new document and automatically index it
+    Supports: PDF, HWP, HWPX, DOC, DOCX, XLS, XLSX, PPT, PPTX
     (Max file size: configurable via MAX_FILE_SIZE_MB, default 100MB)
     """
     try:
@@ -1155,8 +1207,12 @@ async def upload_document(file: UploadFile = File(...)):
         safe_filename = validate_filename(file.filename)
 
         # Validate file type (extension check)
-        if not (safe_filename.endswith('.pdf') or safe_filename.endswith('.hwp')):
-            raise HTTPException(status_code=400, detail="Only PDF and HWP files are allowed")
+        allowed_extensions = ['.pdf', '.hwp', '.hwpx', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx']
+        if not any(safe_filename.endswith(ext) for ext in allowed_extensions):
+            raise HTTPException(
+                status_code=400,
+                detail="지원되지 않는 파일 형식입니다. 지원 형식: PDF, HWP, HWPX, DOC, DOCX, XLS, XLSX, PPT, PPTX"
+            )
 
         # Security: Validate file content (magic bytes check)
         await validate_file_content(file)
@@ -1406,13 +1462,25 @@ async def status():
             except:
                 pass
 
+        # System is ready if documents are indexed (LLM loads on first use)
+        is_ready = (chunk_count > 0) or (rag_system is not None)
+
+        # Determine status: reindexing > ready > initializing
+        if is_reindexing:
+            status_value = "reindexing"
+        elif is_ready:
+            status_value = "ready"
+        else:
+            status_value = "initializing"
+
         response = {
-            "status": "ready" if rag_system else "initializing",
+            "status": status_value,
             "document_count": chunk_count,  # 하위 호환성 유지
             "chunk_count": chunk_count,
             "pdf_count": pdf_count,
             "embedding_model": EMBEDDING_MODEL,
-            "llm_model": LLM_MODEL
+            "llm_model": LLM_MODEL,
+            "is_reindexing": is_reindexing
         }
 
         if index_state:
@@ -1432,6 +1500,73 @@ async def status():
             "status": "error",
             "error": str(e)
         }
+
+
+@app.get("/api/models")
+async def list_available_models():
+    """
+    Get list of locally available models (both LLM and Embedding)
+    Returns only models that are downloaded and ready to use
+    """
+    try:
+        model_manager = ModelManager(model_dir=MODEL_DIR)
+        models = model_manager.list_local_models()
+
+        # Separate LLM and Embedding models
+        llm_models = []
+        embedding_models = []
+
+        # Keywords to identify model types
+        embedding_keywords = ["embedding", "KURE", "e5", "jina", "bge", "gte"]
+        llm_keywords = ["instruct", "chat", "Qwen", "Llama", "GPT", "rnj"]
+
+        for model in models:
+            display_name = model["name"]
+
+            # Determine if it's an embedding model
+            is_embedding = any(keyword.lower() in display_name.lower() for keyword in embedding_keywords)
+
+            # Add user-friendly labels for known models
+            if "Qwen3-30B" in display_name:
+                label = "Qwen 3 30B A3B 4bit"
+            elif "rnj-1-instruct" in display_name:
+                label = "RNJ-1 Instruct 4bit"
+            elif "Qwen2.5-3B" in display_name:
+                label = "Qwen 2.5 3B Instruct 4bit"
+            elif "KURE" in display_name:
+                label = "KURE-v1 (Korean Embedding)"
+            elif "jina-embeddings" in display_name:
+                label = "Jina Embeddings v3"
+            elif "multilingual-e5" in display_name:
+                label = "Multilingual E5 Large"
+            else:
+                # Use model name as label if not recognized
+                label = display_name.split("/")[-1]
+
+            model_info = {
+                "value": display_name,
+                "label": label,
+                "size": model["size"]
+            }
+
+            if is_embedding:
+                embedding_models.append(model_info)
+            else:
+                llm_models.append(model_info)
+
+        # Sort by name for consistent ordering
+        llm_models.sort(key=lambda x: x["label"])
+        embedding_models.sort(key=lambda x: x["label"])
+
+        logger.info(f"Found {len(llm_models)} LLM models and {len(embedding_models)} embedding models")
+        return {
+            "llm_models": llm_models,
+            "embedding_models": embedding_models
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to list models: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to list models: {str(e)}")
 
 
 @app.post("/api/change-llm")
@@ -1466,6 +1601,50 @@ async def change_llm(request: LLMChangeRequest):
     except Exception as e:
         # Security: Use sanitized error message (prevents information disclosure)
         safe_message = get_safe_error_message(e, "change model endpoint")
+        raise HTTPException(status_code=500, detail=safe_message)
+
+
+@app.post("/api/change-embedding")
+async def change_embedding(request: EmbeddingChangeRequest):
+    """
+    Change the Embedding model dynamically
+    Requires re-indexing all documents with new embeddings
+    """
+    global embedding_model, vector_db, EMBEDDING_MODEL
+
+    try:
+        logger.info(f"Changing Embedding model to: {request.embedding_model}")
+
+        # Update the EMBEDDING_MODEL variable
+        EMBEDDING_MODEL = request.embedding_model
+
+        # Reload embedding model
+        embedding_model = EmbeddingModel(
+            model_name=EMBEDDING_MODEL,
+            model_dir=MODEL_DIR
+        )
+
+        # Reinitialize vector DB with new embedding model
+        vector_db = VectorDB(
+            embedding_model=embedding_model,
+            redis_host=REDIS_HOST,
+            redis_port=REDIS_PORT
+        )
+
+        # Note: Existing embeddings in Redis are now incompatible
+        # User needs to reindex documents
+        logger.warning("Embedding model changed - existing document embeddings are now incompatible")
+        logger.info("Please use the reindex endpoint to update all document embeddings")
+
+        return {
+            "status": "success",
+            "embedding_model": EMBEDDING_MODEL,
+            "message": "Embedding model changed successfully",
+            "warning": "기존 문서들을 새로운 임베딩 모델로 재색인해야 합니다. '재색인' 버튼을 클릭하세요."
+        }
+    except Exception as e:
+        # Security: Use sanitized error message (prevents information disclosure)
+        safe_message = get_safe_error_message(e, "change embedding model endpoint")
         raise HTTPException(status_code=500, detail=safe_message)
 
 

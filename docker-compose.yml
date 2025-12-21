@@ -22,13 +22,15 @@ services:
       dockerfile: Dockerfile
     container_name: hwp_service
     ports:
-      - "8081:8081"
+      - "8081:8081"  # API port
+      - "8082:8082"  # Management/metrics port
     environment:
       - SPRING_PROFILES_ACTIVE=docker
-      - JAVA_OPTS=-Xmx512m -Xms256m
+      # JVM options are configured in Dockerfile ENTRYPOINT for optimal performance
+      # -Xms512m -Xmx2048m -XX:+UseG1GC -XX:MaxGCPauseMillis=200
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8081/api/hwp/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8081/api/document/health"]
       interval: 30s
       timeout: 3s
       retries: 3

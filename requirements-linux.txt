@@ -1,29 +1,25 @@
+# Requirements for Linux (NVIDIA GPU)
+# Install with: pip install -r requirements-linux.txt
+
 # Web Framework
 fastapi>=0.109.0
 uvicorn[standard]>=0.27.0
 python-multipart>=0.0.6
 aiofiles>=23.2.1
 
-# ML & AI - Core (All Platforms)
+# ML & AI - Core
 transformers>=4.45.0
 sentence-transformers>=3.2.0
 huggingface-hub>=0.26.0
 einops>=0.8.0
 
-# PyTorch - Platform Specific
-# For NVIDIA GPU (Linux): Install with CUDA support
+# PyTorch with CUDA support
+# Install separately with CUDA:
 # pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
-# For Mac (Apple Silicon): Install regular torch
-# pip install torch torchvision torchaudio
-# For CPU only: Install regular torch
-torch>=2.3.0
-
-# MLX - Apple Silicon Only (Optional)
-# Only install on Mac with Apple Silicon
-# pip install mlx>=0.20.0 mlx-lm>=0.19.0
-# Commented out for cross-platform compatibility:
-# mlx>=0.20.0
-# mlx-lm>=0.19.0
+# Or uncomment below for CPU-only version:
+# torch>=2.3.0
+# torchvision>=0.18.0
+# torchaudio>=2.3.0
 
 # Text Processing
 langchain>=0.3.7
@@ -40,9 +36,9 @@ pydantic-settings>=2.1.0
 numpy>=1.26.0
 tqdm>=4.66.0
 requests>=2.31.0
-
-# Logging
 loguru>=0.7.2
-
-# Optional: Accelerate for better model loading on GPU
 accelerate>=0.33.0
+
+# CUDA-specific optimizations
+# These will be used automatically if CUDA is available
+bitsandbytes>=0.41.0  # For 4-bit/8-bit quantization on GPU

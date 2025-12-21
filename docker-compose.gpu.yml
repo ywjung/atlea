@@ -1,3 +1,6 @@
+# Docker Compose for NVIDIA GPU deployment
+# Use with: docker-compose -f docker-compose.gpu.yml up -d
+
 services:
   # Nginx reverse proxy with SSL termination
   nginx:
@@ -19,6 +22,8 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+    networks:
+      - chatbot-network
 
   # Document Service (Java Spring Boot for multi-format document extraction)
   document-service:
@@ -28,12 +33,10 @@ services:
     image: chatbot-document-service:latest
     container_name: chatbot_document_service
     ports:
-      - "127.0.0.1:8081:8081"  # API port
-      - "127.0.0.1:8082:8082"  # Management/metrics port
+      - "127.0.0.1:8081:8081"
+      - "127.0.0.1:8082:8082"
     environment:
       - SPRING_PROFILES_ACTIVE=production
-      # JVM options configured in Dockerfile for optimal performance
-      # -Xms512m -Xmx2048m -XX:+UseG1GC -XX:MaxGCPauseMillis=200
     restart: unless-stopped
     deploy:
       resources:
@@ -49,18 +52,20 @@ services:
       timeout: 3s
       retries: 3
       start_period: 40s
+    networks:
+      - chatbot-network
 
-  # Application server (multiple replicas for load balancing)
+  # Application server with NVIDIA GPU support
   app:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.gpu
       args:
         APP_USER: appuser
         APP_UID: 1000
         APP_GID: 1000
-    image: chatbot-app:latest
-    container_name: chatbot_app_1
+    image: chatbot-app-gpu:latest
+    container_name: chatbot_app_gpu
     environment:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
@@ -68,7 +73,7 @@ services:
       - DOCUMENT_SERVICE_URL=http://document-service:8081
       - HWP_SERVICE_URL=http://document-service:8081
       - EMBEDDING_MODEL=${EMBEDDING_MODEL:-intfloat/multilingual-e5-large}
-      - LLM_MODEL=${LLM_MODEL:-mlx-community/Qwen3-30B-A3B-4bit}
+      - LLM_MODEL=${LLM_MODEL:-Qwen/Qwen2.5-7B-Instruct}
       - MODEL_DIR=/app/model
       - DATA_DIR=/app/data
       - CHUNK_SIZE=${CHUNK_SIZE:-512}
@@ -77,6 +82,7 @@ services:
       - PORT=8000
       - WORKERS=${WORKERS:-1}
       - LOG_LEVEL=${LOG_LEVEL:-info}
+      - CUDA_VISIBLE_DEVICES=0
     volumes:
       - app_data:/app/data
       - app_models:/app/model
@@ -90,17 +96,24 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '2'
-          memory: 4G
+          cpus: '4'
+          memory: 16G
         reservations:
-          cpus: '1'
-          memory: 2G
+          cpus: '2'
+          memory: 8G
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/status"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 60s
+      start_period: 120s  # Increased for model loading on GPU
+    networks:
+      - chatbot-network
+    runtime: nvidia  # NVIDIA Container Runtime
 
   # Redis with persistence and authentication
   redis:
@@ -137,6 +150,8 @@ services:
       interval: 10s
       timeout: 3s
       retries: 5
+    networks:
+      - chatbot-network
 
   # Redis monitoring (optional, for development/staging)
   redis-insight:
@@ -151,6 +166,28 @@ services:
     restart: unless-stopped
     profiles:
       - monitoring
+    networks:
+      - chatbot-network
+
+  # NVIDIA GPU monitoring (optional)
+  nvidia-exporter:
+    image: nvidia/dcgm-exporter:latest
+    container_name: chatbot_nvidia_exporter
+    ports:
+      - "127.0.0.1:9400:9400"
+    restart: unless-stopped
+    profiles:
+      - monitoring
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    runtime: nvidia
+    networks:
+      - chatbot-network
 
   # Prometheus for metrics collection (optional)
   prometheus:
@@ -168,6 +205,8 @@ services:
     restart: unless-stopped
     profiles:
       - monitoring
+    networks:
+      - chatbot-network
 
   # Grafana for visualization (optional)
   grafana:
@@ -187,6 +226,8 @@ services:
     restart: unless-stopped
     profiles:
       - monitoring
+    networks:
+      - chatbot-network
 
 volumes:
   # Application volumes
@@ -216,3 +257,7 @@ volumes:
     driver: local
   grafana_data:
     driver: local
+
+networks:
+  chatbot-network:
+    driver: bridge

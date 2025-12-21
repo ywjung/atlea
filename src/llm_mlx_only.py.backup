@@ -1,21 +1,16 @@
 """
-LLM Module - Multi-platform support (MLX for Mac, Transformers for NVIDIA/CPU)
+LLM Module - Qwen with MLX for Apple GPU
 """
 
 import re
 from typing import List, Dict, Optional, Generator
 from loguru import logger
+from mlx_lm import load, generate, stream_generate
 from .model_manager import ModelManager
-from .platform_utils import get_platform_detector
 
 
 class LLM:
-    """
-    Multi-platform LLM with automatic backend selection:
-    - MLX for Apple Silicon (optimized)
-    - Transformers + CUDA for NVIDIA GPU
-    - Transformers + CPU for other platforms
-    """
+    """Qwen LLM with Apple GPU acceleration via MLX"""
 
     def __init__(
         self,
@@ -25,10 +20,10 @@ class LLM:
         temperature: float = 0.7
     ):
         """
-        Initialize LLM with automatic platform detection
+        Initialize LLM
 
         Args:
-            model_name: Model name (MLX or HuggingFace format)
+            model_name: Model name (MLX-compatible)
             model_dir: Directory to store models
             max_tokens: Maximum tokens to generate
             temperature: Sampling temperature
@@ -39,78 +34,16 @@ class LLM:
         self.system_prompt = "당신은 문서 내용을 기반으로 질문에 답변하는 AI 어시스턴트입니다. 제공된 문서 내용을 바탕으로 정확하고 상세하게 답변해주세요. 이전 대화 내용을 참고하여 맥락에 맞는 답변을 제공하세요."
         self.model_manager = ModelManager(model_dir)
 
-        # Detect platform and select backend
-        self.platform = get_platform_detector()
-        self.backend = self.platform.get_llm_backend()
-
-        logger.info(f"Loading LLM: {model_name} (backend: {self.backend})")
-
+        logger.info(f"Loading LLM: {model_name}")
         try:
             # Download model if needed
             local_path = self.model_manager.download_if_needed(model_name)
 
-            if self.backend == "mlx":
-                self._load_mlx(local_path)
-            else:
-                self._load_transformers(local_path)
-
-            logger.success(f"LLM loaded successfully (backend: {self.backend})")
+            # Load model with MLX
+            self.model, self.tokenizer = load(local_path)
+            logger.success(f"LLM loaded successfully (using Apple GPU via MLX)")
         except Exception as e:
             logger.error(f"Failed to load LLM: {e}")
-            raise
-
-    def _load_mlx(self, local_path: str):
-        """Load model using MLX (Apple Silicon)"""
-        try:
-            from mlx_lm import load
-            self.model, self.tokenizer = load(local_path)
-            logger.info("Using MLX backend (Apple GPU acceleration)")
-        except ImportError as e:
-            logger.error("MLX not available. Install with: pip install mlx-lm")
-            raise
-
-    def _load_transformers(self, local_path: str):
-        """Load model using Transformers (NVIDIA/CPU)"""
-        try:
-            from transformers import AutoModelForCausalLM, AutoTokenizer
-            import torch
-
-            device = self.platform.get_device()
-            dtype = self.platform.get_model_dtype()
-
-            logger.info(f"Loading model on device: {device} with dtype: {dtype}")
-
-            # Load tokenizer
-            self.tokenizer = AutoTokenizer.from_pretrained(
-                local_path,
-                trust_remote_code=True
-            )
-
-            # Load model with appropriate settings
-            if device == "cuda":
-                # NVIDIA GPU: use float16 and device_map
-                self.model = AutoModelForCausalLM.from_pretrained(
-                    local_path,
-                    torch_dtype=dtype,
-                    device_map="auto",
-                    trust_remote_code=True
-                )
-                logger.info("Using CUDA backend (NVIDIA GPU acceleration)")
-            else:
-                # CPU or MPS
-                self.model = AutoModelForCausalLM.from_pretrained(
-                    local_path,
-                    torch_dtype=dtype,
-                    trust_remote_code=True
-                )
-                self.model = self.model.to(device)
-                logger.info(f"Using Transformers backend ({device})")
-
-            self.device = device
-            self.model.eval()  # Set to evaluation mode
-
-        except ImportError as e:
-            logger.error("Transformers not available. Install with: pip install transformers torch")
             raise
 
     def create_prompt(self, query: str, context: List[Dict], history: Optional[List[Dict]] = None, system_prompt: Optional[str] = None) -> str:
@@ -135,7 +68,7 @@ class LLM:
         # Use provided system prompt or fall back to instance default
         sys_prompt = system_prompt if system_prompt is not None else self.system_prompt
 
-        # Create messages using chat template
+        # Create prompt using Qwen's chat template
         messages = [
             {
                 "role": "system",
@@ -221,95 +154,70 @@ class LLM:
             # Create prompt with history and custom system prompt
             prompt = self.create_prompt(query, context, history, system_prompt=sys_prompt)
 
+            # Generate response
             logger.debug(f"Generating response for query: {query[:50]}...")
 
-            if self.backend == "mlx":
-                return self._generate_mlx(prompt, max_tok, temp, stream)
+            if stream:
+                # Stream generation
+                return self._stream_response(prompt, max_tokens=max_tok, temperature=temp)
             else:
-                return self._generate_transformers(prompt, max_tok, temp, stream)
+                # Non-streaming generation
+                response = generate(
+                    self.model,
+                    self.tokenizer,
+                    prompt=prompt,
+                    max_tokens=max_tok
+                )
 
+                # Clean response to remove <think> tags
+                cleaned_response = self._clean_response(response)
+                logger.success("Response generated successfully")
+                return cleaned_response
         except Exception as e:
             logger.error(f"Failed to generate response: {e}")
             raise
 
-    def _generate_mlx(self, prompt: str, max_tokens: int, temperature: float, stream: bool):
-        """Generate using MLX backend"""
-        from mlx_lm import generate, stream_generate
+    def _stream_response(self, prompt: str, max_tokens: int, temperature: float) -> Generator[str, None, None]:
+        """
+        Stream response generation with real-time display
 
-        if stream:
-            return self._stream_response_mlx(prompt, max_tokens, temperature)
-        else:
-            response = generate(
-                self.model,
-                self.tokenizer,
-                prompt=prompt,
-                max_tokens=max_tokens,
-                temp=temperature
-            )
-            cleaned_response = self._clean_response(response)
-            logger.success("Response generated successfully (MLX)")
-            return cleaned_response
+        Args:
+            prompt: Input prompt
+            max_tokens: Maximum tokens to generate
+            temperature: Sampling temperature
 
-    def _generate_transformers(self, prompt: str, max_tokens: int, temperature: float, stream: bool):
-        """Generate using Transformers backend"""
-        import torch
-
-        # Tokenize input
-        inputs = self.tokenizer(prompt, return_tensors="pt")
-        inputs = {k: v.to(self.device) for k, v in inputs.items()}
-
-        # Generation parameters
-        gen_kwargs = {
-            "max_new_tokens": max_tokens,
-            "temperature": temperature,
-            "do_sample": temperature > 0,
-            "pad_token_id": self.tokenizer.eos_token_id,
-        }
-
-        if stream:
-            return self._stream_response_transformers(inputs, gen_kwargs)
-        else:
-            with torch.no_grad():
-                outputs = self.model.generate(**inputs, **gen_kwargs)
-
-            # Decode response
-            response = self.tokenizer.decode(
-                outputs[0][inputs['input_ids'].shape[1]:],
-                skip_special_tokens=True
-            )
-            cleaned_response = self._clean_response(response)
-            logger.success("Response generated successfully (Transformers)")
-            return cleaned_response
-
-    def _stream_response_mlx(self, prompt: str, max_tokens: int, temperature: float) -> Generator[str, None, None]:
-        """Stream response using MLX backend"""
-        from mlx_lm import stream_generate
-
+        Yields:
+            Response chunks (individual tokens), with <think> tags filtered
+            Optimized for fastest initial response
+        """
         buffer = ""
         inside_think = False
+
+        # Potential tag prefixes to watch for
         tag_prefixes = ['<', '<t', '<th', '<thi', '<thin', '<think', '</', '</t', '</th', '</thi', '</thin', '</think']
 
         for response in stream_generate(
             self.model,
             self.tokenizer,
             prompt=prompt,
-            max_tokens=max_tokens,
-            temp=temperature
+            max_tokens=max_tokens
         ):
             if hasattr(response, 'text') and response.text:
                 token = response.text
                 buffer += token
 
+                # Limit buffer size
                 if len(buffer) > 100:
                     buffer = buffer[-100:]
 
-                # Handle think tags
+                # Check for complete opening tag
                 if '<think>' in buffer and not inside_think:
                     inside_think = True
                     think_pos = buffer.find('<think>')
                     buffer = buffer[think_pos + 7:]
                     continue
 
+                # Check for complete closing tag
                 if inside_think and '</think>' in buffer:
                     inside_think = False
                     think_end_pos = buffer.find('</think>')
@@ -319,10 +227,12 @@ class LLM:
                         buffer = ""
                     continue
 
+                # Skip content inside thinking blocks
                 if inside_think:
                     continue
 
-                # Stream aggressively
+                # Outside thinking - aggressive streaming
+                # Only hold back if buffer ends with potential tag prefix
                 should_hold = False
                 for prefix in tag_prefixes:
                     if buffer.endswith(prefix):
@@ -330,91 +240,22 @@ class LLM:
                         break
 
                 if not should_hold and len(buffer) > 0:
+                    # Yield everything - no tag is forming
                     yield buffer
                     buffer = ""
                 elif should_hold and len(buffer) > 8:
+                    # Tag might be forming, but buffer is large
+                    # Yield everything except the potential tag prefix
                     to_yield = buffer[:-8]
                     buffer = buffer[-8:]
                     if to_yield:
                         yield to_yield
 
+        # Yield remaining buffer
         if buffer and not inside_think:
             yield buffer
 
-        logger.success("Streaming response completed (MLX)")
-
-    def _stream_response_transformers(self, inputs: dict, gen_kwargs: dict) -> Generator[str, None, None]:
-        """Stream response using Transformers backend"""
-        import torch
-        from transformers import TextIteratorStreamer
-        from threading import Thread
-
-        # Create streamer
-        streamer = TextIteratorStreamer(
-            self.tokenizer,
-            skip_prompt=True,
-            skip_special_tokens=True
-        )
-
-        # Update generation kwargs with streamer
-        gen_kwargs["streamer"] = streamer
-
-        # Start generation in a separate thread
-        generation_kwargs = {**inputs, **gen_kwargs}
-        thread = Thread(target=self.model.generate, kwargs=generation_kwargs)
-        thread.start()
-
-        # Stream tokens with think tag filtering
-        buffer = ""
-        inside_think = False
-        tag_prefixes = ['<', '<t', '<th', '<thi', '<thin', '<think', '</', '</t', '</th', '</thi', '</thin', '</think']
-
-        for token in streamer:
-            buffer += token
-
-            if len(buffer) > 100:
-                buffer = buffer[-100:]
-
-            # Handle think tags
-            if '<think>' in buffer and not inside_think:
-                inside_think = True
-                think_pos = buffer.find('<think>')
-                buffer = buffer[think_pos + 7:]
-                continue
-
-            if inside_think and '</think>' in buffer:
-                inside_think = False
-                think_end_pos = buffer.find('</think>')
-                buffer = buffer[think_end_pos + 8:]
-                if buffer:
-                    yield buffer
-                    buffer = ""
-                continue
-
-            if inside_think:
-                continue
-
-            # Stream aggressively
-            should_hold = False
-            for prefix in tag_prefixes:
-                if buffer.endswith(prefix):
-                    should_hold = True
-                    break
-
-            if not should_hold and len(buffer) > 0:
-                yield buffer
-                buffer = ""
-            elif should_hold and len(buffer) > 8:
-                to_yield = buffer[:-8]
-                buffer = buffer[-8:]
-                if to_yield:
-                    yield to_yield
-
-        if buffer and not inside_think:
-            yield buffer
-
-        thread.join()
-        logger.success("Streaming response completed (Transformers)")
+        logger.success("Streaming response completed")
 
     def __call__(self, query: str, context: List[Dict]) -> str:
         """Shorthand for generate_response"""
@@ -475,7 +316,14 @@ class RAGSystem:
             # Build filter expression for document filtering
             filter_expr = None
             if document_ids:
+                # Create OR condition for multiple documents
+                # Escape special characters for Redis Search TAG fields
                 def escape_redis_tag(value):
+                    # For TAG fields, escape: , . < > { } [ ] " ' : ; ! @ # $ % ^ & * ( ) - + = ~ `
+                    # Replace problematic characters with escaped versions
+                    import re
+                    # For TAG fields in Redis, we need to match exactly
+                    # Use double quotes and escape internal quotes
                     escaped = value.replace("\\", "\\\\").replace('"', '\\"')
                     return f'"{escaped}"'
 
@@ -502,6 +350,7 @@ class RAGSystem:
             sources = list(set([doc['filename'] for doc in context_docs]))
 
             if stream:
+                # Return streaming generator
                 logger.info("Generating streaming answer")
                 return {
                     "answer": self.llm.generate_response(
@@ -517,6 +366,7 @@ class RAGSystem:
                     "sources": sources
                 }
             else:
+                # Generate complete answer
                 logger.info("Generating answer")
                 answer = self.llm.generate_response(
                     question,

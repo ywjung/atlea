@@ -11,19 +11,19 @@ import org.springframework.context.annotation.Configuration;
 import java.util.List;
 
 /**
- * OpenAPI (Swagger) configuration for HWP service API documentation
+ * OpenAPI (Swagger) configuration for Document Extraction service API documentation
  */
 @Configuration
 public class OpenApiConfig {
 
     @Bean
-    public OpenAPI hwpServiceOpenAPI() {
+    public OpenAPI documentServiceOpenAPI() {
         Server localServer = new Server();
         localServer.setUrl("http://localhost:8081");
         localServer.setDescription("Local Development Server");
 
         Contact contact = new Contact();
-        contact.setName("HWP Service Team");
+        contact.setName("Document Service Team");
         contact.setEmail("support@example.com");
 
         License license = new License()
@@ -31,10 +31,11 @@ public class OpenApiConfig {
                 .url("https://opensource.org/licenses/MIT");
 
         Info info = new Info()
-                .title("HWP Text Extraction Service API")
-                .version("1.0.0")
-                .description("REST API for extracting text content from Korean HWP (Hangul Word Processor) files. " +
-                        "This service processes HWP files and returns extracted text for RAG chatbot indexing.")
+                .title("Document Extraction Service API")
+                .version("2.0.0")
+                .description("REST API for extracting text content from various document formats. " +
+                        "Supports PDF, HWP, HWPX, DOC, DOCX, XLS, XLSX, PPT, PPTX files. " +
+                        "This service processes documents and returns extracted text for RAG chatbot indexing.")
                 .contact(contact)
                 .license(license);
 

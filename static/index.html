@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PDF/HWP RAG 챗봇</title>
+    <title>문서 RAG 챗봇</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <!-- Early theme initialization to prevent flash -->
     <script>
@@ -34,7 +34,7 @@
     <div class="container">
         <!-- Header -->
         <header class="header">
-            <h1>📚 PDF/HWP RAG 챗봇</h1>
+            <h1>📚 문서 RAG 챗봇</h1>
             <div class="status-bar">
                 <span id="status" class="status">연결 중...</span>
                 <span id="doc-count" class="doc-count"></span>
@@ -77,7 +77,7 @@
             <div class="chat-container" id="chatContainer">
                 <div class="welcome-message">
                     <h2>안녕하세요! 👋</h2>
-                    <p>PDF 및 HWP 문서 내용에 대해 무엇이든 질문해주세요.</p>
+                    <p>업로드된 문서 내용에 대해 무엇이든 질문해주세요.</p>
                     <p class="hint">문서가 로딩되면 질문을 시작할 수 있습니다.</p>
                 </div>
 
@@ -183,14 +183,14 @@
             <!-- Upload Section -->
             <div class="upload-section">
                 <h3>새 문서 업로드</h3>
-                <div class="upload-area" id="uploadArea" title="PDF 또는 HWP 파일을 드래그하거나 클릭하여 업로드하세요">
-                    <input type="file" id="fileInput" accept=".pdf,.hwp" style="display: none;">
+                <div class="upload-area" id="uploadArea" title="지원되는 문서 파일을 드래그하거나 클릭하여 업로드하세요">
+                    <input type="file" id="fileInput" accept=".pdf,.hwp,.hwpx,.doc,.docx,.xls,.xlsx,.ppt,.pptx" style="display: none;">
                     <div class="upload-placeholder">
                         <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor">
                             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                         </svg>
-                        <p>클릭하거나 PDF/HWP 파일을 드래그하세요</p>
-                        <p class="hint-text">파일이 자동으로 색인됩니다 (PDF, HWP 지원)</p>
+                        <p>클릭하거나 문서 파일을 드래그하세요</p>
+                        <p class="hint-text">파일이 자동으로 색인됩니다 (PDF, HWP, HWPX, DOC, DOCX, XLS, XLSX, PPT, PPTX 지원)</p>
                     </div>
                 </div>
                 <div id="uploadStatus" class="upload-status"></div>
@@ -266,12 +266,19 @@
                         <span class="setting-label">LLM 모델</span>
                     </label>
                     <select id="llmSelect" class="llm-select">
-                        <option value="mlx-community/rnj-1-instruct-4bit">RNJ-1 Instruct 4bit (기본)</option>
-                        <option value="mlx-community/Qwen2.5-3B-Instruct-4bit">Qwen 2.5 3B Instruct 4bit</option>
-                        <option value="mlx-community/Qwen3-30B-A3B-4bit">Qwen 3 30B A3B 4bit</option>
-                        <option value="mlx-community/Meta-Llama-3.1-8B-Instruct-4bit">Llama 3.1 8B Instruct 4bit</option>
+                        <option value="">로딩 중...</option>
                     </select>
                     <p class="setting-hint">사용할 언어 모델 선택 (변경 후 재시작 필요)</p>
+                </div>
+
+                <div class="setting-item">
+                    <label for="embeddingSelect">
+                        <span class="setting-label">Embedding 모델</span>
+                    </label>
+                    <select id="embeddingSelect" class="embedding-select">
+                        <option value="">로딩 중...</option>
+                    </select>
+                    <p class="setting-hint">문서 임베딩에 사용할 모델 (변경 시 재색인 필요)</p>
                 </div>
             </div>
 
@@ -376,9 +383,9 @@
                 <!-- Getting Started -->
                 <section class="help-section">
                     <h3>🚀 시작하기</h3>
-                    <p>이 챗봇은 업로드된 PDF 및 HWP 문서의 내용을 기반으로 질문에 답변합니다.</p>
+                    <p>이 챗봇은 업로드된 문서의 내용을 기반으로 질문에 답변합니다.</p>
                     <ul>
-                        <li><strong>지원 형식:</strong> PDF, HWP (한글 문서) 파일</li>
+                        <li><strong>지원 형식:</strong> PDF, HWP, HWPX, DOC, DOCX, XLS, XLSX, PPT, PPTX</li>
                         <li>문서가 로딩되면 하단 입력창에 질문을 입력하세요</li>
                         <li>Enter를 누르거나 전송 버튼을 클릭하여 질문을 보냅니다</li>
                         <li>AI가 문서 내용을 분석하여 답변을 생성합니다</li>
@@ -426,13 +433,13 @@
                 <!-- Document Management -->
                 <section class="help-section">
                     <h3>📁 문서 관리</h3>
-                    <p>헤더의 "문서 관리" 버튼으로 PDF 및 HWP 파일을 업로드하고 관리할 수 있습니다.</p>
+                    <p>헤더의 "문서 관리" 버튼으로 다양한 형식의 문서를 업로드하고 관리할 수 있습니다.</p>
                     <ul>
                         <li><strong>모달 열기:</strong> 헤더의 "문서 관리" 버튼 클릭</li>
-                        <li><strong>문서 업로드:</strong> PDF 또는 HWP 파일을 드래그 앤 드롭 또는 클릭하여 파일 선택</li>
-                        <li><strong>HWP 지원:</strong> 한글(HWP) 문서 자동 텍스트 추출 및 색인 (hwplib 기반)</li>
+                        <li><strong>문서 업로드:</strong> 지원되는 문서 파일을 드래그 앤 드롭 또는 클릭하여 파일 선택</li>
+                        <li><strong>다양한 형식:</strong> PDF, HWP, HWPX, Word(DOC/DOCX), Excel(XLS/XLSX), PowerPoint(PPT/PPTX) 모두 지원</li>
                         <li><strong>업로드 진행:</strong> 파일 업로드 및 처리 진행 상황 표시</li>
-                        <li><strong>문서 목록:</strong> 업로드된 모든 문서 확인 (PDF, HWP)</li>
+                        <li><strong>문서 목록:</strong> 업로드된 모든 문서 확인</li>
                         <li><strong>문서 삭제:</strong> 각 문서의 삭제 버튼으로 문서 제거</li>
                         <li><strong>목록 새로고침:</strong> 새로고침 버튼으로 문서 목록 갱신</li>
                         <li><strong>최대 파일 크기:</strong> 50MB까지 업로드 가능</li>
@@ -505,17 +512,18 @@
                 <!-- API Documentation -->
                 <section class="help-section">
                     <h3>🔌 API 문서 (개발자용)</h3>
-                    <p>HWP 텍스트 추출 API의 상세한 문서를 Swagger UI로 제공합니다.</p>
+                    <p>다양한 문서 형식의 텍스트 추출 API 문서를 Swagger UI로 제공합니다.</p>
                     <ul>
                         <li><strong>Swagger UI:</strong> <a href="http://localhost:8081/swagger-ui.html" target="_blank">http://localhost:8081/swagger-ui.html</a></li>
                         <li><strong>OpenAPI JSON:</strong> <a href="http://localhost:8081/api-docs" target="_blank">http://localhost:8081/api-docs</a></li>
-                        <li><strong>엔드포인트:</strong>
+                        <li><strong>주요 엔드포인트:</strong>
                             <ul>
-                                <li><code>POST /api/hwp/extract</code> - HWP 파일 업로드하여 텍스트 추출</li>
-                                <li><code>POST /api/hwp/extract/base64</code> - Base64로 인코딩된 HWP 파일 처리</li>
-                                <li><code>GET /api/hwp/health</code> - 서비스 상태 확인</li>
+                                <li><code>POST /api/document/extract</code> - 모든 지원 형식의 문서 텍스트 추출</li>
+                                <li><code>POST /api/document/extract/base64</code> - Base64로 인코딩된 문서 처리</li>
+                                <li><code>GET /api/document/health</code> - 서비스 상태 확인</li>
                             </ul>
                         </li>
+                        <li><strong>지원 형식:</strong> PDF, HWP, HWPX, DOC, DOCX, XLS, XLSX, PPT, PPTX</li>
                         <li><strong>테스트:</strong> Swagger UI에서 직접 API를 테스트할 수 있습니다</li>
                         <li><strong>응답 형식:</strong> JSON 형식으로 추출된 텍스트 및 메타데이터 제공</li>
                     </ul>

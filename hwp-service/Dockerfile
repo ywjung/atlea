@@ -35,7 +35,17 @@ EXPOSE 8081
 
 # Health check using curl
 HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
-    CMD curl -f http://localhost:8081/api/hwp/health || exit 1
+    CMD curl -f http://localhost:8081/api/document/health || exit 1
 
-# Run application
-ENTRYPOINT ["java", "-jar", "app.jar"]
+# Run application with optimized JVM settings
+ENTRYPOINT ["java", \
+    "-Xms512m", \
+    "-Xmx2048m", \
+    "-XX:+UseG1GC", \
+    "-XX:MaxGCPauseMillis=200", \
+    "-XX:+UseStringDeduplication", \
+    "-XX:+OptimizeStringConcat", \
+    "-Djava.awt.headless=true", \
+    "-Dfile.encoding=UTF-8", \
+    "-Djava.security.egd=file:/dev/./urandom", \
+    "-jar", "app.jar"]

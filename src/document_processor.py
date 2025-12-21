@@ -1,5 +1,6 @@
 """
-Document Processor - Extract and chunk documents (PDF, HWP)
+Document Processor - Extract and chunk documents
+Supports: PDF, HWP, HWPX, DOC, DOCX, XLS, XLSX, PPT, PPTX
 """
 
 import os
@@ -11,23 +12,22 @@ from loguru import logger
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 import olefile
 
+from .document_service import DocumentService
 from .hwp_processor import HWPProcessor
-from .pdf_service import PDFService
 
 
 class DocumentProcessor:
-    """Process documents (PDF, HWP) and create chunks"""
+    """Process documents and create chunks - supports multiple formats via Java Document Service"""
 
     def __init__(self, chunk_size: int = 512, chunk_overlap: int = 50,
-                 hwp_service_url: str = None, pdf_service_url: str = None):
+                 document_service_url: str = None):
         """
         Initialize document processor
 
         Args:
             chunk_size: Size of text chunks
             chunk_overlap: Overlap between chunks
-            hwp_service_url: URL of Java HWP service (optional)
-            pdf_service_url: URL of Java PDF service (optional)
+            document_service_url: URL of Java document service (default: http://localhost:8081)
         """
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
@@ -38,62 +38,78 @@ class DocumentProcessor:
             separators=["\n\n", "\n", ". ", " ", ""]
         )
 
-        # Initialize HWP processor with Java service
-        self.hwp_processor = HWPProcessor(hwp_service_url)
-        self.use_java_hwp = False  # Default to Python fallback
+        # Initialize unified document service
+        self.document_service = DocumentService(document_service_url)
+        self.use_java_service = False
 
-        # Check if Java HWP service is available
-        if self.hwp_processor.check_service_health():
-            self.use_java_hwp = True
-            logger.success("Java HWP service is available - using Java-based extraction")
+        # Check if Java document service is available
+        if self.document_service.check_service_health():
+            self.use_java_service = True
+            logger.success("✅ Java Document Service available - supports PDF, HWP, HWPX, DOC, DOCX, XLS, XLSX, PPT, PPTX")
         else:
-            logger.warning("Java HWP service not available - falling back to Python extraction")
+            logger.warning("⚠️ Java Document Service not available - falling back to Python extraction (HWP only)")
 
-        # Initialize PDF service with Java service
-        self.pdf_service = PDFService(pdf_service_url)
-        self.use_java_pdf = False  # Default to Python fallback
-
-        # Check if Java PDF service is available
-        if self.pdf_service.check_service_health():
-            self.use_java_pdf = True
-            logger.success("Java PDF service is available - using Java-based extraction")
-        else:
-            logger.warning("Java PDF service not available - Python extraction not available")
+        # Keep HWP fallback processor for legacy support
+        self.hwp_processor = HWPProcessor(document_service_url)
 
         logger.info(f"Document Processor initialized (chunk_size={chunk_size}, overlap={chunk_overlap})")
 
-    def extract_text_from_pdf(self, pdf_path: str) -> str:
+    def extract_text_from_document(self, doc_path: str) -> str:
         """
-        Extract text from PDF file using Java PDF service
+        Extract text from document file using Java Document Service
+        Supports: PDF, HWP, HWPX, DOC, DOCX, XLS, XLSX, PPT, PPTX
 
         Args:
-            pdf_path: Path to PDF file
+            doc_path: Path to document file
 
         Returns:
             Extracted text
         """
-        # Use Java-based extraction
-        if self.use_java_pdf:
+        filename = Path(doc_path).name
+        file_ext = Path(doc_path).suffix.lower()
+
+        # Use Java Document Service for all supported formats
+        if self.use_java_service:
             try:
-                logger.info(f"Using Java PDF service for {Path(pdf_path).name}")
-                result = self.pdf_service.extract_text_from_file(pdf_path)
+                logger.info(f"📄 Extracting text from {filename}")
+                result = self.document_service.extract_text_from_file(doc_path)
+
                 if result and result.get('text'):
                     text = result['text']
-                    logger.success(f"Java extraction successful: {len(text)} characters")
+                    file_type = result.get('fileType', file_ext[1:].upper())
+                    processing_time = result.get('processingTimeMs', 0)
+
+                    logger.success(
+                        f"✅ Extraction successful: {len(text)} chars, "
+                        f"type={file_type}, time={processing_time}ms"
+                    )
                     return text
                 else:
-                    logger.error("Java extraction returned no text")
-                    raise RuntimeError(f"Failed to extract text from PDF: {pdf_path}")
+                    logger.error("❌ Document service returned no text")
+                    raise RuntimeError(f"Failed to extract text from {filename}")
             except Exception as e:
-                logger.error(f"Java extraction failed: {e}")
-                raise
-        else:
-            raise RuntimeError("PDF extraction not available - Java PDF service is not running")
+                logger.error(f"❌ Document service extraction failed: {e}")
 
-    def extract_text_from_hwp(self, hwp_path: str) -> str:
+                # Fallback to Python HWP extraction for .hwp files only
+                if file_ext == '.hwp':
+                    logger.info("🔄 Attempting Python fallback for HWP file")
+                    return self._extract_hwp_fallback(doc_path)
+                else:
+                    raise
+        else:
+            # Java service not available - only HWP fallback possible
+            if file_ext == '.hwp':
+                logger.info(f"📄 Using Python fallback extraction for {filename}")
+                return self._extract_hwp_fallback(doc_path)
+            else:
+                raise RuntimeError(
+                    f"Document extraction not available for {file_ext} files - "
+                    "Java Document Service is not running"
+                )
+
+    def _extract_hwp_fallback(self, hwp_path: str) -> str:
         """
-        Extract text from HWP file (한글 문서)
-        Uses Java HWP service if available, falls back to Python extraction
+        Python fallback for HWP extraction using HWPProcessor
 
         Args:
             hwp_path: Path to HWP file
@@ -101,21 +117,33 @@ class DocumentProcessor:
         Returns:
             Extracted text
         """
-        # Try Java-based extraction first (more reliable)
-        if self.use_java_hwp:
-            try:
-                logger.info(f"Using Java HWP service for {Path(hwp_path).name}")
-                text = self.hwp_processor.extract_text_from_file(hwp_path)
-                if text:
-                    logger.success(f"Java extraction successful: {len(text)} characters")
-                    return text
-                else:
-                    logger.warning("Java extraction returned no text, falling back to Python")
-            except Exception as e:
-                logger.warning(f"Java extraction failed, falling back to Python: {e}")
+        try:
+            logger.info("🔄 Using Python HWP fallback extraction")
 
-        # Fallback to Python-based extraction
-        logger.info(f"Using Python fallback extraction for {Path(hwp_path).name}")
+            # Try HWPProcessor first (calls Java service /api/hwp/extract)
+            text = self.hwp_processor.extract_text_from_file(hwp_path)
+            if text:
+                logger.success(f"✅ HWP fallback successful: {len(text)} chars")
+                return text
+
+            # If HWPProcessor fails, try direct Python extraction
+            logger.warning("HWPProcessor failed, attempting direct Python extraction")
+            return self._extract_hwp_direct(hwp_path)
+
+        except Exception as e:
+            logger.error(f"❌ HWP fallback failed: {e}")
+            raise
+
+    def _extract_hwp_direct(self, hwp_path: str) -> str:
+        """
+        Direct Python HWP extraction (last resort)
+
+        Args:
+            hwp_path: Path to HWP file
+
+        Returns:
+            Extracted text
+        """
         try:
             if not olefile.isOleFile(hwp_path):
                 raise ValueError(f"{hwp_path} is not a valid HWP file")
@@ -258,30 +286,30 @@ class DocumentProcessor:
     def process_document(self, doc_path: str) -> List[Dict]:
         """
         Process document file: extract text and create chunks
+        Supports: PDF, HWP, HWPX, DOC, DOCX, XLS, XLSX, PPT, PPTX
 
         Args:
-            doc_path: Path to document file (PDF or HWP)
+            doc_path: Path to document file
 
         Returns:
             List of chunk dictionaries with metadata
         """
         try:
+            file_name = Path(doc_path).name
             file_ext = Path(doc_path).suffix.lower()
 
-            # 파일 형식에 따라 텍스트 추출
-            if file_ext == '.pdf':
-                text = self.extract_text_from_pdf(doc_path)
-            elif file_ext == '.hwp':
-                text = self.extract_text_from_hwp(doc_path)
-            else:
+            # Check if format is supported
+            if not self.document_service.is_supported_format(file_name):
                 raise ValueError(f"Unsupported file format: {file_ext}")
+
+            # Extract text from document
+            text = self.extract_text_from_document(doc_path)
 
             if not text.strip():
                 logger.warning(f"No text extracted from {doc_path}")
                 return []
 
             # Create metadata
-            file_name = Path(doc_path).name
             metadata = {
                 "source": doc_path,
                 "filename": file_name,
@@ -290,25 +318,33 @@ class DocumentProcessor:
 
             # Create chunks
             chunks = self.create_chunks(text, metadata)
-            logger.success(f"Processed {file_name}: {len(chunks)} chunks")
+            logger.success(f"✅ Processed {file_name}: {len(chunks)} chunks")
             return chunks
         except Exception as e:
-            logger.error(f"Failed to process document {doc_path}: {e}")
+            logger.error(f"❌ Failed to process document {doc_path}: {e}")
             raise
 
     def process_directory(self, directory_path: str, patterns: List[str] = None) -> List[Dict]:
         """
         Process all document files in directory
+        Supports: PDF, HWP, HWPX, DOC, DOCX, XLS, XLSX, PPT, PPTX
 
         Args:
             directory_path: Path to directory
-            patterns: File patterns to match (default: ["*.pdf", "*.hwp"])
+            patterns: File patterns to match (default: all supported formats)
 
         Returns:
             List of all chunks from all documents
         """
         if patterns is None:
-            patterns = ["*.pdf", "*.hwp"]
+            # Default: all supported formats
+            patterns = [
+                "*.pdf",
+                "*.hwp", "*.hwpx",
+                "*.doc", "*.docx",
+                "*.xls", "*.xlsx",
+                "*.ppt", "*.pptx"
+            ]
 
         directory = Path(directory_path)
         if not directory.exists():
@@ -323,7 +359,7 @@ class DocumentProcessor:
             logger.warning(f"No document files found in {directory_path}")
             return []
 
-        logger.info(f"Found {len(all_files)} document files")
+        logger.info(f"📚 Found {len(all_files)} document files")
         all_chunks = []
 
         for doc_file in all_files:
@@ -331,10 +367,10 @@ class DocumentProcessor:
                 chunks = self.process_document(str(doc_file))
                 all_chunks.extend(chunks)
             except Exception as e:
-                logger.error(f"Skipping {doc_file.name}: {e}")
+                logger.error(f"⚠️ Skipping {doc_file.name}: {e}")
                 continue
 
-        logger.success(f"Processed {len(all_files)} documents -> {len(all_chunks)} total chunks")
+        logger.success(f"✅ Processed {len(all_files)} documents → {len(all_chunks)} total chunks")
         return all_chunks
 
 
