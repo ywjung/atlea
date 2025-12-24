@@ -2863,7 +2863,8 @@ function initDocumentFilter() {
  */
 async function loadSuggestedQuestions() {
     try {
-        const response = await fetch('/api/suggested-questions');
+        // Add cache-busting parameter to get fresh questions
+        const response = await fetch(`/api/suggested-questions?t=${Date.now()}`);
         if (!response.ok) {
             devWarn('Failed to load suggested questions');
             return;
