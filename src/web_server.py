@@ -1828,17 +1828,57 @@ async def get_suggested_questions():
 
         # Use pre-generated question pool for fast response
         if not suggested_questions_pool:
-            # Fallback if pool is empty
+            # Fallback if pool is empty - use diverse question pool
             logger.warning("Question pool is empty, using fallback questions")
-            return {
-                "questions": [
-                    "이 문서의 주요 내용은 무엇인가요?",
-                    "문서에서 가장 중요한 핵심 개념은 무엇인가요?",
-                    "이 문서를 간단히 요약해주세요.",
-                    "문서에서 다루는 핵심 주제는 무엇인가요?",
-                    "이 문서에서 얻을 수 있는 주요 정보는 무엇인가요?"
-                ]
-            }
+
+            # Diverse fallback question pool (30 questions covering various aspects)
+            fallback_pool = [
+                # General content questions
+                "이 문서의 주요 내용은 무엇인가요?",
+                "문서에서 가장 중요한 핵심 개념은 무엇인가요?",
+                "이 문서를 간단히 요약해주세요.",
+                "문서에서 다루는 핵심 주제는 무엇인가요?",
+                "이 문서에서 얻을 수 있는 주요 정보는 무엇인가요?",
+
+                # Detailed analysis questions
+                "문서에서 설명하는 주요 개념을 자세히 설명해주세요.",
+                "이 문서의 목적은 무엇인가요?",
+                "문서에 나오는 중요한 용어들을 설명해주세요.",
+                "이 문서가 다루는 범위는 어디까지인가요?",
+                "문서에서 강조하는 핵심 메시지는 무엇인가요?",
+
+                # Practical application questions
+                "이 문서의 내용을 실제로 어떻게 활용할 수 있나요?",
+                "문서에 나온 내용을 적용하려면 어떻게 해야 하나요?",
+                "이 문서가 제시하는 해결책은 무엇인가요?",
+                "문서에서 권장하는 방법은 무엇인가요?",
+                "실무에 적용 가능한 내용이 있나요?",
+
+                # Comparison and analysis questions
+                "문서에서 비교하는 내용이 있나요?",
+                "이 문서의 장단점은 무엇인가요?",
+                "문서에서 언급된 사례나 예시를 알려주세요.",
+                "문서의 내용과 관련된 배경 정보는 무엇인가요?",
+                "이 문서와 관련된 다른 정보를 알려주세요.",
+
+                # Specific details questions
+                "문서에 나온 구체적인 수치나 데이터는 무엇인가요?",
+                "문서에서 다루는 세부 항목들을 나열해주세요.",
+                "이 문서에 포함된 주요 섹션은 무엇인가요?",
+                "문서에서 제시하는 단계나 절차가 있나요?",
+                "문서에 명시된 기준이나 요구사항은 무엇인가요?",
+
+                # Context and implications questions
+                "이 문서를 읽어야 하는 대상은 누구인가요?",
+                "문서의 내용이 시사하는 바는 무엇인가요?",
+                "이 문서와 관련하여 주의해야 할 점은 무엇인가요?",
+                "문서에서 다루지 않은 내용은 무엇인가요?",
+                "이 문서의 핵심을 한 문장으로 표현하면?"
+            ]
+
+            # Randomly select 5 questions from the pool
+            selected_questions = random.sample(fallback_pool, 5)
+            return {"questions": selected_questions}
 
         # Sample 50 random questions from the pool for better autocomplete coverage
         num_questions = min(50, len(suggested_questions_pool))
