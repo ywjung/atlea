@@ -84,7 +84,8 @@ class FollowUpQuestions {
         questions.forEach((question, index) => {
             const questionItem = document.createElement('button');
             questionItem.className = 'follow-up-question-item';
-            questionItem.textContent = question;
+            // Parse markdown in follow-up questions
+            questionItem.innerHTML = marked.parseInline(question);
             questionItem.title = '클릭하여 질문하기';
 
             // Add click handler

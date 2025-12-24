@@ -2,13 +2,14 @@
 Vector Database - Redis Vector Search
 """
 
+import hashlib
 import json
 import numpy as np
 from typing import List, Dict, Optional
 from loguru import logger
 import redis
 from redis import ConnectionPool
-from redis.commands.search.field import TextField, VectorField, NumericField
+from redis.commands.search.field import TextField, VectorField, NumericField, TagField
 from redis.commands.search.indexDefinition import IndexDefinition, IndexType
 from redis.commands.search.query import Query
 
@@ -36,13 +37,44 @@ class VectorDB:
         escaped = value.replace('\\', '\\\\').replace('"', '\\"')
         return escaped
 
+    @staticmethod
+    def escape_tag_value(value: str) -> str:
+        """
+        Escape Redis search query values for TagField
+
+        TagField special characters that need escaping: , . < > { } [ ] " ' : ; ! @ # $ % ^ & * ( ) - + = ~
+
+        Args:
+            value: String value to escape
+
+        Returns:
+            Escaped string safe for TagField queries
+        """
+        # Escape special characters for TagField
+        special_chars = r',.<>{}[]"\':;!@#$%^&*()-+=~ '
+
+        # Build escaped string character by character to avoid double-escaping
+        escaped = ''
+        for char in value:
+            if char in special_chars:
+                escaped += '\\' + char
+            else:
+                escaped += char
+
+        return escaped
+
     def __init__(
         self,
         host: str = "localhost",
         port: int = 6379,
         db: int = 0,
         index_name: str = "pdf_index",
-        embedding_dim: int = 1024
+        embedding_dim: int = 1024,
+        max_connections: int = 50,
+        socket_timeout: int = 5,
+        socket_keepalive: bool = True,
+        socket_keepalive_options: Optional[dict] = None,
+        health_check_interval: int = 30
     ):
         """
         Initialize Redis Vector Database
@@ -53,45 +85,56 @@ class VectorDB:
             db: Redis database number
             index_name: Name for search index
             embedding_dim: Dimension of embeddings
+            max_connections: Maximum number of connections in pool
+            socket_timeout: Socket timeout in seconds
+            socket_keepalive: Enable TCP keepalive
+            socket_keepalive_options: TCP keepalive options dict
+            health_check_interval: Connection health check interval in seconds
         """
         self.index_name = index_name
         self.embedding_dim = embedding_dim
 
         try:
-            # Create connection pool for better concurrent performance
+            # Create simple connection pool (disable health_check for faster startup)
             pool = ConnectionPool(
                 host=host,
                 port=port,
                 db=db,
-                max_connections=20,  # Allow up to 20 concurrent connections
+                max_connections=max_connections,
                 decode_responses=False,
-                socket_keepalive=True,
-                socket_connect_timeout=5,
-                retry_on_timeout=True
+                socket_connect_timeout=socket_timeout,
+                socket_timeout=socket_timeout,
+                retry_on_timeout=True,
+                health_check_interval=0  # Disable health check to avoid blocking
             )
             self.client = redis.Redis(connection_pool=pool)
-            self.client.ping()
-            logger.success(f"Connected to Redis at {host}:{port} (pool size: 20)")
+            logger.success(f"Connected to Redis at {host}:{port} (pool: {max_connections} connections, timeout: {socket_timeout}s)")
         except Exception as e:
             logger.error(f"Failed to connect to Redis: {e}")
             raise
 
+        # Create or verify index (needed when schema changes)
         self._create_index()
 
     def _create_index(self):
         """Create or recreate search index"""
         try:
-            # Try to get index info
+            # Try to get index info with timeout
+            logger.info(f"Checking if index '{self.index_name}' exists...")
             self.client.ft(self.index_name).info()
             logger.info(f"Index '{self.index_name}' already exists")
-        except:
+        except Exception as e:
+            logger.warning(f"Index check failed or doesn't exist: {e}")
             # Create new index
             logger.info(f"Creating new index '{self.index_name}'")
             schema = (
                 TextField("text"),
-                TextField("filename", sortable=True),  # Use TextField with tokenization
+                TextField("filename", sortable=True),  # Use TextField with tokenization for full-text search
+                TagField("filename_exact", separator="|"),  # TagField for exact filename matching (deprecated for Korean)
+                TagField("filename_hash", separator="|"),  # MD5 hash of filename for Unicode support
                 TextField("source"),
                 NumericField("chunk_index"),
+                TagField("group_id", separator="|"),  # Support OR search across groups
                 VectorField(
                     "embedding",
                     "FLAT",
@@ -129,7 +172,18 @@ class VectorDB:
         if len(documents) != len(embeddings):
             raise ValueError("Number of documents must match number of embeddings")
 
+        # Get default group ID if no group specified
+        default_group_id = self.client.get('group:default')
+        if default_group_id:
+            default_group_id = default_group_id.decode('utf-8')
+        else:
+            default_group_id = ''  # Will be set during migration
+
         import uuid
+
+        # Cache for filename -> group_id mapping to avoid repeated Redis calls
+        filename_group_cache = {}
+
         pipe = self.client.pipeline()
         for idx, (doc, embedding) in enumerate(zip(documents, embeddings)):
             # Generate unique document ID using UUID to avoid overwriting
@@ -139,24 +193,50 @@ class VectorDB:
             embedding_bytes = np.array(embedding, dtype=np.float32).tobytes()
 
             # Prepare document
+            filename = doc.get("filename", "")
+            # Calculate MD5 hash of filename for Unicode-safe TAG field
+            filename_hash = hashlib.md5(filename.encode('utf-8')).hexdigest()
+
+            # Preserve existing group assignment during reindexing
+            if filename not in filename_group_cache:
+                existing_group = self.client.get(f'doc:group:{filename}')
+                if existing_group:
+                    filename_group_cache[filename] = existing_group.decode('utf-8')
+                else:
+                    filename_group_cache[filename] = default_group_id
+
+            assigned_group_id = doc.get("group_id", filename_group_cache[filename])
+
             doc_data = {
                 "text": doc.get("text", ""),
-                "filename": doc.get("filename", ""),
+                "filename": filename,
+                "filename_exact": filename,  # Exact filename for TagField matching (deprecated for Korean)
+                "filename_hash": filename_hash,  # MD5 hash for Unicode support
                 "source": doc.get("source", ""),
                 "chunk_index": doc.get("chunk_index", 0),
+                "group_id": assigned_group_id,  # Preserve existing group assignment
                 "embedding": embedding_bytes
             }
 
             pipe.hset(doc_id, mapping=doc_data)
 
         pipe.execute()
+
+        # Wait for Redis Search index to update
+        # Redis Search indexing is asynchronous, so we need a small delay
+        # to ensure newly added documents are searchable immediately
+        import time
+        time.sleep(0.2)  # 200ms delay for index propagation
+
         logger.success(f"Added {len(documents)} documents to database")
 
     def search(
         self,
         query_embedding: List[float],
         top_k: int = 5,
-        filter_expr: Optional[str] = None
+        filter_expr: Optional[str] = None,
+        group_ids: Optional[List[str]] = None,
+        document_ids: Optional[List[str]] = None
     ) -> List[Dict]:
         """
         Search for similar documents
@@ -165,42 +245,199 @@ class VectorDB:
             query_embedding: Query embedding vector
             top_k: Number of results to return
             filter_expr: Optional filter expression
+            group_ids: Optional list of group IDs to filter by (OR logic)
+            document_ids: Optional list of document filenames to filter by (OR logic)
 
         Returns:
             List of matching documents with scores
         """
         try:
+            # DIAGNOSTIC: Check what query_embedding actually is
+            logger.warning(f"DIAGNOSTIC: query_embedding type: {type(query_embedding)}")
+            logger.warning(f"DIAGNOSTIC: query_embedding shape/len: {getattr(query_embedding, 'shape', len(query_embedding) if hasattr(query_embedding, '__len__') else 'no length')}")
+            if hasattr(query_embedding, '__len__') and len(query_embedding) < 10:
+                logger.warning(f"DIAGNOSTIC: query_embedding content: {query_embedding}")
+
             # Convert query embedding to bytes
             query_bytes = np.array(query_embedding, dtype=np.float32).tobytes()
 
-            # Build query
-            base_query = f"*=>[KNN {top_k} @embedding $vec AS score]"
+            # DIAGNOSTIC: Check the actual bytes being sent
+            logger.warning(f"DIAGNOSTIC: query_bytes length: {len(query_bytes)} bytes")
+            logger.warning(f"DIAGNOSTIC: First 50 bytes of query_bytes: {query_bytes[:50].hex()}")
+
+            # DIAGNOSTIC: Compare with random embedding bytes
+            random_emb = np.random.randn(1024).astype(np.float32).tobytes()
+            logger.warning(f"DIAGNOSTIC: Random embedding bytes length: {len(random_emb)} bytes")
+            logger.warning(f"DIAGNOSTIC: First 50 bytes of random_emb: {random_emb[:50].hex()}")
+
+            # Build filters
+            filters = []
+
+            # Group filter (OR logic using TagField)
+            if group_ids:
+                escaped_groups = [self.escape_tag_value(gid) for gid in group_ids]
+                group_filter = "|".join(escaped_groups)
+                filters.append(f"@group_id:{{{group_filter}}}")
+
+            # Document filter (OR logic using filename hash for Unicode support)
+            if document_ids:
+                # Convert filenames to MD5 hashes for Unicode-safe TAG field
+                filename_hashes = [hashlib.md5(filename.encode('utf-8')).hexdigest() for filename in document_ids]
+                hash_filter = "|".join(filename_hashes)
+                filters.append(f"@filename_hash:{{{hash_filter}}}")
+
+            # Custom filter expression
             if filter_expr:
-                base_query = f"({filter_expr})=>[KNN {top_k} @embedding $vec AS score]"
+                filters.append(f"({filter_expr})")
+
+            # Combine all filters with AND
+            base_query = f"*=>[KNN {top_k} @embedding $vec AS score]"
+            if filters:
+                # Single filter: no extra parentheses
+                # Multiple filters: wrap with parentheses for AND logic
+                if len(filters) == 1:
+                    combined_filter = filters[0]
+                else:
+                    combined_filter = "(" + " ".join(filters) + ")"
+                base_query = f"{combined_filter}=>[KNN {top_k} @embedding $vec AS score]"
+                logger.debug(f"Search filters: {filters}")
+                logger.debug(f"Redis query: {base_query}")
 
             query = (
                 Query(base_query)
-                .sort_by("score")
-                .return_fields("text", "filename", "source", "chunk_index", "score")
+                .return_fields("text", "filename", "source", "chunk_index", "group_id", "score")
                 .dialect(2)
             )
 
-            # Execute search
-            results = self.client.ft(self.index_name).search(
-                query,
-                query_params={"vec": query_bytes}
-            )
+            # Log query details for debugging
+            logger.debug(f"Query embedding vector length: {len(query_bytes)} bytes")
+            logger.debug(f"First 20 bytes of embedding: {query_bytes[:20].hex()}")
+            logger.debug(f"Final query string: {base_query}")
+            if filters:
+                logger.debug(f"Active filters: {filters}")
 
-            # Parse results
+            # DIAGNOSTIC: Check index state and test query
+            if filters:
+                try:
+                    # Check index info
+                    index_info = self.client.ft(self.index_name).info()
+                    num_docs = index_info.get('num_docs', 0)
+                    logger.warning(f"DIAGNOSTIC: Index '{self.index_name}' has {num_docs} total documents")
+
+                    # Check how many S2B documents exist
+                    s2b_check = self.client.execute_command(
+                        'FT.SEARCH', self.index_name,
+                        '@filename_exact:{S2B\\ FaQ1\\.pdf}',
+                        'LIMIT', '0', '0',
+                        'DIALECT', '2'
+                    )
+                    logger.warning(f"DIAGNOSTIC: {s2b_check[0]} documents match '@filename_exact:{{S2B\\ FaQ1\\.pdf}}'")
+
+                    # Test with random embedding
+                    test_embedding = np.random.randn(1024).astype(np.float32).tobytes()
+
+                    # Test WITHOUT SORTBY
+                    cmd_args = ['FT.SEARCH', self.index_name, base_query, 'PARAMS', '2', 'vec', 'RETURN', '1', 'filename_exact', 'DIALECT', '2']
+                    logger.warning(f"DIAGNOSTIC: Command args: {cmd_args}")
+                    logger.warning(f"DIAGNOSTIC: Embedding length: {len(test_embedding)} bytes")
+                    direct_result1 = self.client.execute_command(
+                        'FT.SEARCH', self.index_name,
+                        base_query,
+                        'PARAMS', '2', 'vec', test_embedding,
+                        'RETURN', '1', 'filename_exact',
+                        'DIALECT', '2'
+                    )
+                    logger.warning(f"DIAGNOSTIC: Hybrid query WITHOUT SORTBY returned {direct_result1[0]} results")
+
+                    # Test WITH SORTBY
+                    direct_result2 = self.client.execute_command(
+                        'FT.SEARCH', self.index_name,
+                        base_query,
+                        'PARAMS', '2', 'vec', test_embedding,
+                        'RETURN', '1', 'filename_exact',
+                        'SORTBY', 'score',
+                        'DIALECT', '2'
+                    )
+                    logger.warning(f"DIAGNOSTIC: Hybrid query WITH SORTBY returned {direct_result2[0]} results")
+                except Exception as e:
+                    logger.error(f"DIAGNOSTIC failed: {e}")
+                    import traceback
+                    logger.error(traceback.format_exc())
+
+            # Execute search using execute_command (Query class has issues with hybrid queries)
+            logger.warning(f"ACTUAL SEARCH: Executing with base_query: {base_query}")
+            logger.warning(f"ACTUAL SEARCH: query_bytes TYPE: {type(query_bytes)}")
+            logger.warning(f"ACTUAL SEARCH: query_bytes length: {len(query_bytes)}")
+            logger.warning(f"ACTUAL SEARCH: query_bytes first 20 bytes: {query_bytes[:20].hex()}")
+            logger.warning(f"ACTUAL SEARCH: Redis connection: {self.client.connection_pool.connection_kwargs}")
+
+            # TEST: Try with a random embedding to see if it's the embedding that's the issue
+            test_bytes = np.random.randn(1024).astype(np.float32).tobytes()
+            logger.warning(f"ACTUAL SEARCH: test_bytes TYPE: {type(test_bytes)}")
+            logger.warning(f"ACTUAL SEARCH: test_bytes length: {len(test_bytes)}")
+
+            try:
+                # Execute search with actual query bytes
+                logger.warning(f"SEARCH: base_query={base_query}")
+                logger.warning(f"SEARCH: query_bytes length={len(query_bytes)}")
+
+                raw_results = self.client.execute_command(
+                    'FT.SEARCH', self.index_name,
+                    base_query,
+                    'PARAMS', '2', 'vec', query_bytes,
+                    'RETURN', '6', 'text', 'filename', 'source', 'chunk_index', 'group_id', 'score',
+                    'DIALECT', '2'
+                )
+                logger.warning(f"SEARCH: Got {raw_results[0]} results from Redis")
+
+            except Exception as e:
+                logger.error(f"SEARCH: execute_command failed: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
+                raise
+
+            # Parse raw results
+            num_results = raw_results[0]
+            logger.debug(f"Redis returned {num_results} results")
+
+            # Convert raw results to result objects
+            class SearchResult:
+                def __init__(self, doc_data):
+                    self.docs = []
+                    for i in range(1, len(doc_data), 2):
+                        doc_dict = {}
+                        fields = doc_data[i + 1]
+                        for j in range(0, len(fields), 2):
+                            key = fields[j].decode() if isinstance(fields[j], bytes) else fields[j]
+                            value = fields[j + 1].decode() if isinstance(fields[j + 1], bytes) else fields[j + 1]
+                            doc_dict[key] = value
+
+                        # Create a simple object with attributes
+                        class Doc:
+                            pass
+                        doc = Doc()
+                        doc.text = doc_dict.get('text', '')
+                        doc.filename = doc_dict.get('filename', '')
+                        doc.source = doc_dict.get('source', '')
+                        doc.chunk_index = doc_dict.get('chunk_index', '0')
+                        doc.group_id = doc_dict.get('group_id', '')
+                        doc.score = doc_dict.get('score', '0')
+                        self.docs.append(doc)
+
+            results = SearchResult(raw_results)
+
+            # Parse results (filtering is now done at Redis level using TagField)
             documents = []
             for doc in results.docs:
-                documents.append({
+                doc_dict = {
                     "text": doc.text,
                     "filename": doc.filename,
                     "source": doc.source,
                     "chunk_index": int(doc.chunk_index),
+                    "group_id": getattr(doc, 'group_id', ''),
                     "score": float(doc.score)
-                })
+                }
+                documents.append(doc_dict)
 
             logger.debug(f"Found {len(documents)} matching documents")
             return documents
@@ -354,6 +591,7 @@ class VectorDB:
         Count number of chunks for multiple filenames in a single efficient operation
 
         This avoids N+1 queries by batching all counts together.
+        Uses caching to avoid repeated scans of all documents.
 
         Args:
             filenames: List of filenames to count chunks for
@@ -365,47 +603,91 @@ class VectorDB:
             return {}
 
         try:
-            # Initialize result dictionary with all filenames
-            result = {filename: 0 for filename in filenames}
+            # Try to get cached counts first (5 minute TTL)
+            cache_key = "doc:counts:cache"
+            cached_counts = self.client.get(cache_key)
 
-            # For batch counting, we need to query each filename but can optimize
-            # by using async operations or by getting all docs and grouping
-            # Since Redis search doesn't support OR queries efficiently for this use case,
-            # we'll use a different approach: get all indexed documents once and group by filename
+            if cached_counts:
+                # Use cached counts
+                import json
+                filename_counts = json.loads(cached_counts)
+                logger.debug("Using cached document counts")
+            else:
+                # Cache miss - need to scan all documents
+                logger.info("Cache miss - scanning all documents for counts")
 
-            # Get all document keys efficiently using SCAN
-            filename_counts = {}
-            batch_size = 100
-            key_batch = []
+                # Get all document keys efficiently using SCAN
+                filename_counts = {}
+                batch_size = 100
+                key_batch = []
 
-            for key in self.client.scan_iter(match="doc:*", count=batch_size):
-                key_str = key.decode('utf-8')
+                for key in self.client.scan_iter(match="doc:*", count=batch_size):
+                    key_str = key.decode('utf-8')
 
-                # Exclude doc:hash:xxx keys, accept both numeric and UUID document IDs
-                parts = key_str.split(':')
-                if len(parts) != 2 or parts[0] != 'doc' or parts[1] == 'hash':
-                    continue
+                    # Exclude doc:hash:xxx and doc:group:xxx keys, accept both numeric and UUID document IDs
+                    parts = key_str.split(':')
+                    if len(parts) != 2 or parts[0] != 'doc':
+                        continue
 
-                key_batch.append(key)
+                    key_batch.append(key)
 
-                # Process batch when it reaches batch_size
-                if len(key_batch) >= batch_size:
-                    self._count_filenames_in_batch(key_batch, filename_counts, set(filenames))
-                    key_batch = []
+                    # Process batch when it reaches batch_size
+                    if len(key_batch) >= batch_size:
+                        self._count_all_filenames_in_batch(key_batch, filename_counts)
+                        key_batch = []
 
-            # Process remaining keys
-            if key_batch:
-                self._count_filenames_in_batch(key_batch, filename_counts, set(filenames))
+                # Process remaining keys
+                if key_batch:
+                    self._count_all_filenames_in_batch(key_batch, filename_counts)
 
-            # Update result with actual counts
-            for filename in filenames:
-                result[filename] = filename_counts.get(filename, 0)
+                # Cache the counts for 5 minutes (300 seconds)
+                import json
+                self.client.setex(cache_key, 300, json.dumps(filename_counts))
+                logger.info(f"Cached counts for {len(filename_counts)} unique filenames")
 
+            # Build result with requested filenames
+            result = {filename: filename_counts.get(filename, 0) for filename in filenames}
             return result
+
         except Exception as e:
             logger.error(f"Failed to batch count documents: {e}")
             # Return zero counts for all filenames on error
             return {filename: 0 for filename in filenames}
+
+    def clear_document_count_cache(self):
+        """
+        Clear the cached document counts
+        Should be called when documents are added, updated, or deleted
+        """
+        try:
+            cache_key = "doc:counts:cache"
+            self.client.delete(cache_key)
+            logger.debug("Cleared document count cache")
+        except Exception as e:
+            logger.error(f"Failed to clear document count cache: {e}")
+
+    def _count_all_filenames_in_batch(self, keys: List[bytes], filename_counts: Dict[str, int]):
+        """
+        Count occurrences of ALL filenames in a batch of keys (for caching)
+
+        Args:
+            keys: List of Redis keys to process
+            filename_counts: Dictionary to update with counts
+        """
+        if not keys:
+            return
+
+        # Use pipeline to batch all operations
+        pipe = self.client.pipeline()
+        for key in keys:
+            pipe.hget(key, 'filename')
+        results = pipe.execute()
+
+        # Count all filenames
+        for filename_bytes in results:
+            if filename_bytes:
+                filename = filename_bytes.decode('utf-8')
+                filename_counts[filename] = filename_counts.get(filename, 0) + 1
 
     def _count_filenames_in_batch(self, keys: List[bytes], filename_counts: Dict[str, int], target_filenames: set):
         """

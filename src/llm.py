@@ -284,17 +284,21 @@ class LLM:
     def _stream_response_mlx(self, prompt: str, max_tokens: int, temperature: float) -> Generator[str, None, None]:
         """Stream response using MLX backend"""
         from mlx_lm import stream_generate
+        from mlx_lm.sample_utils import make_sampler
 
         buffer = ""
         inside_think = False
         tag_prefixes = ['<', '<t', '<th', '<thi', '<thin', '<think', '</', '</t', '</th', '</thi', '</thin', '</think']
+
+        # Create sampler with temperature (new MLX-LM API)
+        sampler = make_sampler(temp=temperature)
 
         for response in stream_generate(
             self.model,
             self.tokenizer,
             prompt=prompt,
             max_tokens=max_tokens,
-            temp=temperature
+            sampler=sampler
         ):
             if hasattr(response, 'text') and response.text:
                 token = response.text
@@ -453,7 +457,8 @@ class RAGSystem:
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         system_prompt: Optional[str] = None,
-        document_ids: Optional[List[str]] = None
+        document_ids: Optional[List[str]] = None,
+        group_ids: Optional[List[str]] = None
     ):
         """
         Query RAG system
@@ -465,6 +470,7 @@ class RAGSystem:
             stream: Whether to stream the response
             history: Conversation history
             document_ids: Optional list of document IDs/filenames to filter by
+            group_ids: Optional list of group IDs to filter by (OR logic)
 
         Returns:
             Dictionary with answer and context (or generator if streaming)
@@ -472,23 +478,35 @@ class RAGSystem:
         k = top_k or self.top_k
 
         try:
-            # Build filter expression for document filtering
-            filter_expr = None
+            # Log filtering info
+            if group_ids:
+                logger.info(f"Filtering by groups: {group_ids}")
             if document_ids:
-                def escape_redis_tag(value):
-                    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
-                    return f'"{escaped}"'
-
-                filters = [f"@filename:{escape_redis_tag(doc_id)}" for doc_id in document_ids]
-                filter_expr = "|".join(filters)
-                if len(filters) > 1:
-                    filter_expr = f"({filter_expr})"
                 logger.info(f"Filtering by documents: {document_ids}")
-                logger.debug(f"Filter expression: {filter_expr}")
 
-            # Retrieve relevant documents
-            logger.info(f"Retrieving top {k} documents")
-            context_docs = self.vector_db.search(query_embedding, top_k=k, filter_expr=filter_expr)
+            # Increase top_k when using filters to ensure we find relevant docs within filtered set
+            # Filters apply AFTER vector search, so we need more candidates
+            search_k = k
+            if group_ids or document_ids:
+                search_k = min(k * 20, 100)  # Increase by 20x, max 100
+                logger.info(f"Using expanded search_k={search_k} for filtered search (returning top {k})")
+
+            # Retrieve relevant documents (use native vector_db filtering)
+            logger.warning(f"LLM QUERY: Retrieving top {k} documents")
+            logger.warning(f"LLM QUERY: document_ids={document_ids}")
+            logger.warning(f"LLM QUERY: group_ids={group_ids}")
+            logger.warning(f"LLM QUERY: search_k={search_k}")
+            context_docs = self.vector_db.search(
+                query_embedding,
+                top_k=search_k,
+                group_ids=group_ids,
+                document_ids=document_ids
+            )
+            logger.warning(f"LLM QUERY: Got {len(context_docs)} documents from vector_db")
+
+            # Limit to requested k after filtering
+            if len(context_docs) > k:
+                context_docs = context_docs[:k]
 
             if not context_docs:
                 logger.warning("No relevant documents found")

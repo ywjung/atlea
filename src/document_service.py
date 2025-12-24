@@ -147,7 +147,8 @@ class DocumentService:
             '.pdf', '.hwp', '.hwpx',
             '.doc', '.docx',
             '.xls', '.xlsx',
-            '.ppt', '.pptx'
+            '.ppt', '.pptx',
+            '.txt'
         ]
 
         file_ext = Path(filename).suffix.lower()

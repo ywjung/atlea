@@ -9,7 +9,8 @@
 - **Java 문서 추출 서비스**: Apache POI + PDFBox 기반 고성능 텍스트 추출 (최대 50MB)
 - **스마트 색인**: 파일 변경 감지 및 자동 재색인 (매번 임베딩하지 않음)
 - **고속 벡터 검색**: Redis Vector DB + 연결 풀링으로 빠른 문서 검색 (동시 쿼리 5-10배 개선)
-- **문서 관리**: 웹 UI에서 모든 형식의 문서 업로드, 삭제, 상태 확인
+- **문서 그룹 관리**: 계층 구조 그룹으로 문서 조직화, 그룹별 OR 검색 지원
+- **문서 관리**: 웹 UI에서 모든 형식의 문서 업로드, 삭제, 상태 확인, 그룹 할당
 - **중복 방지**: MD5 해시 기반 중복 문서 업로드 차단
 - **Python Fallback**: Java 서비스 미사용 시 Python HWP 추출 대체
 
@@ -27,6 +28,16 @@
 - **세션 관리**: 대화 히스토리 저장 및 복원
 - **에러 처리**: 사용자 친화적 에러 메시지 및 복구 옵션
 - **실시간 피드백**: 타이핑 인디케이터, 진행률 표시, 토큰 카운트
+- **그룹 관리 UI**: 드래그 앤 드롭으로 문서 그룹 할당, 트리 뷰 탐색
+
+### 🚀 프로덕션 기능
+- **멀티 워커 서버**: CPU 코어 기반 자동 워커 설정 (최대 8개), 동시 요청 처리
+- **비동기 처리**: asyncio.to_thread로 블로킹 작업 처리, 이벤트 루프 차단 방지
+- **헬스 체크**: `/health` 엔드포인트로 Redis, 모델, 시스템 상태 모니터링
+- **메트릭 수집**: `/metrics` Prometheus 호환 엔드포인트로 성능 지표 추적
+- **프로덕션 로깅**: 구조화된 로깅, 로그 로테이션 (100MB, 7일 보관)
+- **API 문서**: Swagger UI (`/docs`), ReDoc (`/redoc`) 자동 생성
+- **보안 헤더**: CSP, XSS 방지, 프레임 보호, MIME 타입 스니핑 차단
 
 ## 🏗️ 시스템 아키텍처
 
@@ -88,7 +99,7 @@
 - **Micrometer**: 성능 메트릭 수집
 
 ### Database
-- **Redis Stack**: Vector DB with RediSearch (20 연결 풀)
+- **Redis Stack**: Vector DB with RediSearch (50 연결 풀, 프로덕션 최적화)
 - **Docker**: 컨테이너화 (Redis, Java Service)
 
 ### Frontend
@@ -225,9 +236,13 @@ tail -f server.log
 - 쉬운 상태 확인 및 제어
 
 서버가 시작되면:
-- 웹 UI: http://localhost:8000
-- RedisInsight: http://localhost:8001 (Redis 관리 도구)
-- 서버 준비 시간: **~1초** (Fast Startup 모드, 96% 개선)
+- **웹 UI**: http://localhost:8000
+- **Swagger UI**: http://localhost:8000/docs (API 문서)
+- **ReDoc**: http://localhost:8000/redoc (대체 API 문서)
+- **Health Check**: http://localhost:8000/health (시스템 상태)
+- **Metrics**: http://localhost:8000/metrics (Prometheus 메트릭)
+- **RedisInsight**: http://localhost:8001 (Redis 관리 도구)
+- **서버 준비 시간**: ~1초 (Fast Startup 모드, 96% 개선)
 
 ## 📝 사용 방법
 
@@ -253,11 +268,19 @@ tail -f server.log
 - 수동 모드: 사용자가 직접 선택한 테마 유지
 
 #### 문서 관리
-- 헤더의 "문서 관리" 버튼으로 PDF 관리 모달 열기
-- **PDF 업로드**: 드래그 앤 드롭 또는 클릭하여 파일 선택
+- 헤더의 "문서 관리" 버튼으로 문서 관리 모달 열기
+- **문서 업로드**: 드래그 앤 드롭 또는 클릭하여 파일 선택 (9가지 형식 지원)
 - **문서 삭제**: 각 문서의 삭제 버튼 클릭
 - **문서 새로고침**: 문서 목록 갱신
+- **그룹 할당**: 문서를 그룹에 배치하여 조직화
 - 업로드된 모든 문서 목록 및 상태 확인
+
+#### 문서 그룹 관리
+- **그룹 생성**: "그룹 관리" 버튼으로 계층 구조 그룹 생성
+- **그룹 편집**: 이름, 설명, 색상, 아이콘 커스터마이징
+- **문서 할당**: 드래그 앤 드롭 또는 배치 할당으로 문서 그룹 지정
+- **그룹별 검색**: 특정 그룹의 문서만 검색 (OR 검색 지원)
+- **트리 뷰**: 계층 구조로 그룹 및 문서 탐색
 
 #### 세션 관리
 - **대화 저장**: 대화 내용이 자동으로 로컬 저장
@@ -366,9 +389,21 @@ curl http://localhost:8000/api/status
 `.env` 파일에서 설정을 변경할 수 있습니다:
 
 ```bash
+# 서버 기본 설정
+HOST=0.0.0.0
+PORT=8000
+ENVIRONMENT=production  # production 또는 development
+
 # Redis 설정
 REDIS_HOST=localhost
 REDIS_PORT=6379
+REDIS_MAX_CONNECTIONS=50  # 연결 풀 크기 (기본: 50)
+REDIS_SOCKET_TIMEOUT=5    # 타임아웃 (초)
+REDIS_SOCKET_KEEPALIVE=true  # TCP keepalive 활성화
+
+# 캐시 설정
+CACHE_SIMILARITY_THRESHOLD=0.95  # 유사도 임계값 (0-1)
+CACHE_TTL=3600  # 캐시 TTL (초, 기본: 1시간)
 
 # 모델 설정
 EMBEDDING_MODEL=jinaai/jina-embeddings-v3
@@ -381,14 +416,21 @@ CHUNK_SIZE=512
 CHUNK_OVERLAP=50
 
 # 파일 업로드 제한
-MAX_FILE_SIZE_MB=100  # PDF/HWP 파일 최대 크기 (MB)
+MAX_FILE_SIZE_MB=100  # 파일 최대 크기 (MB)
 
 # 성능 최적화 설정
-ENABLE_QUESTION_GENERATION=false  # true로 설정 시 시작 시 자동 질문 생성 (시작 느려짐)
+ENABLE_QUESTION_GENERATION=false  # 시작 시 자동 질문 생성
 
-# 서버 설정
-HOST=0.0.0.0
-PORT=8000
+# Uvicorn 서버 설정
+TIMEOUT_KEEP_ALIVE=65  # Keep-alive 타임아웃 (초)
+TIMEOUT_GRACEFUL_SHUTDOWN=30  # 종료 대기 시간 (초)
+LIMIT_CONCURRENCY=1000  # 최대 동시 연결 수
+LIMIT_MAX_REQUESTS=10000  # 워커 재시작 전 최대 요청 수
+
+# 로깅 설정
+LOG_LEVEL=info  # debug, info, warning, error
+LOG_FILE=/tmp/chatbot_production.log  # 로그 파일 경로
+ACCESS_LOG=false  # 액세스 로그 활성화 (true/false)
 ```
 
 ## 📂 프로젝트 구조
@@ -406,6 +448,7 @@ chatbot_redis/
 │   ├── document_tracker.py # 문서 변경 감지
 │   ├── vector_db.py        # Redis vector DB
 │   ├── cache_manager.py    # 답변 캐싱
+│   ├── group_manager.py    # 문서 그룹 관리
 │   ├── llm.py              # Qwen LLM
 │   ├── model_manager.py    # 모델 관리
 │   └── web_server.py       # FastAPI 서버
@@ -421,7 +464,9 @@ chatbot_redis/
 │   ├── follow-up-questions.js   # 후속 질문
 │   ├── follow-up-styles.css
 │   ├── autocomplete.js      # 질문 자동완성
-│   └── autocomplete-styles.css
+│   ├── autocomplete-styles.css
+│   ├── group-manager.js     # 그룹 관리
+│   └── group-styles.css
 ├── docker-compose.yml       # Redis 설정
 ├── requirements.txt         # Python 패키지
 ├── .env.example            # 환경 변수 템플릿
@@ -559,9 +604,44 @@ docker-compose down -v
 
 ### 벡터 검색 최적화
 
-- **Redis 연결 풀링**: 20개 동시 연결로 처리량 5-10배 향상
+- **Redis 연결 풀링**: 50개 동시 연결로 처리량 5-10배 향상 (프로덕션 최적화)
 - **Redis Vector 인덱스**: 코사인 유사도 기반 고속 검색
 - **답변 캐싱**: 95% 유사도 기반 자동 캐시 응답 (중복 쿼리 제거)
+- **Connection Health Check**: 30초 간격 연결 상태 확인 및 자동 복구
+
+### 프로덕션 서버 최적화 (2025-12-23)
+
+#### 멀티 워커 아키텍처
+- **자동 워커 설정**: `(CPU 코어 * 2) + 1`, 최소 4개, 최대 8개
+- **비동기 처리**: asyncio.to_thread()로 블로킹 작업(임베딩, LLM) 처리
+- **동시 요청 처리**: 이벤트 루프 차단 없이 여러 요청 병렬 처리
+- **워커 재활용**: 10,000 요청마다 워커 자동 재시작 (메모리 누수 방지)
+
+#### 모니터링 및 관찰성
+```
+/health      - 시스템 헬스 체크 (Redis, 모델, CPU, 메모리, 디스크)
+/metrics     - Prometheus 메트릭 (캐시 히트율, Redis 연결, 시스템 리소스)
+/docs        - Swagger UI (인터랙티브 API 문서)
+/redoc       - ReDoc (읽기 전용 API 문서)
+```
+
+#### 로깅 시스템
+- **구조화된 로깅**: 타임스탬프, 레벨, 소스 위치 포함
+- **로그 로테이션**: 100MB마다 회전, 7일 보관, 자동 압축 (zip)
+- **환경별 설정**: Production (INFO), Development (DEBUG)
+- **파일 로깅**: `/tmp/chatbot_production.log` (설정 가능)
+
+#### 타임아웃 및 제한
+- **Keep-alive**: 65초 (브라우저 타임아웃 방지)
+- **Graceful Shutdown**: 30초 (요청 완료 대기 후 종료)
+- **동시 연결 제한**: 1,000개 (DoS 방지)
+- **연결 대기 큐**: 2,048개 (백로그)
+
+#### 보안 강화
+- **CSP 헤더**: XSS 공격 차단, Swagger UI는 허용 목록 방식
+- **보안 헤더**: X-Frame-Options, X-Content-Type-Options, X-XSS-Protection
+- **서버 정보 숨김**: 버전 정보 노출 차단
+- **프록시 지원**: X-Forwarded-* 헤더 처리 (로드 밸런서 호환)
 
 ### 서버 시작 최적화 (Fast Startup Mode)
 

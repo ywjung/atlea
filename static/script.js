@@ -31,6 +31,16 @@ const docCountEl = document.getElementById('doc-count');
 const themeToggle = document.getElementById('themeToggle');
 const refreshSuggestionsBtn = document.getElementById('refreshSuggestionsBtn');
 
+// Conversation history elements
+const historyToggleBtn = document.getElementById('historyToggleBtn');
+const conversationSidebar = document.getElementById('conversationSidebar');
+const newChatBtn = document.getElementById('newChatBtn');
+const conversationList = document.getElementById('conversationList');
+const container = document.querySelector('.container');
+
+// Current conversation session
+let currentSessionId = null;
+
 // Source modal elements
 const sourceModal = document.getElementById('sourceModal');
 const closeSourceModal = document.getElementById('closeSourceModal');
@@ -97,7 +107,9 @@ function setupEventListeners() {
         e.preventDefault();
         sendMessage();
     });
-    clearBtn.addEventListener('click', clearChat);
+    clearBtn.addEventListener('click', async () => {
+        await clearChat();
+    });
     exportBtn.addEventListener('click', exportHistory);
     importBtn.addEventListener('click', importHistory);
     reindexBtn.addEventListener('click', reindexDocuments);
@@ -155,6 +167,22 @@ function setupEventListeners() {
         refreshSuggestionsBtn.addEventListener('click', refreshSuggestedQuestions);
     }
 
+    // Conversation history event listeners
+    historyToggleBtn.addEventListener('click', async () => {
+        const isOpening = !conversationSidebar.classList.contains('active');
+
+        conversationSidebar.classList.toggle('active');
+        container.classList.toggle('sidebar-active');
+        historyToggleBtn.classList.toggle('active');
+
+        // Reload conversations when opening sidebar to get latest titles
+        if (isOpening) {
+            await loadConversations();
+        }
+    });
+
+    newChatBtn.addEventListener('click', createNewConversation);
+
     userInput.addEventListener('input', () => {
         autoResize();
         updateSendButton();
@@ -205,6 +233,13 @@ function setupKeyboardShortcuts() {
             // Close chunk viewer modal
             if (chunkViewerModal.classList.contains('active')) {
                 chunkViewerModal.classList.remove('active');
+                return;
+            }
+            // Close conversation history sidebar
+            if (conversationSidebar.classList.contains('active')) {
+                conversationSidebar.classList.remove('active');
+                container.classList.remove('sidebar-active');
+                historyToggleBtn.classList.remove('active');
                 return;
             }
         }
@@ -337,6 +372,308 @@ function validateInput(text) {
     return { valid: true, normalized };
 }
 
+// ===== Conversation History Functions =====
+
+// Load conversation list
+let isLoadingConversations = false;
+
+async function loadConversations() {
+    // Prevent concurrent loads
+    if (isLoadingConversations) {
+        devLog('Already loading conversations, skipping...');
+        return;
+    }
+
+    isLoadingConversations = true;
+
+    try {
+        const response = await fetch('/api/conversations');
+        if (!response.ok) {
+            throw new Error('Failed to load conversations');
+        }
+
+        const data = await response.json();
+        const conversations = data.sessions || [];
+
+        conversationList.innerHTML = '';
+
+        if (conversations.length === 0) {
+            conversationList.innerHTML = '<div class="loading-conversations"><span>대화 기록이 없습니다</span></div>';
+            return;
+        }
+
+        conversations.forEach(conv => {
+            const item = document.createElement('div');
+            item.className = 'conversation-item';
+            item.setAttribute('data-id', conv.id);
+            const isCurrentSession = conv.id === currentSessionId;
+
+            if (isCurrentSession) {
+                item.classList.add('active');
+            }
+
+            // Only show delete button if it's not the current session
+            const deleteButtonHTML = isCurrentSession ? '' : `
+                <button class="conversation-delete-btn" title="삭제">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                        <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
+            `;
+
+            item.innerHTML = `
+                <div class="conversation-item-header">
+                    <div class="conversation-title">${escapeHtml(conv.title)}</div>
+                    ${deleteButtonHTML}
+                </div>
+                <div class="conversation-time">${formatTimestamp(conv.updated_at)}</div>
+            `;
+
+            // Click to load conversation (use event delegation later, but keep individual for now)
+            item.addEventListener('click', (e) => {
+                if (!e.target.closest('.conversation-delete-btn')) {
+                    loadConversation(conv.id);
+                }
+            }, { once: true }); // Use once:true to prevent duplicate listeners
+
+            // Delete button - only add listener if button exists
+            if (!isCurrentSession) {
+                const deleteBtn = item.querySelector('.conversation-delete-btn');
+                if (deleteBtn) {
+                    deleteBtn.addEventListener('click', async (e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        const sessionId = item.getAttribute('data-id');
+                        if (confirm('이 대화를 삭제하시겠습니까?')) {
+                            // Disable button during deletion
+                            deleteBtn.disabled = true;
+                            await deleteConversation(sessionId);
+                        }
+                    }, { once: true });
+                }
+            }
+
+            conversationList.appendChild(item);
+        });
+    } catch (error) {
+        console.error('Error loading conversations:', error);
+        conversationList.innerHTML = '<div class="loading-conversations"><span>대화 목록 로딩 실패</span></div>';
+    } finally {
+        isLoadingConversations = false;
+    }
+}
+
+// Create new conversation
+async function createNewConversation() {
+    try {
+        const response = await fetch('/api/conversations', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+
+        if (!response.ok) {
+            throw new Error('Failed to create conversation');
+        }
+
+        const data = await response.json();
+        currentSessionId = data.session_id;
+
+        // Clear chat UI (no confirmation)
+        clearChatUI();
+
+        // Reload conversation list
+        await loadConversations();
+
+        devLog('Created new conversation:', currentSessionId);
+    } catch (error) {
+        console.error('Error creating conversation:', error);
+        alert('새 대화 생성에 실패했습니다.');
+    }
+}
+
+// Load conversation messages
+async function loadConversation(sessionId) {
+    try {
+        const response = await fetch(`/api/conversations/${sessionId}`);
+        if (!response.ok) {
+            throw new Error('Failed to load conversation');
+        }
+
+        const data = await response.json();
+        currentSessionId = sessionId;
+
+        // Clear current chat UI
+        clearChatUI();
+
+        // Load messages
+        data.messages.forEach(msg => {
+            if (msg.role === 'user') {
+                addMessage(msg.content, 'user');
+            } else if (msg.role === 'assistant') {
+                const sources = msg.metadata?.sources || [];
+                addMessage(msg.content, 'bot', sources);  // Use 'bot' type for markdown rendering
+            }
+        });
+
+        // Update conversation list UI
+        document.querySelectorAll('.conversation-item').forEach(item => {
+            item.classList.remove('active');
+        });
+        document.querySelector(`.conversation-item[data-id="${sessionId}"]`)?.classList.add('active');
+
+        // Scroll to bottom
+        scrollToBottom();
+
+        devLog('Loaded conversation:', sessionId);
+    } catch (error) {
+        console.error('Error loading conversation:', error);
+        alert('대화 로딩에 실패했습니다.');
+    }
+}
+
+// Delete conversation
+let isDeletingConversation = false;
+
+async function deleteConversation(sessionId) {
+    // Prevent concurrent deletions
+    if (isDeletingConversation) {
+        devLog('Already deleting a conversation, skipping...');
+        return;
+    }
+
+    isDeletingConversation = true;
+
+    try {
+        devLog('Deleting conversation:', sessionId);
+
+        const response = await fetch(`/api/conversations/${sessionId}`, {
+            method: 'DELETE'
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.detail || 'Failed to delete conversation');
+        }
+
+        const result = await response.json();
+        devLog('Delete result:', result);
+
+        // If deleted current conversation, create new one
+        if (sessionId === currentSessionId) {
+            devLog('Deleted current conversation, creating new one');
+            currentSessionId = null; // Clear current session first
+            await createNewConversation();
+        } else {
+            devLog('Deleted non-current conversation, reloading list');
+            await loadConversations();
+        }
+
+        devLog('Successfully deleted conversation:', sessionId);
+    } catch (error) {
+        console.error('Error deleting conversation:', error);
+        alert(`대화 삭제에 실패했습니다: ${error.message}`);
+        // Reload list anyway to sync with server state
+        await loadConversations();
+    } finally {
+        isDeletingConversation = false;
+    }
+}
+
+// Format timestamp
+function formatTimestamp(timestamp) {
+    const date = new Date(timestamp);
+    const now = new Date();
+    const diff = now - date;
+
+    // Less than 1 minute
+    if (diff < 60000) {
+        return '방금 전';
+    }
+
+    // Less than 1 hour
+    if (diff < 3600000) {
+        const minutes = Math.floor(diff / 60000);
+        return `${minutes}분 전`;
+    }
+
+    // Less than 1 day
+    if (diff < 86400000) {
+        const hours = Math.floor(diff / 3600000);
+        return `${hours}시간 전`;
+    }
+
+    // Less than 7 days
+    if (diff < 604800000) {
+        const days = Math.floor(diff / 86400000);
+        return `${days}일 전`;
+    }
+
+    // Format as date
+    return `${date.getMonth() + 1}/${date.getDate()}`;
+}
+
+// Clear chat UI only (no confirmation)
+function clearChatUI() {
+    const chatContainer = document.getElementById('chatContainer');
+    if (chatContainer) {
+        chatContainer.innerHTML = '';
+    }
+}
+
+// Initialize conversation history
+async function initConversationHistory() {
+    try {
+        // Clear chat UI to ensure fresh start
+        clearChatUI();
+
+        // Load existing conversations first
+        const response = await fetch('/api/conversations');
+        if (response.ok) {
+            const data = await response.json();
+            const conversations = data.sessions || [];
+
+            // Load the most recent conversation
+            if (conversations.length > 0) {
+                const mostRecent = conversations[0];
+                const messageCount = parseInt(mostRecent.message_count || '0');
+
+                if (messageCount === 0) {
+                    // Reuse the empty conversation - keep screen empty
+                    currentSessionId = mostRecent.id;
+                    devLog('Reusing empty conversation:', currentSessionId);
+                } else {
+                    // Most recent has messages - load it to display
+                    devLog('Loading most recent conversation:', mostRecent.id);
+                    await loadConversation(mostRecent.id);
+                }
+            } else {
+                // No conversations exist, create new one
+                devLog('No conversations found, creating new one');
+                await createNewConversation();
+            }
+        } else {
+            // Error loading conversations, create new one
+            console.error('Failed to load conversations, creating new one');
+            await createNewConversation();
+        }
+
+        // Load conversation list for sidebar
+        await loadConversations();
+
+        devLog('Conversation history initialized');
+    } catch (error) {
+        console.error('Failed to initialize conversation history:', error);
+        // Fallback: create new conversation
+        try {
+            await createNewConversation();
+        } catch (e) {
+            console.error('Failed to create fallback conversation:', e);
+        }
+    }
+}
+
 // Send message with streaming
 async function sendMessage(regenerate = false) {
     let question;
@@ -441,8 +778,8 @@ async function sendMessage(regenerate = false) {
     currentAbortController = new AbortController();
 
     try {
-        // Get selected document IDs from filter
-        const documentIds = getSelectedDocumentIds();
+        // Get filter data based on active tab
+        const { documentIds, groupIds } = getActiveFilterData();
 
         // Wrap fetch with ErrorHandler retry and timeout
         const response = await errorHandler.withTimeout(
@@ -462,6 +799,8 @@ async function sendMessage(regenerate = false) {
                             cache_threshold: currentSettings.cache_threshold,
                             cache_ttl: currentSettings.cache_ttl,
                             document_ids: documentIds,  // Add selected document IDs
+                            session_id: currentSessionId,  // Add conversation session ID
+                            group_ids: groupIds,  // Add selected group IDs
                             history: conversationHistory.slice(0, -1)  // Send history without current question
                         }),
                         signal: currentAbortController.signal
@@ -670,6 +1009,12 @@ async function sendMessage(regenerate = false) {
 
         // Reset StreamingVisualizer
         streamingVisualizer.reset();
+
+        // Refresh conversation list to update title after message (only if sidebar is open)
+        if (currentSessionId && conversationSidebar.classList.contains('active')) {
+            // Refresh to show updated title (first message updates title from "새 대화")
+            await loadConversations();
+        }
     }
 }
 
@@ -786,9 +1131,12 @@ function removeLoading(id) {
     }
 }
 
-// Clear chat
-function clearChat() {
-    if (confirm('대화 내용을 모두 삭제하시겠습니까?')) {
+// Clear chat and create new conversation
+async function clearChat() {
+    if (confirm('새 대화를 시작하시겠습니까?\n(현재 대화는 히스토리에 저장됩니다)')) {
+        // Create new conversation (this will save the current one)
+        await createNewConversation();
+
         // Clear conversation history (both in memory and localStorage)
         clearHistory();
 
@@ -1130,9 +1478,21 @@ uploadArea.addEventListener('click', () => {
 });
 
 // File input change
+// Validate file type
+function isValidDocumentFile(file) {
+    const fileName = file.name.toLowerCase();
+    const validExtensions = ['.pdf', '.hwp', '.hwpx', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.txt'];
+    return validExtensions.some(ext => fileName.endsWith(ext));
+}
+
 fileInput.addEventListener('change', (e) => {
     if (e.target.files.length > 0) {
-        uploadFile(e.target.files[0]);
+        const file = e.target.files[0];
+        if (isValidDocumentFile(file)) {
+            uploadFile(file);
+        } else {
+            showUploadStatus('지원되지 않는 파일 형식입니다. 지원 형식: PDF, HWP, HWPX, DOC, DOCX, XLS, XLSX, PPT, PPTX, TXT', 'error');
+        }
     }
 });
 
@@ -1152,14 +1512,10 @@ uploadArea.addEventListener('drop', (e) => {
 
     if (e.dataTransfer.files.length > 0) {
         const file = e.dataTransfer.files[0];
-        const fileName = file.name.toLowerCase();
-        const isPDF = file.type === 'application/pdf' || fileName.endsWith('.pdf');
-        const isHWP = fileName.endsWith('.hwp');
-
-        if (isPDF || isHWP) {
+        if (isValidDocumentFile(file)) {
             uploadFile(file);
         } else {
-            showUploadStatus('PDF 또는 HWP 파일만 업로드 가능합니다.', 'error');
+            showUploadStatus('지원되지 않는 파일 형식입니다. 지원 형식: PDF, HWP, HWPX, DOC, DOCX, XLS, XLSX, PPT, PPTX, TXT', 'error');
         }
     }
 });
@@ -1193,6 +1549,14 @@ async function uploadFile(file) {
                 loadDocuments();
                 loadFilterDocuments();  // Refresh search scope filter
                 checkStatus();
+
+                // Update group tree (document count in groups)
+                loadGroupTree();
+
+                // If group management modal is open and a group is selected, refresh its documents
+                if (selectedGroupForEdit) {
+                    loadGroupDocuments(selectedGroupForEdit);
+                }
             }, 1000);
         } else {
             showUploadStatus(`✗ 업로드 실패: ${result.detail}`, 'error');
@@ -1570,6 +1934,8 @@ settingsBtn.addEventListener('click', async () => {
 function closeSettings() {
     settingsPanel.classList.remove('active');
     settingsOverlay.classList.remove('active');
+    // Remove focus from settings button to clear outline
+    settingsBtn.blur();
 }
 
 closeSettingsBtn.addEventListener('click', closeSettings);
@@ -2251,7 +2617,7 @@ function setTheme(theme, skipTransition = false) {
 loadSettings();
 
 // Load conversation history on startup
-loadHistory();
+// loadHistory();  // Disabled: Now using Redis-based conversation history instead of localStorage
 
 // Load draft on startup
 loadDraft();
@@ -2397,6 +2763,9 @@ function handleDocumentSelection(checkbox) {
     if (selectedDocumentIds.size > 0 && selectedMode) {
         selectedMode.checked = true;
     }
+
+    // Update tab counts
+    updateFilterTabCounts();
 }
 
 // Handle filter mode change (all vs selected)
@@ -2407,6 +2776,7 @@ function handleFilterModeChange(mode) {
             cb.checked = false;
         });
         selectedDocumentIds.clear();
+        updateFilterTabCounts();
     }
 }
 
@@ -2423,6 +2793,37 @@ function getSelectedDocumentIds() {
     }
 
     return Array.from(selectedDocumentIds);
+}
+
+/**
+ * Get active filter data based on the currently selected tab
+ * Returns object with documentIds and groupIds
+ */
+function getActiveFilterData() {
+    // Check which filter tab is active
+    const activeTab = document.querySelector('.filter-tab.active')?.dataset.tab;
+
+    let documentIds = null;
+    let groupIds = null;
+
+    if (activeTab === 'documents') {
+        // Document filter is active
+        const filterMode = document.querySelector('input[name="filterMode"]:checked')?.value;
+        if (filterMode === 'selected' && selectedDocumentIds && selectedDocumentIds.size > 0) {
+            documentIds = Array.from(selectedDocumentIds);
+        }
+    } else if (activeTab === 'groups') {
+        // Group filter is active
+        const groupFilterMode = document.querySelector('input[name="groupFilterMode"]:checked')?.value;
+        if (groupFilterMode === 'selected' && groupFilter) {
+            const selectedGroups = groupFilter.getSelectedGroups();
+            if (selectedGroups && selectedGroups.length > 0) {
+                groupIds = selectedGroups;
+            }
+        }
+    }
+
+    return { documentIds, groupIds };
 }
 
 // Initialize document filter
@@ -2590,14 +2991,557 @@ function hideSuggestedQuestions() {
     }
 }
 
+// ============================================================================
+// Group Management Integration
+// ============================================================================
+
+let groupManager = null;
+let groupFilter = null;
+let selectedGroupForEdit = null;
+
+/**
+ * Initialize group management UI
+ */
+async function initGroupManagement() {
+    try {
+        // Initialize group manager and filter
+        const result = await initializeGroupManagement();
+        groupManager = result.groupManager;
+        groupFilter = result.groupFilter;
+
+        // Setup modal event handlers
+        setupGroupModalHandlers();
+
+        // Setup filter tab handlers
+        setupGroupFilterHandlers();
+
+        // Load groups into filter
+        await loadGroupsIntoFilter();
+
+        // Update initial tab counts
+        updateFilterTabCounts();
+
+        console.log('Group management initialized successfully');
+    } catch (error) {
+        console.error('Failed to initialize group management:', error);
+    }
+}
+
+/**
+ * Setup group management modal handlers
+ */
+function setupGroupModalHandlers() {
+    // Group management button - open modal
+    const groupManageBtn = document.getElementById('groupManageBtn');
+    const groupModal = document.getElementById('groupManagementModal');
+    const closeGroupModal = document.getElementById('closeGroupModal');
+
+    if (groupManageBtn && groupModal) {
+        groupManageBtn.addEventListener('click', async () => {
+            groupModal.classList.add('active');
+
+            // Load latest group tree data
+            await loadGroupTree();
+
+            // If a group is currently selected, refresh its data
+            if (selectedGroupForEdit) {
+                await loadGroupDocuments(selectedGroupForEdit);
+            }
+
+            // Reload assignable documents list
+            await loadAllDocumentsForAssign();
+        });
+    }
+
+    if (closeGroupModal && groupModal) {
+        closeGroupModal.addEventListener('click', () => {
+            groupModal.classList.remove('active');
+        });
+    }
+
+    // Close modal when clicking outside
+    if (groupModal) {
+        groupModal.addEventListener('click', (e) => {
+            if (e.target === groupModal) {
+                groupModal.classList.remove('active');
+            }
+        });
+    }
+
+    // Create group button - open create modal
+    const createGroupBtn = document.getElementById('createGroupBtn');
+    const groupCreateModal = document.getElementById('groupCreateModal');
+    const closeGroupCreateModal = document.getElementById('closeGroupCreateModal');
+    const cancelGroupCreate = document.getElementById('cancelGroupCreate');
+
+    if (createGroupBtn && groupCreateModal) {
+        createGroupBtn.addEventListener('click', () => {
+            groupCreateModal.classList.add('active');
+            populateParentGroupSelect();
+        });
+    }
+
+    if (closeGroupCreateModal && groupCreateModal) {
+        closeGroupCreateModal.addEventListener('click', () => {
+            groupCreateModal.classList.remove('active');
+        });
+    }
+
+    if (cancelGroupCreate && groupCreateModal) {
+        cancelGroupCreate.addEventListener('click', () => {
+            groupCreateModal.classList.remove('active');
+        });
+    }
+
+    // Group creation form submit
+    const groupCreateForm = document.getElementById('groupCreateForm');
+    if (groupCreateForm) {
+        groupCreateForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            await handleGroupCreate();
+        });
+    }
+
+    // Group info form submit
+    const groupInfoForm = document.getElementById('groupInfoForm');
+    if (groupInfoForm) {
+        groupInfoForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            await handleGroupUpdate();
+        });
+    }
+
+    // Delete group button
+    const deleteGroupBtn = document.getElementById('deleteGroupBtn');
+    if (deleteGroupBtn) {
+        deleteGroupBtn.addEventListener('click', async () => {
+            await handleGroupDelete();
+        });
+    }
+
+    // Assign documents button
+    const assignDocumentsBtn = document.getElementById('assignDocumentsBtn');
+    if (assignDocumentsBtn) {
+        assignDocumentsBtn.addEventListener('click', async () => {
+            await handleDocumentAssign();
+        });
+    }
+}
+
+/**
+ * Setup filter tab handlers
+ */
+function setupGroupFilterHandlers() {
+    const filterTabs = document.querySelectorAll('.filter-tab');
+    const documentPanel = document.getElementById('documentFilterPanel');
+    const groupPanel = document.getElementById('groupFilterPanel');
+
+    filterTabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+            // Update active tab
+            filterTabs.forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+
+            // Show corresponding panel
+            const tabType = tab.dataset.tab;
+            if (tabType === 'documents') {
+                documentPanel.style.display = 'block';
+                groupPanel.style.display = 'none';
+            } else if (tabType === 'groups') {
+                documentPanel.style.display = 'none';
+                groupPanel.style.display = 'block';
+            }
+        });
+    });
+}
+
+/**
+ * Update filter tab counts to show selected items
+ */
+function updateFilterTabCounts() {
+    const documentTab = document.querySelector('.filter-tab[data-tab="documents"]');
+    const groupTab = document.querySelector('.filter-tab[data-tab="groups"]');
+
+    if (documentTab) {
+        const docCount = selectedDocumentIds ? selectedDocumentIds.size : 0;
+        const baseText = '문서별';
+        documentTab.textContent = docCount > 0 ? `${baseText} (${docCount})` : baseText;
+    }
+
+    if (groupTab && groupFilter) {
+        const groupCount = groupFilter.getSelectedGroups().length;
+        const baseText = '그룹별';
+        groupTab.textContent = groupCount > 0 ? `${baseText} (${groupCount})` : baseText;
+    }
+}
+
+/**
+ * Load groups into filter panel
+ */
+async function loadGroupsIntoFilter() {
+    try {
+        await groupManager.loadGroups();
+        const groupFilterList = document.getElementById('groupFilterList');
+
+        if (groupFilterList && groupFilter) {
+            groupFilter.renderGroupSelector(groupFilterList);
+
+            // Setup filter change handler
+            groupFilter.onFilterChanged = (selectedGroupIds) => {
+                console.log('Selected groups:', selectedGroupIds);
+
+                // Auto-select appropriate radio button based on group selection
+                const selectedRadio = document.querySelector('input[name="groupFilterMode"][value="selected"]');
+                const allRadio = document.querySelector('input[name="groupFilterMode"][value="all"]');
+
+                if (selectedGroupIds && selectedGroupIds.length > 0) {
+                    // Groups are selected -> auto-select "선택한 그룹만"
+                    if (selectedRadio) selectedRadio.checked = true;
+                } else {
+                    // No groups selected -> auto-select "전체 그룹"
+                    if (allRadio) allRadio.checked = true;
+                }
+
+                // Update tab counts
+                updateFilterTabCounts();
+                // Filter will be applied when user sends a query
+            };
+        }
+    } catch (error) {
+        console.error('Failed to load groups into filter:', error);
+    }
+}
+
+/**
+ * Load group tree in management modal
+ */
+async function loadGroupTree() {
+    try {
+        await groupManager.loadGroups();
+        const groupTree = document.getElementById('groupTree');
+
+        if (groupTree) {
+            groupManager.renderTree(groupTree, {
+                onSelect: handleGroupSelect,
+                onEdit: handleGroupEdit,
+                onDelete: handleGroupDelete,
+                selectedGroupId: selectedGroupForEdit,
+                showDocumentCount: true
+            });
+        }
+    } catch (error) {
+        console.error('Failed to load group tree:', error);
+    }
+}
+
+/**
+ * Handle group selection in tree
+ */
+function handleGroupSelect(groupId) {
+    selectedGroupForEdit = groupId;
+    const group = groupManager.findGroup(groupId);
+
+    if (group) {
+        // Show group details panel
+        document.getElementById('groupDetailsEmpty').style.display = 'none';
+        document.getElementById('groupDetailsContent').style.display = 'block';
+
+        // Populate form fields
+        document.getElementById('groupNameInput').value = group.name;
+        document.getElementById('groupDescInput').value = group.description || '';
+        document.getElementById('groupColorInput').value = group.color;
+        document.getElementById('groupIconInput').value = group.icon;
+        document.getElementById('groupDocCount').textContent = group.document_count || 0;
+
+        // Load documents for this group
+        loadGroupDocuments(groupId);
+
+        // Reload tree to show selection
+        loadGroupTree();
+    }
+}
+
+/**
+ * Handle group edit button click
+ */
+function handleGroupEdit(groupId) {
+    handleGroupSelect(groupId);
+}
+
+/**
+ * Handle group update form submit
+ */
+async function handleGroupUpdate() {
+    if (!selectedGroupForEdit) return;
+
+    try {
+        const updates = {
+            name: document.getElementById('groupNameInput').value,
+            description: document.getElementById('groupDescInput').value,
+            color: document.getElementById('groupColorInput').value,
+            icon: document.getElementById('groupIconInput').value
+        };
+
+        await groupManager.updateGroup(selectedGroupForEdit, updates);
+        await loadGroupTree();
+        await loadGroupsIntoFilter();
+
+        alert('그룹이 업데이트되었습니다.');
+    } catch (error) {
+        console.error('Failed to update group:', error);
+        alert('그룹 업데이트 실패: ' + error.message);
+    }
+}
+
+/**
+ * Handle group deletion
+ */
+async function handleGroupDelete() {
+    if (!selectedGroupForEdit) return;
+
+    const group = groupManager.findGroup(selectedGroupForEdit);
+    if (!group) return;
+
+    if (!confirm(`"${group.name}" 그룹을 삭제하시겠습니까?\n그룹의 문서는 부모 그룹으로 이동됩니다.`)) {
+        return;
+    }
+
+    try {
+        await groupManager.deleteGroup(selectedGroupForEdit);
+
+        // Reset selection
+        selectedGroupForEdit = null;
+        document.getElementById('groupDetailsEmpty').style.display = 'block';
+        document.getElementById('groupDetailsContent').style.display = 'none';
+
+        await loadGroupTree();
+        await loadGroupsIntoFilter();
+
+        alert('그룹이 삭제되었습니다.');
+    } catch (error) {
+        console.error('Failed to delete group:', error);
+        alert('그룹 삭제 실패: ' + error.message);
+    }
+}
+
+/**
+ * Handle group creation
+ */
+async function handleGroupCreate() {
+    try {
+        const groupData = {
+            name: document.getElementById('newGroupName').value,
+            description: document.getElementById('newGroupDesc').value,
+            color: document.getElementById('newGroupColor').value,
+            icon: document.getElementById('newGroupIcon').value,
+            parent_id: document.getElementById('newGroupParent').value || null
+        };
+
+        await groupManager.createGroup(groupData);
+
+        // Close modal and reset form
+        document.getElementById('groupCreateModal').classList.remove('active');
+        document.getElementById('groupCreateForm').reset();
+
+        // Reload trees
+        await loadGroupTree();
+        await loadGroupsIntoFilter();
+
+        alert('그룹이 생성되었습니다.');
+    } catch (error) {
+        console.error('Failed to create group:', error);
+        alert('그룹 생성 실패: ' + error.message);
+    }
+}
+
+/**
+ * Populate parent group select dropdown
+ */
+function populateParentGroupSelect() {
+    const select = document.getElementById('newGroupParent');
+    if (!select) return;
+
+    // Clear existing options except first
+    while (select.options.length > 1) {
+        select.remove(1);
+    }
+
+    // Add all groups as options
+    groupManager.groups.forEach(group => {
+        const option = document.createElement('option');
+        option.value = group.id;
+        option.textContent = `${group.icon} ${group.name}`;
+        select.appendChild(option);
+    });
+}
+
+/**
+ * Load documents for a group
+ */
+async function loadGroupDocuments(groupId) {
+    try {
+        const documents = await groupManager.getGroupDocuments(groupId);
+        const listContainer = document.getElementById('groupDocumentsList');
+
+        if (!listContainer) return;
+
+        if (documents.length === 0) {
+            listContainer.innerHTML = '<div class="empty-state">할당된 문서가 없습니다</div>';
+        } else {
+            listContainer.innerHTML = documents.map(doc => `
+                <div class="assigned-document-item">
+                    <span class="assigned-document-name">${doc}</span>
+                    <button class="remove-document-btn" data-filename="${doc}" data-group-id="${groupId}" title="그룹에서 제거">🗑️</button>
+                </div>
+            `).join('');
+
+            // Add event listeners to remove buttons
+            listContainer.querySelectorAll('.remove-document-btn').forEach(btn => {
+                btn.addEventListener('click', async (e) => {
+                    const filename = e.target.dataset.filename;
+                    const groupId = e.target.dataset.groupId;
+
+                    if (confirm(`"${filename}" 문서를 이 그룹에서 제거하시겠습니까?\n(문서는 기본 그룹으로 이동됩니다)`)) {
+                        try {
+                            await groupManager.removeDocumentFromGroup(filename, groupId);
+                            // Reload group documents and update count
+                            await loadGroupDocuments(groupId);
+                            updateGroupDocCount(groupId);
+
+                            // Reload group tree to update document counts in group list
+                            await loadGroupTree();
+
+                            // Reload the assignable document list to prevent duplicates
+                            await loadAllDocumentsForAssign();
+
+                            // Update search filter to reflect document count changes
+                            await loadGroupsIntoFilter();
+
+                            showNotification('문서가 기본 그룹으로 이동되었습니다.', 'success');
+                        } catch (error) {
+                            showNotification('문서 제거에 실패했습니다: ' + error.message, 'error');
+                        }
+                    }
+                });
+            });
+        }
+
+        // Load all documents into the assign select
+        await loadAllDocumentsForAssign();
+    } catch (error) {
+        console.error('Failed to load group documents:', error);
+    }
+}
+
+/**
+ * Update group document count in UI
+ */
+async function updateGroupDocCount(groupId) {
+    try {
+        const group = groupManager.findGroup(groupId);
+        if (group) {
+            const countElement = document.getElementById('groupDocCount');
+            if (countElement) {
+                countElement.textContent = group.document_count || 0;
+            }
+        }
+    } catch (error) {
+        console.error('Failed to update group doc count:', error);
+    }
+}
+
+/**
+ * Load all documents for assignment dropdown
+ */
+async function loadAllDocumentsForAssign() {
+    try {
+        const response = await fetch('/api/documents');
+        const data = await response.json();
+
+        const select = document.getElementById('documentSelectForAssign');
+        if (!select) return;
+
+        select.innerHTML = '';
+
+        // Get currently assigned documents for the selected group
+        let assignedDocs = [];
+        if (selectedGroupForEdit) {
+            try {
+                assignedDocs = await groupManager.getGroupDocuments(selectedGroupForEdit);
+            } catch (error) {
+                console.error('Failed to load assigned documents:', error);
+            }
+        }
+
+        if (data.documents && data.documents.length > 0) {
+            // Filter out documents already assigned to the current group
+            const availableDocs = data.documents.filter(doc => !assignedDocs.includes(doc.filename));
+
+            if (availableDocs.length > 0) {
+                availableDocs.forEach(doc => {
+                    const option = document.createElement('option');
+                    option.value = doc.filename;
+                    option.textContent = doc.filename;
+                    select.appendChild(option);
+                });
+            } else {
+                select.innerHTML = '<option>할당 가능한 문서가 없습니다</option>';
+            }
+        } else {
+            select.innerHTML = '<option>문서가 없습니다</option>';
+        }
+    } catch (error) {
+        console.error('Failed to load documents:', error);
+    }
+}
+
+/**
+ * Handle document assignment
+ */
+async function handleDocumentAssign() {
+    if (!selectedGroupForEdit) {
+        alert('그룹을 먼저 선택해주세요.');
+        return;
+    }
+
+    const select = document.getElementById('documentSelectForAssign');
+    const selectedDocs = Array.from(select.selectedOptions).map(opt => opt.value);
+
+    if (selectedDocs.length === 0) {
+        alert('할당할 문서를 선택해주세요.');
+        return;
+    }
+
+    try {
+        await groupManager.batchAssignDocuments(selectedDocs, selectedGroupForEdit);
+        await loadGroupDocuments(selectedGroupForEdit);
+        await loadGroupTree(); // Refresh to update document counts
+
+        // Reload the assignable document list to update available documents
+        await loadAllDocumentsForAssign();
+
+        // Update search filter to reflect document count changes
+        await loadGroupsIntoFilter();
+
+        alert(`${selectedDocs.length}개 문서가 할당되었습니다.`);
+    } catch (error) {
+        console.error('Failed to assign documents:', error);
+        alert('문서 할당 실패: ' + error.message);
+    }
+}
+
 // Start application when DOM is ready
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
         init();
         initDocumentFilter();
+        initGroupManagement();
+        initConversationHistory();
     });
 } else {
     // DOM already loaded
     init();
     initDocumentFilter();
+    initGroupManagement();
+    initConversationHistory();
 }

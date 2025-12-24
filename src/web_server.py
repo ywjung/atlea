@@ -8,7 +8,7 @@ import shutil
 import hashlib
 import asyncio
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 from fastapi import FastAPI, HTTPException, UploadFile, File, Request, Response
 from fastapi.middleware.gzip import GZipMiddleware
@@ -26,6 +26,8 @@ from .llm import LLM, RAGSystem
 from .document_tracker import DocumentTracker
 from .cache_manager import CacheManager
 from .model_manager import ModelManager
+from .group_manager import GroupManager
+from .conversation_manager import ConversationManager
 
 # Load environment variables
 load_dotenv()
@@ -102,16 +104,28 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # Restrict feature permissions
         response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
 
-        # Content Security Policy (moderate policy allowing CDNs for external libraries)
-        response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "  # Allow marked.js and highlight.js from trusted CDNs
-            "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; "  # Allow highlight.js CSS from CDN
-            "img-src 'self' data:; "  # Allow data URIs for images
-            "font-src 'self'; "
-            "connect-src 'self'; "
-            "frame-ancestors 'none';"  # Prevent embedding in iframes
-        )
+        # Relaxed CSP for API documentation pages (/docs, /redoc, /openapi.json)
+        if request.url.path in ["/docs", "/redoc", "/openapi.json"]:
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'self'; "
+                "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://unpkg.com https://cdnjs.cloudflare.com; "
+                "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com https://cdnjs.cloudflare.com; "
+                "img-src 'self' data: https:; "
+                "font-src 'self' data: https://cdn.jsdelivr.net https://unpkg.com; "
+                "connect-src 'self'; "
+                "frame-ancestors 'none';"
+            )
+        else:
+            # Stricter CSP for main application
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'self'; "
+                "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
+                "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; "
+                "img-src 'self' data:; "
+                "font-src 'self'; "
+                "connect-src 'self'; "
+                "frame-ancestors 'none';"
+            )
 
         # HSTS only for HTTPS connections (uncomment in production with HTTPS)
         # if request.url.scheme == "https":
@@ -140,6 +154,7 @@ vector_db: Optional[VectorDB] = None
 llm: Optional[LLM] = None
 rag_system: Optional[RAGSystem] = None
 cache_manager: Optional[CacheManager] = None
+conversation_manager: Optional[ConversationManager] = None
 suggested_questions_pool: list = []  # Pre-generated question pool
 is_reindexing: bool = False  # Flag to track reindexing status
 reindex_event: Optional[asyncio.Event] = None  # Event to signal reindex completion
@@ -163,7 +178,7 @@ def invalidate_status_cache():
 async def validate_file_content(file: UploadFile, max_header_bytes: int = 1024) -> bool:
     """
     Validate file content by checking magic bytes (file signature)
-    Supports: PDF, HWP, HWPX, DOC, DOCX, XLS, XLSX, PPT, PPTX
+    Supports: PDF, HWP, HWPX, DOC, DOCX, XLS, XLSX, PPT, PPTX, TXT
 
     Args:
         file: Uploaded file object
@@ -208,6 +223,22 @@ async def validate_file_content(file: UploadFile, max_header_bytes: int = 1024) 
         valid = True
     elif file_ext in ['docx', 'xlsx', 'pptx'] and is_zip:
         valid = True
+    elif file_ext == 'txt':
+        # TXT files don't have magic bytes, but check for malicious content
+        # Check for executable signatures
+        if header.startswith(b'MZ') or header.startswith(b'\x7fELF'):
+            raise HTTPException(
+                status_code=400,
+                detail="실행 파일은 업로드할 수 없습니다."
+            )
+        # Check for HTML/script content
+        elif b'<script' in header.lower() or b'<html' in header.lower():
+            raise HTTPException(
+                status_code=400,
+                detail="HTML 파일은 업로드할 수 없습니다."
+            )
+        # TXT files are text-based, allow them
+        valid = True
 
     if not valid:
         # Try to detect malicious content
@@ -224,7 +255,7 @@ async def validate_file_content(file: UploadFile, max_header_bytes: int = 1024) 
         else:
             raise HTTPException(
                 status_code=400,
-                detail=f"파일 형식이 올바르지 않습니다. 지원 형식: PDF, HWP, HWPX, DOC, DOCX, XLS, XLSX, PPT, PPTX"
+                detail=f"파일 형식이 올바르지 않습니다. 지원 형식: PDF, HWP, HWPX, DOC, DOCX, XLS, XLSX, PPT, PPTX, TXT"
             )
 
     return True
@@ -350,7 +381,9 @@ class QueryRequest(BaseModel):
     cache_threshold: float = 0.95
     cache_ttl: int = 60
     document_ids: Optional[list] = None  # Filter by specific document IDs/filenames
+    group_ids: Optional[list] = None  # Filter by group IDs (OR logic)
     history: Optional[list] = None  # Conversation history [{"role": "user/assistant", "content": "..."}]
+    session_id: Optional[str] = None  # Conversation session ID for history persistence
 
     @validator('question')
     def sanitize_question(cls, v):
@@ -472,7 +505,7 @@ async def get_rag_system() -> RAGSystem:
 @app.on_event("startup")
 async def startup_event():
     """Initialize models and database on startup (fast startup with lazy loading)"""
-    global embedding_model, vector_db, cache_manager, suggested_questions_pool, reindex_event
+    global embedding_model, vector_db, cache_manager, group_manager, conversation_manager, suggested_questions_pool, reindex_event
 
     try:
         logger.info("🚀 Starting application initialization (fast mode)...")
@@ -488,22 +521,51 @@ async def startup_event():
             model_dir=MODEL_DIR
         )
 
-        # Initialize vector database
+        # Initialize vector database with production-ready Redis configuration
         logger.info("🔌 Connecting to Redis...")
+
+        # Production Redis configuration
+        redis_max_connections = int(os.getenv("REDIS_MAX_CONNECTIONS", 50))
+        redis_socket_timeout = int(os.getenv("REDIS_SOCKET_TIMEOUT", 5))
+        redis_socket_keepalive = os.getenv("REDIS_SOCKET_KEEPALIVE", "true").lower() == "true"
+
         vector_db = VectorDB(
             host=REDIS_HOST,
             port=REDIS_PORT,
-            embedding_dim=embedding_model.get_embedding_dim()
+            embedding_dim=embedding_model.get_embedding_dim(),
+            # Production Redis connection pool settings
+            max_connections=redis_max_connections,
+            socket_timeout=redis_socket_timeout,
+            socket_keepalive=redis_socket_keepalive,
+            socket_keepalive_options={},
+            health_check_interval=30  # Check connection health every 30s
         )
 
-        # Initialize cache manager
+        logger.info(f"Redis configured: max_connections={redis_max_connections}, timeout={redis_socket_timeout}s")
+
+        # Initialize cache manager with production settings
         logger.info("💾 Initializing cache manager...")
+
+        # Production cache configuration
+        cache_similarity_threshold = float(os.getenv("CACHE_SIMILARITY_THRESHOLD", 0.95))
+        cache_ttl = int(os.getenv("CACHE_TTL", 3600))  # Default 1 hour
+
         cache_manager = CacheManager(
             redis_client=vector_db.client,
             embedding_model=embedding_model.model,
-            similarity_threshold=0.95,  # 95% similarity threshold
-            cache_ttl=3600  # 1 hour cache
+            similarity_threshold=cache_similarity_threshold,
+            cache_ttl=cache_ttl
         )
+
+        logger.info(f"Cache configured: similarity={cache_similarity_threshold}, TTL={cache_ttl}s")
+
+        # Initialize group manager
+        logger.info("📁 Initializing group manager...")
+        group_manager = GroupManager(redis_client=vector_db.client)
+
+        # Initialize conversation manager
+        logger.info("💬 Initializing conversation manager...")
+        conversation_manager = ConversationManager(redis_client=vector_db.client)
 
         # Smart indexing: check if reindexing is needed
         await check_and_index_pdfs()
@@ -832,6 +894,15 @@ async def query(request: QueryRequest):
         logger.info(f"✅ Reindex complete, processing query")
 
     try:
+        # Save user question to conversation history
+        if request.session_id and conversation_manager:
+            conversation_manager.add_message(
+                session_id=request.session_id,
+                role="user",
+                content=request.question
+            )
+            logger.debug(f"💬 Saved user message to session {request.session_id}")
+
         # Lazy load RAG system on first use
         rag = await get_rag_system()
 
@@ -844,8 +915,23 @@ async def query(request: QueryRequest):
             query_embedding=query_embedding,
             top_k=request.top_k,
             history=request.history,
-            document_ids=request.document_ids
+            document_ids=request.document_ids,
+            group_ids=request.group_ids
         )
+
+        # Save assistant response to conversation history
+        if request.session_id and conversation_manager:
+            metadata = {
+                "sources": result["sources"],
+                "chunk_count": len(result["context"])
+            }
+            conversation_manager.add_message(
+                session_id=request.session_id,
+                role="assistant",
+                content=result["answer"],
+                metadata=metadata
+            )
+            logger.debug(f"💬 Saved assistant response to session {request.session_id}")
 
         return QueryResponse(
             answer=result["answer"],
@@ -877,6 +963,15 @@ async def query_stream(request: QueryRequest):
         logger.info(f"✅ Reindex complete, processing streaming query")
 
     try:
+        # Save user question to conversation history
+        if request.session_id and conversation_manager:
+            conversation_manager.add_message(
+                session_id=request.session_id,
+                role="user",
+                content=request.question
+            )
+            logger.debug(f"💬 Saved user message to session {request.session_id}")
+
         # Lazy load RAG system on first use
         rag = await get_rag_system()
 
@@ -888,7 +983,8 @@ async def query_stream(request: QueryRequest):
             question=request.question,
             top_k=request.top_k,
             similarity_threshold=request.cache_threshold,
-            document_ids=request.document_ids
+            document_ids=request.document_ids,
+            group_ids=request.group_ids
         )
 
         if cached_response:
@@ -901,6 +997,21 @@ async def query_stream(request: QueryRequest):
                 "cached": True,
                 "similarity": cached_response["similarity"]
             }
+
+            # Save cached response to conversation history
+            if request.session_id and conversation_manager:
+                metadata = {
+                    "sources": cached_response["sources"],
+                    "cached": True,
+                    "similarity": cached_response["similarity"]
+                }
+                conversation_manager.add_message(
+                    session_id=request.session_id,
+                    role="assistant",
+                    content=cached_response["response"],
+                    metadata=metadata
+                )
+                logger.debug(f"💬 Saved cached response to session {request.session_id}")
 
             async def generate_cached_stream():
                 # Send metadata with cache indicator
@@ -932,11 +1043,14 @@ async def query_stream(request: QueryRequest):
         # Cache MISS - generate new response
         logger.info("❌ Cache MISS - generating new response")
 
-        # Create query embedding
-        query_embedding = embedding_model.encode(request.question)[0]
+        # Create query embedding (run in thread pool to avoid blocking)
+        query_embedding = await asyncio.to_thread(
+            lambda: embedding_model.encode(request.question)[0]
+        )
 
-        # Query RAG system with streaming
-        result = rag.query(
+        # Query RAG system with streaming (run in thread pool to avoid blocking)
+        result = await asyncio.to_thread(
+            rag.query,
             question=request.question,
             query_embedding=query_embedding,
             top_k=request.top_k,
@@ -945,7 +1059,8 @@ async def query_stream(request: QueryRequest):
             temperature=request.temperature,
             max_tokens=request.max_tokens,
             system_prompt=request.system_prompt,
-            document_ids=request.document_ids
+            document_ids=request.document_ids,
+            group_ids=request.group_ids
         )
 
         # Prepare context and sources for the first message
@@ -962,7 +1077,7 @@ async def query_stream(request: QueryRequest):
             "cached": False
         }
 
-        # Collect response for caching
+        # Collect response for caching and conversation history
         full_response = []
 
         async def generate_stream():
@@ -984,9 +1099,25 @@ async def query_stream(request: QueryRequest):
                 top_k=request.top_k,
                 cache_ttl=request.cache_ttl,
                 context=context_data["context"],  # Save context for source details
-                document_ids=request.document_ids  # Include document filter in cache key
+                document_ids=request.document_ids,  # Include document filter in cache key
+                group_ids=request.group_ids  # Include group filter in cache key
             )
             logger.info(f"💾 Saved response to cache for question: '{request.question[:50]}...'")
+
+            # Save assistant response to conversation history
+            if request.session_id and conversation_manager:
+                metadata = {
+                    "sources": result["sources"],
+                    "chunk_count": len(result["context"]),
+                    "cached": False
+                }
+                conversation_manager.add_message(
+                    session_id=request.session_id,
+                    role="assistant",
+                    content=complete_response,
+                    metadata=metadata
+                )
+                logger.debug(f"💬 Saved assistant response to session {request.session_id}")
 
             # Send completion message
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
@@ -1031,6 +1162,12 @@ async def reindex():
 
         # Invalidate status cache (documents reindexed)
         invalidate_status_cache()
+
+        # Clear document count cache (all documents reindexed)
+        vector_db.clear_document_count_cache()
+
+        # Synchronize group document counts after reindexing
+        group_manager.sync_document_counts()
 
         logger.success("✅ Reindexing completed (search enabled)")
 
@@ -1089,18 +1226,27 @@ async def clear_cache():
 @app.get("/api/documents")
 async def list_documents():
     """
-    List all indexed PDF and HWP documents with metadata (optimized with batch queries)
+    List all indexed documents with metadata (optimized with batch queries)
+    Supports: PDF, HWP, HWPX, DOC, DOCX, XLS, XLSX, PPT, PPTX, TXT
     """
     try:
         data_path = Path(DATA_DIR)
         if not data_path.exists():
             return {"documents": []}
 
-        # Get all PDF and HWP files
+        # Get all supported document files
         import itertools
         all_files = list(itertools.chain(
             data_path.glob("*.pdf"),
-            data_path.glob("*.hwp")
+            data_path.glob("*.hwp"),
+            data_path.glob("*.hwpx"),
+            data_path.glob("*.doc"),
+            data_path.glob("*.docx"),
+            data_path.glob("*.xls"),
+            data_path.glob("*.xlsx"),
+            data_path.glob("*.ppt"),
+            data_path.glob("*.pptx"),
+            data_path.glob("*.txt")
         ))
 
         if not all_files:
@@ -1207,11 +1353,11 @@ async def upload_document(file: UploadFile = File(...)):
         safe_filename = validate_filename(file.filename)
 
         # Validate file type (extension check)
-        allowed_extensions = ['.pdf', '.hwp', '.hwpx', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx']
+        allowed_extensions = ['.pdf', '.hwp', '.hwpx', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.txt']
         if not any(safe_filename.endswith(ext) for ext in allowed_extensions):
             raise HTTPException(
                 status_code=400,
-                detail="지원되지 않는 파일 형식입니다. 지원 형식: PDF, HWP, HWPX, DOC, DOCX, XLS, XLSX, PPT, PPTX"
+                detail="지원되지 않는 파일 형식입니다. 지원 형식: PDF, HWP, HWPX, DOC, DOCX, XLS, XLSX, PPT, PPTX, TXT"
             )
 
         # Security: Validate file content (magic bytes check)
@@ -1326,6 +1472,18 @@ async def upload_document(file: UploadFile = File(...)):
             # Invalidate status cache (document set changed)
             invalidate_status_cache()
 
+            # Clear document count cache (new document added)
+            vector_db.clear_document_count_cache()
+
+            # Automatically assign new document to default group (미분류)
+            try:
+                default_group_id = group_manager.get_default_group_id()
+                group_manager.assign_document(safe_filename, default_group_id)
+                logger.info(f"Assigned {safe_filename} to default group (미분류)")
+            except Exception as e:
+                logger.warning(f"Failed to assign document to default group: {e}")
+                # Don't fail the upload if group assignment fails
+
             # Get file stats
             stat = file_path.stat()
 
@@ -1390,6 +1548,14 @@ async def delete_document(filename: str):
                 logger.error(f"Failed to delete from vector DB: {e}")
                 # Continue with file deletion even if vector DB deletion fails
 
+        # Remove document from all groups
+        try:
+            group_manager.delete_document_from_all_groups(safe_filename)
+            logger.info(f"Removed {safe_filename} from all groups")
+        except Exception as e:
+            logger.warning(f"Failed to remove document from groups: {e}")
+            # Continue with file deletion even if group removal fails
+
         # Delete file
         file_path.unlink()
         logger.info(f"Deleted file: {safe_filename}")
@@ -1411,6 +1577,9 @@ async def delete_document(filename: str):
 
         # Invalidate status cache (document set changed)
         invalidate_status_cache()
+
+        # Clear document count cache (document deleted)
+        vector_db.clear_document_count_cache()
 
         return {
             "message": f"Document '{safe_filename}' deleted successfully",
@@ -1689,6 +1858,526 @@ async def get_suggested_questions():
         }
 
 
+# ============================================================================
+# Group Management API Endpoints
+# ============================================================================
+
+class GroupCreateRequest(BaseModel):
+    name: str
+    description: str = ""
+    color: str = "#3B82F6"
+    icon: str = "📁"
+    parent_id: Optional[str] = None
+
+
+class GroupUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    color: Optional[str] = None
+    icon: Optional[str] = None
+
+
+class GroupMoveRequest(BaseModel):
+    new_parent_id: Optional[str] = None
+
+
+class DocumentAssignRequest(BaseModel):
+    group_id: str
+
+
+class BatchDocumentAssignRequest(BaseModel):
+    filenames: List[str]
+
+
+@app.get("/api/groups")
+async def list_groups():
+    """
+    Get all groups with hierarchy
+
+    Returns:
+        List of all groups with their metadata and tree structure
+    """
+    try:
+        groups = group_manager.get_all_groups()
+        tree = group_manager.get_group_tree()
+
+        return {
+            "groups": groups,
+            "tree": tree
+        }
+    except Exception as e:
+        logger.error(f"Failed to list groups: {e}")
+        safe_message = get_safe_error_message(e, "list groups endpoint")
+        raise HTTPException(status_code=500, detail=safe_message)
+
+
+@app.post("/api/groups")
+async def create_group(request: GroupCreateRequest):
+    """
+    Create a new group
+
+    Args:
+        request: Group creation parameters
+
+    Returns:
+        Created group ID and details
+    """
+    try:
+        group_id = group_manager.create_group(
+            name=request.name,
+            description=request.description,
+            color=request.color,
+            icon=request.icon,
+            parent_id=request.parent_id,
+            created_by="system"
+        )
+
+        if not group_id:
+            raise HTTPException(status_code=400, detail="Failed to create group")
+
+        group = group_manager.get_group(group_id)
+        logger.info(f"Created group: {group_id} ({request.name})")
+
+        return {
+            "success": True,
+            "group_id": group_id,
+            "group": group
+        }
+    except ValueError as e:
+        # Validation errors (e.g., invalid parent_id)
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to create group: {e}")
+        safe_message = get_safe_error_message(e, "create group endpoint")
+        raise HTTPException(status_code=500, detail=safe_message)
+
+
+@app.put("/api/groups/{group_id}")
+async def update_group(group_id: str, request: GroupUpdateRequest):
+    """
+    Update group metadata
+
+    Args:
+        group_id: ID of the group to update
+        request: Fields to update
+
+    Returns:
+        Updated group details
+    """
+    try:
+        # Build update dict from non-None fields
+        updates = {}
+        if request.name is not None:
+            updates["name"] = request.name
+        if request.description is not None:
+            updates["description"] = request.description
+        if request.color is not None:
+            updates["color"] = request.color
+        if request.icon is not None:
+            updates["icon"] = request.icon
+
+        if not updates:
+            raise HTTPException(status_code=400, detail="No fields to update")
+
+        success = group_manager.update_group(
+            group_id=group_id,
+            updated_by="system",
+            **updates
+        )
+
+        if not success:
+            raise HTTPException(status_code=404, detail="Group not found")
+
+        group = group_manager.get_group(group_id)
+        logger.info(f"Updated group: {group_id}")
+
+        return {
+            "success": True,
+            "group": group
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to update group: {e}")
+        safe_message = get_safe_error_message(e, "update group endpoint")
+        raise HTTPException(status_code=500, detail=safe_message)
+
+
+@app.delete("/api/groups/{group_id}")
+async def delete_group(group_id: str, reassign_to: Optional[str] = None):
+    """
+    Delete a group and reassign its documents
+
+    Args:
+        group_id: ID of the group to delete
+        reassign_to: Group ID to reassign documents to (defaults to parent or default group)
+
+    Returns:
+        Number of documents reassigned
+    """
+    try:
+        # Prevent deletion of default group
+        default_group_id = group_manager.get_default_group_id()
+        if group_id == default_group_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot delete default group"
+            )
+
+        reassigned_count = group_manager.delete_group(
+            group_id=group_id,
+            reassign_to=reassign_to
+        )
+
+        logger.info(f"Deleted group: {group_id}, reassigned {reassigned_count} documents")
+
+        return {
+            "success": True,
+            "reassigned_documents": reassigned_count
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to delete group: {e}")
+        safe_message = get_safe_error_message(e, "delete group endpoint")
+        raise HTTPException(status_code=500, detail=safe_message)
+
+
+@app.patch("/api/groups/{group_id}/move")
+async def move_group(group_id: str, request: GroupMoveRequest):
+    """
+    Move a group to a new parent (change hierarchy)
+
+    Args:
+        group_id: ID of the group to move
+        request: New parent group ID
+
+    Returns:
+        Updated group details
+    """
+    try:
+        success = group_manager.move_group(
+            group_id=group_id,
+            new_parent_id=request.new_parent_id,
+            updated_by="system"
+        )
+
+        if not success:
+            raise HTTPException(status_code=404, detail="Group not found")
+
+        group = group_manager.get_group(group_id)
+        logger.info(f"Moved group: {group_id} to parent {request.new_parent_id}")
+
+        return {
+            "success": True,
+            "group": group
+        }
+    except ValueError as e:
+        # Circular reference or validation errors
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to move group: {e}")
+        safe_message = get_safe_error_message(e, "move group endpoint")
+        raise HTTPException(status_code=500, detail=safe_message)
+
+
+@app.put("/api/documents/{filename}/group")
+async def assign_document_to_group(filename: str, request: DocumentAssignRequest):
+    """
+    Assign a document to a group
+
+    Args:
+        filename: Document filename
+        request: Target group ID
+
+    Returns:
+        Success status
+    """
+    try:
+        success = group_manager.assign_document(
+            filename=filename,
+            group_id=request.group_id
+        )
+
+        if not success:
+            raise HTTPException(
+                status_code=404,
+                detail="Document or group not found"
+            )
+
+        logger.info(f"Assigned document '{filename}' to group {request.group_id}")
+
+        return {
+            "success": True,
+            "filename": filename,
+            "group_id": request.group_id
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to assign document: {e}")
+        safe_message = get_safe_error_message(e, "assign document endpoint")
+        raise HTTPException(status_code=500, detail=safe_message)
+
+
+@app.post("/api/groups/{group_id}/documents")
+async def batch_assign_documents(group_id: str, request: BatchDocumentAssignRequest):
+    """
+    Batch assign multiple documents to a group
+
+    Args:
+        group_id: Target group ID
+        request: List of filenames to assign
+
+    Returns:
+        Number of documents successfully assigned
+    """
+    try:
+        assigned_count = group_manager.batch_assign_documents(
+            filenames=request.filenames,
+            group_id=group_id
+        )
+
+        logger.info(f"Batch assigned {assigned_count}/{len(request.filenames)} documents to group {group_id}")
+
+        return {
+            "success": True,
+            "assigned_count": assigned_count,
+            "total_requested": len(request.filenames)
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to batch assign documents: {e}")
+        safe_message = get_safe_error_message(e, "batch assign documents endpoint")
+        raise HTTPException(status_code=500, detail=safe_message)
+
+
+@app.delete("/api/groups/{group_id}/documents/{filename}")
+async def remove_document_from_group(group_id: str, filename: str):
+    """
+    Remove a document from a group (reassigns to default group)
+
+    Args:
+        group_id: Group ID to remove document from
+        filename: Document filename to remove
+
+    Returns:
+        Success status
+    """
+    try:
+        success = group_manager.remove_document_from_group(
+            filename=filename,
+            group_id=group_id
+        )
+
+        if not success:
+            raise HTTPException(
+                status_code=404,
+                detail="문서 또는 그룹을 찾을 수 없습니다."
+            )
+
+        logger.info(f"Removed document '{filename}' from group {group_id}")
+
+        return {
+            "success": True,
+            "filename": filename,
+            "group_id": group_id,
+            "message": "문서가 기본 그룹으로 이동되었습니다."
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to remove document from group: {e}")
+        safe_message = get_safe_error_message(e, "remove document from group endpoint")
+        raise HTTPException(status_code=500, detail=safe_message)
+
+
+@app.get("/api/groups/{group_id}/documents")
+async def list_group_documents(group_id: str):
+    """
+    Get all documents in a group
+
+    Args:
+        group_id: Group ID to query
+
+    Returns:
+        List of document filenames in the group
+    """
+    try:
+        documents = group_manager.get_group_documents(group_id)
+
+        return {
+            "group_id": group_id,
+            "documents": documents,
+            "count": len(documents)
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to list group documents: {e}")
+        safe_message = get_safe_error_message(e, "list group documents endpoint")
+        raise HTTPException(status_code=500, detail=safe_message)
+
+
+@app.post("/api/groups/sync-counts")
+async def sync_group_document_counts():
+    """
+    Synchronize document counts for all groups
+    Recalculates counts from actual SET cardinality
+    """
+    try:
+        group_manager.sync_document_counts()
+        return {"status": "success", "message": "그룹별 문서 개수가 동기화되었습니다"}
+    except Exception as e:
+        logger.error(f"Failed to sync document counts: {e}")
+        safe_message = get_safe_error_message(e, "sync document counts endpoint")
+        raise HTTPException(status_code=500, detail=safe_message)
+
+
+# ============================================================================
+# Conversation History API Endpoints
+# ============================================================================
+
+@app.post("/api/conversations")
+async def create_conversation(title: str = None):
+    """
+    Create a new conversation session
+
+    Args:
+        title: Optional conversation title
+
+    Returns:
+        Session ID and metadata
+    """
+    try:
+        if not conversation_manager:
+            raise HTTPException(status_code=500, detail="Conversation manager not initialized")
+
+        session_id = conversation_manager.create_session(title=title)
+        session = conversation_manager.get_session(session_id)
+
+        return {
+            "session_id": session_id,
+            "session": session
+        }
+    except Exception as e:
+        logger.error(f"Failed to create conversation: {e}")
+        safe_message = get_safe_error_message(e, "create conversation endpoint")
+        raise HTTPException(status_code=500, detail=safe_message)
+
+
+@app.get("/api/conversations")
+async def list_conversations(limit: int = 50, offset: int = 0):
+    """
+    List conversation sessions (sorted by most recent)
+
+    Args:
+        limit: Maximum number of sessions to return
+        offset: Number of sessions to skip
+
+    Returns:
+        List of conversation sessions
+    """
+    try:
+        if not conversation_manager:
+            raise HTTPException(status_code=500, detail="Conversation manager not initialized")
+
+        sessions = conversation_manager.list_sessions(limit=limit, offset=offset)
+        total_count = conversation_manager.get_session_count()
+
+        return {
+            "sessions": sessions,
+            "total_count": total_count,
+            "limit": limit,
+            "offset": offset
+        }
+    except Exception as e:
+        logger.error(f"Failed to list conversations: {e}")
+        safe_message = get_safe_error_message(e, "list conversations endpoint")
+        raise HTTPException(status_code=500, detail=safe_message)
+
+
+@app.get("/api/conversations/{session_id}")
+async def get_conversation(session_id: str, limit: int = None, offset: int = 0):
+    """
+    Get conversation session with messages
+
+    Args:
+        session_id: Conversation session ID
+        limit: Maximum number of messages to return (None = all)
+        offset: Number of messages to skip
+
+    Returns:
+        Session metadata and messages
+    """
+    try:
+        if not conversation_manager:
+            raise HTTPException(status_code=500, detail="Conversation manager not initialized")
+
+        session = conversation_manager.get_session(session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail=f"Conversation {session_id} not found")
+
+        messages = conversation_manager.get_messages(session_id, limit=limit, offset=offset)
+
+        return {
+            "session": session,
+            "messages": messages,
+            "message_count": len(messages)
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get conversation: {e}")
+        safe_message = get_safe_error_message(e, "get conversation endpoint")
+        raise HTTPException(status_code=500, detail=safe_message)
+
+
+@app.delete("/api/conversations/{session_id}")
+async def delete_conversation(session_id: str):
+    """
+    Delete a conversation session and all its messages
+
+    Args:
+        session_id: Conversation session ID
+
+    Returns:
+        Success message
+    """
+    try:
+        if not conversation_manager:
+            raise HTTPException(status_code=500, detail="Conversation manager not initialized")
+
+        success = conversation_manager.delete_session(session_id)
+
+        if not success:
+            raise HTTPException(status_code=404, detail=f"Conversation {session_id} not found")
+
+        return {
+            "status": "success",
+            "message": f"Conversation {session_id} deleted successfully"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to delete conversation: {e}")
+        safe_message = get_safe_error_message(e, "delete conversation endpoint")
+        raise HTTPException(status_code=500, detail=safe_message)
+
+
+# ============================================================================
+# Follow-up Questions API
+# ============================================================================
+
 class FollowUpRequest(BaseModel):
     question: str
     answer: str
@@ -1797,11 +2486,225 @@ async def generate_follow_up_questions(request: FollowUpRequest):
         }
 
 
+@app.get("/health")
+async def health_check():
+    """
+    Health check endpoint for load balancers and monitoring systems.
+    Returns detailed system status including Redis, models, and cache.
+    """
+    try:
+        import psutil
+        import time
+        from datetime import datetime
+
+        # Check Redis connectivity
+        redis_healthy = False
+        redis_info = {}
+        try:
+            vector_db.client.ping()
+            redis_healthy = True
+            info = vector_db.client.info()
+            redis_info = {
+                "connected_clients": info.get("connected_clients", 0),
+                "used_memory_human": info.get("used_memory_human", "unknown"),
+                "total_commands_processed": info.get("total_commands_processed", 0),
+                "instantaneous_ops_per_sec": info.get("instantaneous_ops_per_sec", 0)
+            }
+        except Exception as e:
+            logger.error(f"Redis health check failed: {e}")
+
+        # Check cache stats
+        cache_stats = {}
+        if cache_manager:
+            cache_stats = cache_manager.get_cache_stats()
+
+        # System resources
+        cpu_percent = psutil.cpu_percent(interval=0.1)
+        memory = psutil.virtual_memory()
+        disk = psutil.disk_usage('/')
+
+        # Model status
+        models_loaded = {
+            "embedding": embedding_model is not None,
+            "llm": llm is not None,
+            "rag": rag_system is not None
+        }
+
+        # Overall health status
+        is_healthy = redis_healthy and all(models_loaded.values())
+
+        return {
+            "status": "healthy" if is_healthy else "unhealthy",
+            "timestamp": datetime.utcnow().isoformat(),
+            "redis": {
+                "healthy": redis_healthy,
+                "info": redis_info
+            },
+            "cache": {
+                "entries": cache_stats.get("total_entries", 0),
+                "hit_rate": (cache_stats.get("cache_hits", 0) / max(cache_stats.get("total_queries", 1), 1)) * 100
+            },
+            "models": models_loaded,
+            "system": {
+                "cpu_percent": cpu_percent,
+                "memory_percent": memory.percent,
+                "memory_available_gb": round(memory.available / (1024**3), 2),
+                "disk_percent": disk.percent
+            }
+        }
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        return JSONResponse(
+            status_code=503,
+            content={"status": "unhealthy", "error": str(e)}
+        )
+
+
+@app.get("/metrics")
+async def metrics():
+    """
+    Prometheus-compatible metrics endpoint for monitoring.
+    Returns key performance metrics in plain text format.
+    """
+    try:
+        import psutil
+
+        # Get cache stats
+        cache_stats = cache_manager.get_cache_stats() if cache_manager else {}
+
+        # Get Redis stats
+        redis_info = {}
+        try:
+            info = vector_db.client.info()
+            redis_info = {
+                "connected_clients": info.get("connected_clients", 0),
+                "used_memory": info.get("used_memory", 0),
+                "total_commands": info.get("total_commands_processed", 0)
+            }
+        except:
+            pass
+
+        # System metrics
+        cpu_percent = psutil.cpu_percent(interval=0.1)
+        memory = psutil.virtual_memory()
+
+        # Format metrics in Prometheus format
+        metrics_output = f"""# HELP cache_entries Total number of cache entries
+# TYPE cache_entries gauge
+cache_entries {cache_stats.get('total_entries', 0)}
+
+# HELP cache_queries_total Total number of cache queries
+# TYPE cache_queries_total counter
+cache_queries_total {cache_stats.get('total_queries', 0)}
+
+# HELP cache_hits_total Total number of cache hits
+# TYPE cache_hits_total counter
+cache_hits_total {cache_stats.get('cache_hits', 0)}
+
+# HELP redis_connected_clients Number of Redis client connections
+# TYPE redis_connected_clients gauge
+redis_connected_clients {redis_info.get('connected_clients', 0)}
+
+# HELP redis_memory_used_bytes Redis memory usage in bytes
+# TYPE redis_memory_used_bytes gauge
+redis_memory_used_bytes {redis_info.get('used_memory', 0)}
+
+# HELP system_cpu_percent CPU usage percentage
+# TYPE system_cpu_percent gauge
+system_cpu_percent {cpu_percent}
+
+# HELP system_memory_percent Memory usage percentage
+# TYPE system_memory_percent gauge
+system_memory_percent {memory.percent}
+"""
+
+        return Response(content=metrics_output, media_type="text/plain")
+    except Exception as e:
+        logger.error(f"Metrics endpoint failed: {e}")
+        return Response(content="", media_type="text/plain", status_code=500)
+
+
 if __name__ == "__main__":
     import uvicorn
+    import multiprocessing
+    import sys
 
+    # Production configuration
     host = os.getenv("HOST", "0.0.0.0")
     port = int(os.getenv("PORT", 8000))
+    environment = os.getenv("ENVIRONMENT", "production")
 
-    logger.info(f"Starting server at http://{host}:{port}")
-    uvicorn.run(app, host=host, port=port)
+    # Configure logging for production
+    if environment == "production":
+        # Remove default logger and configure for production
+        logger.remove()
+
+        # Add structured logging with rotation
+        logger.add(
+            sys.stderr,
+            format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
+            level="INFO",
+            colorize=False
+        )
+
+        # Add file logging with rotation (keep 7 days, rotate at 100MB)
+        log_file = os.getenv("LOG_FILE", "/tmp/chatbot_production.log")
+        logger.add(
+            log_file,
+            rotation="100 MB",
+            retention="7 days",
+            compression="zip",
+            format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}",
+            level="INFO"
+        )
+
+        logger.info("Production logging configured")
+    else:
+        # Development: keep colorful logging
+        logger.info("Development logging active")
+
+    # Worker configuration based on CPU cores
+    # Production: (CPU cores * 2) + 1, with min 4 and max 8
+    cpu_count = multiprocessing.cpu_count()
+    if environment == "development":
+        workers = 1  # Single worker for easier debugging
+    else:
+        workers = max(4, min(8, (cpu_count * 2) + 1))
+
+    # Timeout settings for production
+    timeout_keep_alive = int(os.getenv("TIMEOUT_KEEP_ALIVE", 65))  # Keep-alive timeout
+    timeout_graceful_shutdown = int(os.getenv("TIMEOUT_GRACEFUL_SHUTDOWN", 30))
+
+    # Connection limits
+    limit_concurrency = int(os.getenv("LIMIT_CONCURRENCY", 1000))  # Max concurrent connections
+    limit_max_requests = int(os.getenv("LIMIT_MAX_REQUESTS", 10000))  # Max requests before worker restart
+
+    # Logging configuration
+    log_level = os.getenv("LOG_LEVEL", "info" if environment == "production" else "debug")
+    access_log = os.getenv("ACCESS_LOG", "false").lower() == "true"
+
+    logger.info(f"🚀 Starting server in {environment.upper()} mode")
+    logger.info(f"📍 Server: http://{host}:{port}")
+    logger.info(f"👥 Workers: {workers} (CPU cores: {cpu_count})")
+    logger.info(f"⏱️  Timeouts: keep-alive={timeout_keep_alive}s, graceful-shutdown={timeout_graceful_shutdown}s")
+    logger.info(f"🔗 Limits: concurrency={limit_concurrency}, max-requests={limit_max_requests}")
+
+    uvicorn.run(
+        "src.web_server:app",
+        host=host,
+        port=port,
+        workers=workers,
+        log_level=log_level,
+        access_log=access_log,
+        timeout_keep_alive=timeout_keep_alive,
+        timeout_graceful_shutdown=timeout_graceful_shutdown,
+        limit_concurrency=limit_concurrency,
+        limit_max_requests=limit_max_requests,
+        # Production optimizations
+        backlog=2048,  # Connection backlog queue size
+        use_colors=False if environment == "production" else True,
+        server_header=False,  # Don't expose server version
+        date_header=True,
+        proxy_headers=True,  # Support X-Forwarded-* headers
+        forwarded_allow_ips="*"  # Allow all proxy IPs (configure for specific IPs in production)
+    )

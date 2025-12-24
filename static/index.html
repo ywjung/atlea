@@ -36,6 +36,11 @@
         <header class="header">
             <h1>📚 문서 RAG 챗봇</h1>
             <div class="status-bar">
+                <button id="historyToggleBtn" class="history-toggle-btn" title="대화 히스토리">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
                 <span id="status" class="status">연결 중...</span>
                 <span id="doc-count" class="doc-count"></span>
                 <button id="themeToggle" class="theme-toggle-btn" title="테마 전환">
@@ -61,6 +66,11 @@
                         <circle cx="12" cy="17" r="0.5" fill="currentColor" stroke="none"/>
                     </svg>
                 </button>
+                <button id="groupManageBtn" class="group-manage-btn" title="그룹 관리">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                        <path d="M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-6l-2-2H5a2 2 0 0 0-2 2z" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
                 <button id="settingsBtn" class="settings-btn" title="설정">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
                         <circle cx="12" cy="12" r="3" stroke-width="2"/>
@@ -70,6 +80,25 @@
                 </button>
             </div>
         </header>
+
+        <!-- Conversation History Sidebar -->
+        <div class="conversation-sidebar" id="conversationSidebar">
+            <div class="sidebar-header">
+                <h3>대화 히스토리</h3>
+                <button id="newChatBtn" class="new-chat-btn" title="새 대화">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                        <path d="M12 5v14M5 12h14" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="conversation-list" id="conversationList">
+                <!-- Conversations will be loaded here -->
+                <div class="loading-conversations">
+                    <div class="spinner-small"></div>
+                    <span>대화 목록 로딩 중...</span>
+                </div>
+            </div>
+        </div>
 
         <!-- Chat Wrapper (contains chat container and scroll button) -->
         <div class="chat-wrapper">
@@ -119,18 +148,44 @@
                 </button>
             </div>
             <div class="filter-content" id="filterContent">
-                <div class="filter-options">
-                    <label class="filter-option" title="모든 문서에서 검색합니다">
-                        <input type="radio" name="filterMode" value="all" checked>
-                        <span>전체 문서</span>
-                    </label>
-                    <label class="filter-option" title="체크한 문서에서만 검색합니다">
-                        <input type="radio" name="filterMode" value="selected">
-                        <span>선택한 문서만</span>
-                    </label>
+                <!-- Filter Tabs -->
+                <div class="filter-tabs">
+                    <button class="filter-tab active" data-tab="documents">문서별</button>
+                    <button class="filter-tab" data-tab="groups">그룹별</button>
                 </div>
-                <div class="document-list" id="filterDocumentList">
-                    <div class="loading-documents">문서 목록을 불러오는 중...</div>
+
+                <!-- Document Filter Panel -->
+                <div class="filter-panel" id="documentFilterPanel">
+                    <div class="filter-options">
+                        <label class="filter-option" title="모든 문서에서 검색합니다">
+                            <input type="radio" name="filterMode" value="all" checked>
+                            <span>전체 문서</span>
+                        </label>
+                        <label class="filter-option" title="체크한 문서에서만 검색합니다">
+                            <input type="radio" name="filterMode" value="selected">
+                            <span>선택한 문서만</span>
+                        </label>
+                    </div>
+                    <div class="document-list" id="filterDocumentList">
+                        <div class="loading-documents">문서 목록을 불러오는 중...</div>
+                    </div>
+                </div>
+
+                <!-- Group Filter Panel -->
+                <div class="filter-panel" id="groupFilterPanel" style="display: none;">
+                    <div class="filter-options">
+                        <label class="filter-option" title="모든 그룹에서 검색합니다">
+                            <input type="radio" name="groupFilterMode" value="all" checked>
+                            <span>전체 그룹</span>
+                        </label>
+                        <label class="filter-option" title="선택한 그룹에서만 검색합니다">
+                            <input type="radio" name="groupFilterMode" value="selected">
+                            <span>선택한 그룹만</span>
+                        </label>
+                    </div>
+                    <div class="group-filter-list" id="groupFilterList">
+                        <div class="loading-groups">그룹 목록을 불러오는 중...</div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -184,13 +239,13 @@
             <div class="upload-section">
                 <h3>새 문서 업로드</h3>
                 <div class="upload-area" id="uploadArea" title="지원되는 문서 파일을 드래그하거나 클릭하여 업로드하세요">
-                    <input type="file" id="fileInput" accept=".pdf,.hwp,.hwpx,.doc,.docx,.xls,.xlsx,.ppt,.pptx" style="display: none;">
+                    <input type="file" id="fileInput" accept=".pdf,.hwp,.hwpx,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt" style="display: none;">
                     <div class="upload-placeholder">
                         <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor">
                             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                         </svg>
                         <p>클릭하거나 문서 파일을 드래그하세요</p>
-                        <p class="hint-text">파일이 자동으로 색인됩니다 (PDF, HWP, HWPX, DOC, DOCX, XLS, XLSX, PPT, PPTX 지원)</p>
+                        <p class="hint-text">파일이 자동으로 색인됩니다 (PDF, HWP, HWPX, DOC, DOCX, XLS, XLSX, PPT, PPTX, TXT 지원)</p>
                     </div>
                 </div>
                 <div id="uploadStatus" class="upload-status"></div>
@@ -603,6 +658,150 @@
         </div>
     </div>
 
+    <!-- Group Management Modal -->
+    <div id="groupManagementModal" class="modal">
+        <div class="modal-content group-modal-content">
+            <div class="modal-header">
+                <h2>📁 그룹 관리</h2>
+                <button class="modal-close" id="closeGroupModal">&times;</button>
+            </div>
+
+            <div class="group-modal-body">
+                <!-- Left Panel: Group Tree -->
+                <div class="group-tree-panel">
+                    <div class="group-tree-header">
+                        <h3>그룹 목록</h3>
+                        <button id="createGroupBtn" class="btn-primary create-group-btn" title="새 그룹 생성">
+                            새 그룹
+                        </button>
+                    </div>
+                    <div id="groupTree" class="group-tree">
+                        <div class="loading">그룹을 불러오는 중...</div>
+                    </div>
+                </div>
+
+                <!-- Right Panel: Group Details & Document Assignment -->
+                <div class="group-details-panel">
+                    <div id="groupDetailsEmpty" class="empty-state">
+                        그룹을 선택하여 상세 정보를 확인하세요
+                    </div>
+
+                    <div id="groupDetailsContent" style="display: none;">
+                        <!-- Group Info Form -->
+                        <div class="group-info-section">
+                            <h3>그룹 정보</h3>
+                            <form id="groupInfoForm">
+                                <div class="form-group">
+                                    <label>그룹 이름</label>
+                                    <input type="text" id="groupNameInput" required>
+                                </div>
+                                <div class="form-group">
+                                    <label>설명</label>
+                                    <textarea id="groupDescInput" rows="2"></textarea>
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label>색상</label>
+                                        <input type="color" id="groupColorInput" value="#3B82F6">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>아이콘</label>
+                                        <select id="groupIconInput">
+                                            <option value="📁">📁 폴더</option>
+                                            <option value="📂">📂 열린 폴더</option>
+                                            <option value="📚">📚 책</option>
+                                            <option value="📖">📖 열린 책</option>
+                                            <option value="📄">📄 문서</option>
+                                            <option value="📋">📋 클립보드</option>
+                                            <option value="🗂️">🗂️ 파일함</option>
+                                            <option value="💼">💼 서류가방</option>
+                                            <option value="🏷️">🏷️ 태그</option>
+                                            <option value="⭐">⭐ 별</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="form-actions">
+                                    <button type="submit" class="btn-primary">저장</button>
+                                    <button type="button" id="deleteGroupBtn" class="btn-danger">삭제</button>
+                                </div>
+                            </form>
+                        </div>
+
+                        <!-- Document Assignment Section -->
+                        <div class="group-documents-section">
+                            <h3>문서 할당 (<span id="groupDocCount">0</span>개)</h3>
+                            <div class="document-assignment">
+                                <select id="documentSelectForAssign" size="5" multiple>
+                                    <option value="">문서 목록을 불러오는 중...</option>
+                                </select>
+                                <button id="assignDocumentsBtn" class="btn-secondary">
+                                    선택한 문서 할당
+                                </button>
+                            </div>
+                            <h4 style="margin-top: var(--space-lg); margin-bottom: var(--space-sm); font-size: 1rem; font-weight: 600; color: var(--text-primary);">할당된 문서</h4>
+                            <div id="groupDocumentsList" class="assigned-documents-list">
+                                <!-- Assigned documents will be listed here -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Group Create Modal -->
+    <div id="groupCreateModal" class="modal">
+        <div class="modal-content group-create-modal">
+            <div class="modal-header">
+                <h2>새 그룹 생성</h2>
+                <button class="modal-close" id="closeGroupCreateModal">&times;</button>
+            </div>
+
+            <form id="groupCreateForm">
+                <div class="form-group">
+                    <label>그룹 이름 *</label>
+                    <input type="text" id="newGroupName" required placeholder="예: 회계 문서">
+                </div>
+                <div class="form-group">
+                    <label>설명</label>
+                    <textarea id="newGroupDesc" rows="2" placeholder="그룹에 대한 간단한 설명"></textarea>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>색상</label>
+                        <input type="color" id="newGroupColor" value="#3B82F6">
+                    </div>
+                    <div class="form-group">
+                        <label>아이콘</label>
+                        <select id="newGroupIcon">
+                            <option value="📁">📁 폴더</option>
+                            <option value="📂">📂 열린 폴더</option>
+                            <option value="📚">📚 책</option>
+                            <option value="📖">📖 열린 책</option>
+                            <option value="📄">📄 문서</option>
+                            <option value="📋">📋 클립보드</option>
+                            <option value="🗂️">🗂️ 파일함</option>
+                            <option value="💼">💼 서류가방</option>
+                            <option value="🏷️">🏷️ 태그</option>
+                            <option value="⭐">⭐ 별</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>상위 그룹</label>
+                    <select id="newGroupParent">
+                        <option value="">최상위 그룹</option>
+                        <!-- Group options will be populated dynamically -->
+                    </select>
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="btn-primary">생성</button>
+                    <button type="button" class="btn-secondary" id="cancelGroupCreate">취소</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- Session Manager -->
     <script src="/static/session-manager.js"></script>
 
@@ -617,6 +816,9 @@
 
     <!-- Follow-up Questions -->
     <script src="/static/follow-up-questions.js"></script>
+
+    <!-- Group Manager -->
+    <script src="/static/group-manager.js"></script>
 
     <!-- Main Script -->
     <script src="/static/script.js?v=43"></script>

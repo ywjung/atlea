@@ -22,8 +22,15 @@ env/
 model/
 !model/.gitkeep
 
+# Java build
+hwp-service/target/
+hwp-service/logs/
+
 # Data
 data/.document_metadata.json
+data/*.pdf
+data/*.hwp
+data/*.txt
 
 # Logs
 *.log
@@ -38,3 +45,14 @@ tmp.md
 
 # Server runtime
 .server.pid
+
+# Test and debug scripts
+check_*.py
+test_*.py
+test_*.sh
+debug_*.py
+reindex_all.py
+verify_*.sh
+
+# Playwright screenshots
+.playwright-mcp/

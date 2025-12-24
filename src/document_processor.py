@@ -1,6 +1,6 @@
 """
 Document Processor - Extract and chunk documents
-Supports: PDF, HWP, HWPX, DOC, DOCX, XLS, XLSX, PPT, PPTX
+Supports: PDF, HWP, HWPX, DOC, DOCX, XLS, XLSX, PPT, PPTX, TXT
 """
 
 import os
@@ -57,7 +57,7 @@ class DocumentProcessor:
     def extract_text_from_document(self, doc_path: str) -> str:
         """
         Extract text from document file using Java Document Service
-        Supports: PDF, HWP, HWPX, DOC, DOCX, XLS, XLSX, PPT, PPTX
+        Supports: PDF, HWP, HWPX, DOC, DOCX, XLS, XLSX, PPT, PPTX, TXT
 
         Args:
             doc_path: Path to document file
@@ -67,6 +67,26 @@ class DocumentProcessor:
         """
         filename = Path(doc_path).name
         file_ext = Path(doc_path).suffix.lower()
+
+        # Handle TXT files directly - simple UTF-8 text reading
+        if file_ext == '.txt':
+            try:
+                logger.info(f"📄 Reading TXT file: {filename}")
+                with open(doc_path, 'r', encoding='utf-8') as f:
+                    text = f.read()
+                logger.success(f"✅ TXT file read successful: {len(text)} chars")
+                return text
+            except UnicodeDecodeError:
+                # Try with different encodings if UTF-8 fails
+                logger.warning("UTF-8 decoding failed, trying cp949 encoding")
+                try:
+                    with open(doc_path, 'r', encoding='cp949') as f:
+                        text = f.read()
+                    logger.success(f"✅ TXT file read successful (cp949): {len(text)} chars")
+                    return text
+                except Exception as e:
+                    logger.error(f"❌ Failed to read TXT file: {e}")
+                    raise
 
         # Use Java Document Service for all supported formats
         if self.use_java_service:

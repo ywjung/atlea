@@ -81,16 +81,17 @@ class CacheManager:
         """Generate cache key for a question hash."""
         return f"{self.cache_prefix}:question:{question_hash}"
 
-    def _hash_question(self, question: str, top_k: int, document_ids: Optional[List[str]] = None) -> str:
+    def _hash_question(self, question: str, top_k: int, document_ids: Optional[List[str]] = None, group_ids: Optional[List[str]] = None) -> str:
         """
         Generate hash for question + parameters.
 
-        Includes top_k and document_ids in hash to differentiate cache entries
+        Includes top_k, document_ids, and group_ids in hash to differentiate cache entries
         with different retrieval settings.
         """
-        # Sort document_ids for consistent hashing
+        # Sort document_ids and group_ids for consistent hashing
         doc_filter = "all" if not document_ids else "|".join(sorted(document_ids))
-        content = f"{question}|top_k={top_k}|docs={doc_filter}"
+        group_filter = "all" if not group_ids else "|".join(sorted(group_ids))
+        content = f"{question}|top_k={top_k}|docs={doc_filter}|groups={group_filter}"
         return hashlib.md5(content.encode()).hexdigest()
 
     def get_cached_response(
@@ -98,7 +99,8 @@ class CacheManager:
         question: str,
         top_k: int,
         similarity_threshold: Optional[float] = None,
-        document_ids: Optional[List[str]] = None
+        document_ids: Optional[List[str]] = None,
+        group_ids: Optional[List[str]] = None
     ) -> Optional[Dict]:
         """
         Check if similar question exists in cache and return cached response.
@@ -108,6 +110,7 @@ class CacheManager:
             top_k: Number of documents to retrieve (part of cache key)
             similarity_threshold: Custom similarity threshold (defaults to instance threshold)
             document_ids: Optional list of document IDs to filter by (part of cache key)
+            group_ids: Optional list of group IDs to filter by (part of cache key)
 
         Returns:
             Cached response dict if found, None otherwise
@@ -164,6 +167,12 @@ class CacheManager:
                 if sorted(cached_doc_ids) != sorted(current_doc_ids):
                     continue
 
+                # Early filter: Check if group_ids matches (normalize None to empty list)
+                cached_group_ids = cached_data.get("group_ids") or []
+                current_group_ids = group_ids or []
+                if sorted(cached_group_ids) != sorted(current_group_ids):
+                    continue
+
                 # Calculate similarity (expensive operation, done last)
                 cached_emb = np.array(cached_data["embedding"])
                 similarity = self._calculate_similarity(question_emb, cached_emb)
@@ -216,7 +225,8 @@ class CacheManager:
         top_k: int,
         cache_ttl: Optional[int] = None,
         context: Optional[List[Dict]] = None,
-        document_ids: Optional[List[str]] = None
+        document_ids: Optional[List[str]] = None,
+        group_ids: Optional[List[str]] = None
     ) -> bool:
         """
         Save question-response pair to cache.
@@ -229,6 +239,7 @@ class CacheManager:
             cache_ttl: Custom cache TTL in seconds (defaults to instance TTL)
             context: List of context documents with text, filename, score
             document_ids: Optional list of document IDs that were filtered
+            group_ids: Optional list of group IDs that were filtered
 
         Returns:
             True if saved successfully, False otherwise
@@ -241,8 +252,8 @@ class CacheManager:
             if question_emb is None:
                 return False
 
-            # Generate hash for this question (including document_ids)
-            question_hash = self._hash_question(question, top_k, document_ids)
+            # Generate hash for this question (including document_ids and group_ids)
+            question_hash = self._hash_question(question, top_k, document_ids, group_ids)
             cache_key = self._get_cache_key(question_hash)
 
             # Prepare cache data
@@ -253,7 +264,8 @@ class CacheManager:
                 "top_k": top_k,
                 "embedding": question_emb.tolist(),  # Convert numpy array to list for JSON
                 "context": context or [],  # Store context for source details
-                "document_ids": document_ids or []  # Store document filter
+                "document_ids": document_ids or [],  # Store document filter
+                "group_ids": group_ids or []  # Store group filter
             }
 
             # Save to Redis with TTL
