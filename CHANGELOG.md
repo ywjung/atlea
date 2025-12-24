@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Welcome Screen Display**: Fixed blank screen issue on page refresh and new conversation
+  - Page refresh now shows welcome message and suggested questions instead of blank screen
+  - "새 대화" button now displays initial conversation screen with welcome message
+  - Removed 43 lines of duplicate HTML code by reusing `createNewConversation()`
+- **Scrollbar Styling**: Matched conversation history scrollbar with dark theme UI
+  - Applied consistent 8px scrollbar width and CSS variable-based theming
+  - Unified scrollbar appearance across all UI components
+- **Suggested Questions Refresh**: Fixed static questions appearing on every refresh
+  - Expanded fallback question pool from 5 to 30 diverse questions
+  - Questions now randomly selected on each refresh (5 from pool of 30)
+  - Categories: general, detailed analysis, practical, comparison, specific details, context
+  - Added cache-busting parameter to API requests
+
 ## [2.1.0] - 2025-12-23
 
 ### Added
