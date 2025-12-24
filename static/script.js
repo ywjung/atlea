@@ -517,6 +517,15 @@ async function loadConversation(sessionId) {
             }
         });
 
+        // Find and set last user question for regenerate function
+        lastUserQuestion = '';  // Reset first
+        for (let i = data.messages.length - 1; i >= 0; i--) {
+            if (data.messages[i].role === 'user') {
+                lastUserQuestion = data.messages[i].content;
+                break;
+            }
+        }
+
         // Update conversation list UI
         document.querySelectorAll('.conversation-item').forEach(item => {
             item.classList.remove('active');
