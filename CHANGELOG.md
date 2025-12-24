@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Questions now randomly selected on each refresh (5 from pool of 30)
   - Categories: general, detailed analysis, practical, comparison, specific details, context
   - Added cache-busting parameter to API requests
+- **Regenerate Button**: Fixed "no question to regenerate" error on loaded conversations
+  - Issue: Clicking regenerate button on previously loaded conversations showed error alert
+  - Solution: Restore `lastUserQuestion` from loaded messages
+  - Regenerate button now works correctly on all conversations
 
 ## [2.1.0] - 2025-12-23
 
