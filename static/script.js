@@ -480,8 +480,8 @@ async function createNewConversation() {
         const data = await response.json();
         currentSessionId = data.session_id;
 
-        // Clear chat UI (no confirmation)
-        clearChatUI();
+        // Show welcome screen for new conversation
+        await showWelcomeScreen();
 
         // Reload conversation list
         await loadConversations();
@@ -1177,9 +1177,6 @@ function removeLoading(id) {
 // Clear chat and create new conversation
 async function clearChat() {
     if (confirm('새 대화를 시작하시겠습니까?\n(현재 대화는 히스토리에 저장됩니다)')) {
-        // Create new conversation (this will save the current one)
-        await createNewConversation();
-
         // Clear conversation history (both in memory and localStorage)
         clearHistory();
 
@@ -1188,44 +1185,8 @@ async function clearChat() {
             questionAutoComplete.clear();
         }
 
-        // Clear chat UI and recreate suggested questions section
-        chatContainer.innerHTML = `
-            <div class="welcome-message">
-                <h2>안녕하세요! 👋</h2>
-                <p>PDF 문서 내용에 대해 무엇이든 질문해주세요.</p>
-                <p class="hint">문서가 로딩되면 질문을 시작할 수 있습니다.</p>
-            </div>
-
-            <!-- Suggested Questions Section -->
-            <div class="suggested-questions" id="suggestedQuestions" style="display: none;">
-                <div class="suggested-questions-header">
-                    <span class="suggested-icon">💡</span>
-                    <h3>이런 질문은 어떠세요?</h3>
-                    <button id="refreshSuggestionsBtn" class="refresh-suggestions-btn" title="새로운 질문 생성">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                            <path d="M1 4v6h6M23 20v-6h-6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                            <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                        </svg>
-                    </button>
-                </div>
-                <div class="suggested-questions-list" id="suggestedQuestionsList">
-                    <!-- Questions will be inserted here dynamically -->
-                </div>
-            </div>
-        `;
-
-        // Reattach event listener for refresh button
-        const refreshBtn = document.getElementById('refreshSuggestionsBtn');
-        if (refreshBtn) {
-            refreshBtn.addEventListener('click', loadSuggestedQuestions);
-        }
-
-        // Show and load suggested questions
-        const suggestedQuestionsContainer = document.getElementById('suggestedQuestions');
-        if (suggestedQuestionsContainer) {
-            suggestedQuestionsContainer.style.display = 'block';
-        }
-        loadSuggestedQuestions();
+        // Create new conversation (this will show welcome screen automatically)
+        await createNewConversation();
     }
 }
 
