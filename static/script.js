@@ -622,6 +622,46 @@ function clearChatUI() {
     }
 }
 
+// Show welcome screen with initial UI
+async function showWelcomeScreen() {
+    const chatContainer = document.getElementById('chatContainer');
+    if (chatContainer) {
+        chatContainer.innerHTML = `
+            <div class="welcome-message">
+                <h2>안녕하세요! 👋</h2>
+                <p>업로드된 문서 내용에 대해 무엇이든 질문해주세요.</p>
+                <p class="hint">문서가 로딩되면 질문을 시작할 수 있습니다.</p>
+            </div>
+
+            <!-- Suggested Questions Section -->
+            <div class="suggested-questions" id="suggestedQuestions" style="display: none;">
+                <div class="suggested-questions-header">
+                    <span class="suggested-icon">💡</span>
+                    <h3>이런 질문은 어떠세요?</h3>
+                    <button id="refreshSuggestionsBtn" class="refresh-suggestions-btn" title="새로운 질문 생성">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <path d="M1 4v6h6M23 20v-6h-6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                            <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </button>
+                </div>
+                <div class="suggested-questions-list" id="suggestedQuestionsList">
+                    <!-- Questions will be inserted here dynamically -->
+                </div>
+            </div>
+        `;
+
+        // Re-attach event listener for refresh button
+        const refreshBtn = document.getElementById('refreshSuggestionsBtn');
+        if (refreshBtn) {
+            refreshBtn.addEventListener('click', refreshSuggestedQuestions);
+        }
+
+        // Load suggested questions
+        await loadSuggestedQuestions();
+    }
+}
+
 // Initialize conversation history
 async function initConversationHistory() {
     try {
@@ -640,8 +680,9 @@ async function initConversationHistory() {
                 const messageCount = parseInt(mostRecent.message_count || '0');
 
                 if (messageCount === 0) {
-                    // Reuse the empty conversation - keep screen empty
+                    // Reuse the empty conversation - show welcome screen
                     currentSessionId = mostRecent.id;
+                    await showWelcomeScreen();
                     devLog('Reusing empty conversation:', currentSessionId);
                 } else {
                     // Most recent has messages - load it to display
@@ -652,11 +693,13 @@ async function initConversationHistory() {
                 // No conversations exist, create new one
                 devLog('No conversations found, creating new one');
                 await createNewConversation();
+                await showWelcomeScreen();
             }
         } else {
             // Error loading conversations, create new one
             console.error('Failed to load conversations, creating new one');
             await createNewConversation();
+            await showWelcomeScreen();
         }
 
         // Load conversation list for sidebar
