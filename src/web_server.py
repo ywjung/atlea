@@ -38,6 +38,7 @@ from .confidence_scorer import confidence_scorer
 from .feedback_analyzer import feedback_analyzer
 from .config import config
 from .middleware import RateLimitMiddleware, AuditMiddleware
+from .middleware.csp_nonce import CSPNonceMiddleware
 from .audit import AuditLogger, AuditAction
 from .exceptions import (
     ChatbotException,
@@ -244,6 +245,9 @@ app.add_middleware(
 
 # Add audit logging middleware (will use app.state.audit_logger after startup)
 app.add_middleware(AuditMiddleware)
+
+# Add CSP Nonce middleware (generates nonce for each request)
+app.add_middleware(CSPNonceMiddleware)
 
 # Add security headers middleware (must be before GZip to affect all responses)
 app.add_middleware(SecurityHeadersMiddleware)
