@@ -718,10 +718,8 @@ class QueryRequest(BaseModel):
         if len(v) > 10000:
             raise ValueError("질문이 너무 깁니다 (최대 10,000자).")
 
-        # HTML escape to prevent XSS
-        sanitized = html.escape(v)
-
-        # Block obvious malicious patterns
+        # Block obvious malicious patterns BEFORE escaping
+        # This is critical: check patterns on raw input first
         dangerous_patterns = [
             r'<script[^>]*>',
             r'javascript:',
@@ -732,12 +730,18 @@ class QueryRequest(BaseModel):
             r'document\.cookie',
             r'<iframe[^>]*>',
             r'<embed[^>]*>',
-            r'<object[^>]*>'
+            r'<object[^>]*>',
+            r'data:text/html',
+            r'vbscript:',
+            r'on\w+\s*='  # Catches any on* event handlers
         ]
 
         for pattern in dangerous_patterns:
-            if re.search(pattern, sanitized, re.IGNORECASE):
+            if re.search(pattern, v, re.IGNORECASE):
                 raise ValueError("입력에 허용되지 않는 패턴이 포함되어 있습니다.")
+
+        # HTML escape to prevent XSS (do this AFTER pattern checking)
+        sanitized = html.escape(v)
 
         return sanitized
 
