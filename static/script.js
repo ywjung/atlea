@@ -2997,8 +2997,21 @@ function loadSettings() {
  */
 async function loadSystemPromptFromServer() {
     try {
-        // Use public endpoint (no authentication required)
-        const response = await fetch('/api/system-prompt');
+        // Check if user is authenticated
+        const token = localStorage.getItem('access_token');
+
+        if (!token) {
+            // Not authenticated - use default system prompt
+            devLog('Not authenticated, using default system prompt');
+            return;
+        }
+
+        // Fetch with authentication
+        const headers = {
+            'Authorization': `Bearer ${token}`
+        };
+
+        const response = await fetch('/api/system-prompt', { headers });
 
         if (response.ok) {
             const data = await response.json();
@@ -3015,8 +3028,8 @@ async function loadSystemPromptFromServer() {
                 devLog('System prompt loaded:', data.system_prompt.substring(0, 100) + '...');
             }
         } else {
-            // If endpoint fails, use default
-            devLog('Using default system prompt (server prompt not available)');
+            // If endpoint fails (e.g., 401), use default
+            devLog('Using default system prompt (auth failed or not available)');
         }
     } catch (error) {
         // Silent fail - use default system prompt from localStorage/defaultSettings

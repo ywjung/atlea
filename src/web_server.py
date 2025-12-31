@@ -4680,10 +4680,16 @@ async def status():
 
 
 @app.get("/api/system-prompt", tags=["System"])
-async def get_public_system_prompt(request: Request):
-    """시스템 프롬프트 조회 (모든 사용자 접근 가능)
+async def get_public_system_prompt(
+    request: Request,
+    current_user: dict = Depends(get_current_active_user)
+):
+    """시스템 프롬프트 조회 (로그인한 사용자만 접근 가능)
 
-    관리자가 설정한 시스템 프롬프트를 모든 사용자가 조회할 수 있도록 하는 public 엔드포인트
+    관리자가 설정한 시스템 프롬프트를 로그인한 사용자가 조회할 수 있는 엔드포인트
+
+    Args:
+        current_user: 현재 로그인한 사용자 정보
 
     Returns:
         저장된 시스템 프롬프트 또는 기본값
