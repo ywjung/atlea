@@ -1631,7 +1631,7 @@ async def backup_scheduler():
 
                         # 백업 파일명 생성
                         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                        filename = f"auto_backup_{timestamp}.rdb"
+                        filename = f"dump_auto_{timestamp}.rdb"
 
                         # Redis BGSAVE 명령 실행
                         redis_client.bgsave()
