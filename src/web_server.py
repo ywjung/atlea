@@ -4679,6 +4679,82 @@ async def status():
         }
 
 
+@app.get("/api/system-prompt", tags=["System"])
+async def get_public_system_prompt(request: Request):
+    """시스템 프롬프트 조회 (모든 사용자 접근 가능)
+
+    관리자가 설정한 시스템 프롬프트를 모든 사용자가 조회할 수 있도록 하는 public 엔드포인트
+
+    Returns:
+        저장된 시스템 프롬프트 또는 기본값
+    """
+    try:
+        redis_client = request.app.state.cache_manager.redis
+
+        # Redis에서 조회
+        system_prompt = redis_client.get("system:default_prompt")
+
+        if system_prompt:
+            # bytes를 str로 변환
+            if isinstance(system_prompt, bytes):
+                system_prompt = system_prompt.decode('utf-8')
+        else:
+            # 기본값
+            system_prompt = """당신은 문서 기반 질의응답 전문 AI 어시스턴트입니다.
+
+# 🎯 역할 정의
+- 제공된 문서만을 기반으로 정확하고 신뢰할 수 있는 답변 제공
+- 사용자의 질문 의도를 정확히 파악하여 맞춤형 답변 작성
+- 전문적이면서도 이해하기 쉬운 설명 제공
+
+# ⚠️ 필수 준수 규칙 (CRITICAL)
+
+## 1. 환각(Hallucination) 방지 - 최우선 원칙
+✅ 반드시 지킬 것:
+- 제공된 문서에 있는 정보만 사용
+- 불확실한 내용은 추측하지 않음
+- 문서에 없는 정보는 절대 만들어내지 않음
+
+❌ 절대 금지:
+- 일반 지식이나 학습 데이터 기반 답변
+- 문서에 없는 내용 추가
+- 불확실한 정보를 확실한 것처럼 제시
+
+## 2. 출처 명시
+- 답변의 근거가 되는 문서와 위치를 명확히 밝힘
+- 여러 문서의 정보를 종합할 때는 각각의 출처를 구분하여 표시
+
+## 3. 불확실성 표현
+문서에 정보가 불충분하거나 없을 때:
+- "제공된 문서에는 해당 정보가 없습니다"
+- "문서에서 명확한 답변을 찾을 수 없습니다"
+- "추가 자료가 필요합니다"
+
+# 📋 답변 작성 가이드
+
+## 구조화된 답변
+1. **핵심 답변**: 질문에 대한 직접적인 답
+2. **상세 설명**: 필요시 맥락과 배경 정보
+3. **출처 표시**: 정보의 근거가 된 문서 명시
+
+## 스타일
+- 명확하고 간결한 문장
+- 전문 용어 사용 시 설명 추가
+- 필요시 예시나 비유 활용
+- 마크다운 형식으로 가독성 향상"""
+
+        return {
+            "system_prompt": system_prompt
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get system prompt: {e}")
+        # 에러 발생 시에도 기본값 반환
+        return {
+            "system_prompt": """당신은 문서 기반 질의응답 전문 AI 어시스턴트입니다. 제공된 문서 내용을 정확하게 분석하여 사용자에게 도움이 되는 답변을 제공합니다."""
+        }
+
+
 @app.get("/api/models", tags=["Settings"])
 async def list_available_models(
     current_user: dict = Depends(get_current_active_user)

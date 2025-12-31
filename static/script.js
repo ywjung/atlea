@@ -2997,7 +2997,8 @@ function loadSettings() {
  */
 async function loadSystemPromptFromServer() {
     try {
-        const response = await fetch('/api/admin/system-prompt');
+        // Use public endpoint (no authentication required)
+        const response = await fetch('/api/system-prompt');
 
         if (response.ok) {
             const data = await response.json();
@@ -3014,7 +3015,7 @@ async function loadSystemPromptFromServer() {
                 devLog('System prompt loaded:', data.system_prompt.substring(0, 100) + '...');
             }
         } else {
-            // If endpoint fails (e.g., not authenticated), use default
+            // If endpoint fails, use default
             devLog('Using default system prompt (server prompt not available)');
         }
     } catch (error) {
