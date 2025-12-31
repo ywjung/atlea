@@ -7,6 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, status, Request
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime
+import time
+import secrets
 from loguru import logger
 from ..auth.models import (
     UserCreate, UserLogin, LoginResponse, TokenPair,
@@ -134,8 +136,10 @@ async def login(
     Raises:
         HTTPException: 인증 실패 시 401
     """
-    import time
+    # 타이밍 공격 방지: 응답 시간을 일정하게 유지
     start_time = time.time()
+    # 최소 응답 시간 (밀리초): 200-300ms 랜덤 (성공/실패 여부와 무관)
+    min_response_time_ms = 200 + secrets.randbelow(100)
 
     auth_service = AuthService(request.app.state.cache_manager.redis)
 
@@ -182,6 +186,12 @@ async def login(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=str(e)
         )
+
+    finally:
+        # 타이밍 공격 방지: 성공/실패 여부와 관계없이 최소 응답 시간 보장
+        elapsed_ms = (time.time() - start_time) * 1000
+        if elapsed_ms < min_response_time_ms:
+            time.sleep((min_response_time_ms - elapsed_ms) / 1000)
 
 
 @router.post("/logout")
