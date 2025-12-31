@@ -1646,14 +1646,65 @@ async def backup_scheduler():
                         # dump.rdb 파일을 백업 디렉토리로 복사
                         backup_dir = Path("backups")
                         backup_dir.mkdir(exist_ok=True)
+                        backup_path = backup_dir / filename
 
-                        redis_dump_path = Path("/data/dump.rdb")
-                        if redis_dump_path.exists():
-                            backup_path = backup_dir / filename
-                            shutil.copy2(redis_dump_path, backup_path)
-                            logger.success(f"✅ Scheduled backup completed: {filename}")
+                        # Get Redis data directory and filename
+                        redis_config = redis_client.config_get("dir")
+                        redis_dir = redis_config.get("dir", "/data")
+                        redis_dbfilename = redis_client.config_get("dbfilename").get("dbfilename", "dump.rdb")
+
+                        # Check if Redis is running in Docker
+                        import subprocess
+                        docker_container = None
+                        try:
+                            # Check if Redis container exists
+                            result = subprocess.run(
+                                ["docker", "ps", "--filter", "name=chatbot_redis", "--format", "{{.Names}}"],
+                                capture_output=True,
+                                text=True,
+                                timeout=5
+                            )
+                            if result.returncode == 0 and result.stdout.strip():
+                                docker_container = result.stdout.strip()
+                                logger.debug(f"📦 Detected Redis in Docker: {docker_container}")
+                        except Exception as e:
+                            logger.debug(f"Docker check skipped: {e}")
+
+                        # Copy dump file from Docker or local filesystem
+                        backup_success = False
+                        if docker_container:
+                            # Copy from Docker container
+                            source_path = f"{redis_dir}/{redis_dbfilename}"
+                            docker_source = f"{docker_container}:{source_path}"
+
+                            try:
+                                result = subprocess.run(
+                                    ["docker", "cp", docker_source, str(backup_path)],
+                                    capture_output=True,
+                                    text=True,
+                                    timeout=30
+                                )
+
+                                if result.returncode == 0:
+                                    logger.success(f"✅ Scheduled backup completed: {filename} (from Docker: {docker_source})")
+                                    backup_success = True
+                                else:
+                                    logger.error(f"❌ Docker copy failed: {result.stderr}")
+
+                            except Exception as e:
+                                logger.error(f"❌ Docker copy error: {e}")
                         else:
-                            logger.warning("⚠️ Redis dump file not found for backup")
+                            # Copy from local filesystem
+                            source_dump = Path(redis_dir) / redis_dbfilename
+                            if source_dump.exists():
+                                shutil.copy2(source_dump, backup_path)
+                                logger.success(f"✅ Scheduled backup completed: {filename} (from {source_dump})")
+                                backup_success = True
+                            else:
+                                logger.warning(f"⚠️ Redis dump file not found at: {source_dump}")
+
+                        if not backup_success:
+                            logger.error("❌ Scheduled backup failed: Could not copy dump file")
 
                     except Exception as e:
                         logger.error(f"❌ Scheduled backup failed: {e}")
