@@ -3003,7 +3003,10 @@ async def submit_feedback(
 
 
 @app.get("/api/admin/feedback/stats", tags=["Feedback", "Admin"])
-async def get_feedback_stats(request: Request):
+async def get_feedback_stats(
+    request: Request,
+    user=Depends(require_admin)
+):
     """
     피드백 통계 조회 (관리자용)
 
@@ -3011,9 +3014,6 @@ async def get_feedback_stats(request: Request):
     """
     try:
         redis = request.app.state.cache_manager.redis
-
-        # 관리자 권한 확인
-        require_admin(request, redis)
 
         # 전체 피드백 카운트 조회
         positive_count = int(redis.get("feedback:count:positive") or 0)

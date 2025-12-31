@@ -198,12 +198,11 @@ async def logout(
     Returns:
         로그아웃 성공 메시지
     """
-    from .utils import extract_token_from_request
+    from ..auth.utils import extract_token_from_request, ALGORITHM
     import jwt
-    from ..config import get_settings
+    from ..config import config
 
     auth_service = AuthService(request.app.state.cache_manager.redis)
-    settings = get_settings()
 
     # IP 주소 추출
     ip_address = request.client.host if request.client else None
@@ -217,8 +216,8 @@ async def logout(
                 # 토큰 디코딩 (만료 체크 비활성화)
                 payload = jwt.decode(
                     token,
-                    settings.SECRET_KEY,
-                    algorithms=[settings.ALGORITHM],
+                    config.SECRET_KEY,
+                    algorithms=[ALGORITHM],
                     options={"verify_exp": False}  # 만료 체크 비활성화
                 )
 
@@ -229,7 +228,7 @@ async def logout(
                     # 토큰을 블랙리스트에 추가
                     from ..auth.token_blacklist import TokenBlacklist
                     blacklist = TokenBlacklist(request.app.state.cache_manager.redis)
-                    blacklist.add_token(token, settings.SECRET_KEY, reason="logout")
+                    blacklist.add_token(token, config.SECRET_KEY, reason="logout")
 
                     # 사용자의 모든 활성 세션 조회 및 삭제
                     session_ids = request.app.state.cache_manager.redis.smembers(

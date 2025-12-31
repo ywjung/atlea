@@ -17,11 +17,19 @@ class FollowUpQuestions {
      */
     async generate(userQuestion, aiAnswer, context = []) {
         try {
+            // Check authentication (required for follow-up questions)
+            const token = localStorage.getItem('access_token');
+            const headers = {
+                'Content-Type': 'application/json'
+            };
+
+            if (token) {
+                headers['Authorization'] = `Bearer ${token}`;
+            }
+
             const response = await fetch('/api/follow-up-questions', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
+                headers: headers,
                 body: JSON.stringify({
                     question: userQuestion,
                     answer: aiAnswer,
@@ -38,7 +46,7 @@ class FollowUpQuestions {
             return this.currentQuestions;
 
         } catch (error) {
-            // Return fallback questions
+            // Return fallback questions for unauthenticated or error cases
             return [
                 '이 내용과 관련된 추가 정보가 있나요?',
                 '다른 규정과의 차이점은 무엇인가요?',

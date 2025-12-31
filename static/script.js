@@ -1,14 +1,248 @@
+// ASCII art detection function (shared between renderer and highlighter)
+function isAsciiArt(code, language) {
+    // If language is specified and it's a known programming language, it's not ASCII art
+    if (language && ['javascript', 'python', 'java', 'cpp', 'c', 'csharp', 'go', 'rust',
+                      'typescript', 'ruby', 'php', 'swift', 'kotlin', 'scala', 'sql',
+                      'html', 'css', 'json', 'xml', 'yaml', 'bash', 'shell'].includes(language.toLowerCase())) {
+        return false;
+    }
+
+    // Check for box-drawing characters (Unicode box drawing)
+    const hasBoxDrawing = /[│┤┐└┴┬├─┼╔╗╚╝═║╠╣╦╩╬▀▄█▌▐░▒▓■□▪▫┌┘]/.test(code);
+    if (hasBoxDrawing) return true;
+
+    // Check for ASCII art patterns (multiple lines with drawing characters)
+    const lines = code.split('\n');
+    if (lines.length < 3) return false; // Too short to be ASCII art
+
+    // Count lines with ASCII drawing characters
+    const drawingChars = /[\|\/\\_\-\+\=\[\]\{\}\(\)\<\>\~\`\']/;
+    const linesWithDrawing = lines.filter(line => drawingChars.test(line)).length;
+
+    // If more than 60% of lines have drawing characters, it's likely ASCII art
+    if (linesWithDrawing / lines.length > 0.6) return true;
+
+    // Check for diagram keywords in combination with drawing characters
+    const hasKeywords = /(┐|┌|└|┘|\||─|╔|╗|╚|╝|diagram|chart|graph|tree|flow)/i.test(code);
+    if (hasKeywords && drawingChars.test(code)) return true;
+
+    return false;
+}
+
+// Custom renderer for marked.js
+const renderer = new marked.Renderer();
+const originalCodeRenderer = renderer.code.bind(renderer);
+
+renderer.code = function(code, language) {
+    // Check if it's ASCII art
+    if (isAsciiArt(code, language)) {
+        const escaped = code
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+        return `<pre class="ascii-art"><code>${escaped}</code></pre>`;
+    }
+
+    // Use default renderer for code with language
+    return originalCodeRenderer(code, language);
+};
+
 // Configure marked.js
 marked.setOptions({
+    renderer: renderer,
     highlight: function(code, lang) {
-        if (lang && hljs.getLanguage(lang)) {
-            return hljs.highlight(code, { language: lang }).value;
+        // Use shared ASCII art detection function
+        if (isAsciiArt(code, lang)) {
+            // Return plain text WITHOUT any highlighting
+            // This will be used inside <pre class="ascii-art"><code>
+            return code;
         }
-        return hljs.highlightAuto(code).value;
+
+        // Apply syntax highlighting for code with specified language
+        if (lang && hljs.getLanguage(lang)) {
+            try {
+                return hljs.highlight(code, { language: lang }).value;
+            } catch (e) {
+                console.warn('Highlight.js error:', e);
+                return code;
+            }
+        }
+
+        // For code blocks without language, don't auto-detect to avoid false positives
+        // Just return plain code
+        return code;
     },
     breaks: true,
     gfm: true
 });
+
+// Generate unique session ID
+function generateSessionId() {
+    return `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+}
+
+// Math rendering helper function
+function renderMath(element) {
+    if (typeof renderMathInElement !== 'undefined') {
+        try {
+            renderMathInElement(element, {
+                delimiters: [
+                    {left: '$$', right: '$$', display: true},   // Block math
+                    {left: '$', right: '$', display: false},     // Inline math
+                    {left: '\\[', right: '\\]', display: true},  // LaTeX block
+                    {left: '\\(', right: '\\)', display: false}  // LaTeX inline
+                ],
+                throwOnError: false,
+                errorColor: '#cc0000',
+                strict: false,
+                trust: (context) => ['\\ce', '\\pu'].includes(context.command), // Allow mhchem commands
+                macros: {
+                    "\\RR": "\\mathbb{R}",
+                    "\\NN": "\\mathbb{N}",
+                    "\\ZZ": "\\mathbb{Z}",
+                    "\\QQ": "\\mathbb{Q}",
+                    "\\CC": "\\mathbb{C}"
+                }
+            });
+        } catch (e) {
+            console.error('KaTeX rendering error:', e);
+        }
+    }
+}
+
+// Mermaid diagram rendering
+function renderMermaid(element) {
+    if (typeof mermaid !== 'undefined') {
+        try {
+            // Initialize Mermaid with theme based on current theme
+            const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+            mermaid.initialize({
+                startOnLoad: false,
+                theme: isDark ? 'dark' : 'default',
+                securityLevel: 'loose',
+                fontFamily: 'var(--font-sans)',
+                flowchart: {
+                    useMaxWidth: true,
+                    htmlLabels: true,
+                    curve: 'basis'
+                }
+            });
+
+            // Find all mermaid code blocks
+            const mermaidBlocks = element.querySelectorAll('pre code.language-mermaid');
+            mermaidBlocks.forEach((block, index) => {
+                const code = block.textContent;
+                const pre = block.parentElement;
+
+                // Create container for mermaid diagram
+                const container = document.createElement('div');
+                container.className = 'mermaid-container';
+                container.id = `mermaid-${Date.now()}-${index}`;
+
+                // Replace pre with container
+                pre.parentElement.replaceChild(container, pre);
+
+                // Render mermaid
+                mermaid.render(`mermaid-svg-${Date.now()}-${index}`, code).then(result => {
+                    container.innerHTML = result.svg;
+                }).catch(err => {
+                    console.error('Mermaid rendering error:', err);
+                    container.innerHTML = `<div class="render-error">❌ Diagram rendering error: ${err.message}</div>`;
+                });
+            });
+        } catch (e) {
+            console.error('Mermaid initialization error:', e);
+        }
+    }
+}
+
+// ABC notation music rendering
+function renderMusic(element) {
+    if (typeof ABCJS !== 'undefined') {
+        try {
+            // Find all ABC notation blocks
+            const abcBlocks = element.querySelectorAll('pre code.language-abc');
+            abcBlocks.forEach((block, index) => {
+                const code = block.textContent;
+                const pre = block.parentElement;
+
+                // Create container for music notation
+                const container = document.createElement('div');
+                container.className = 'abc-container';
+                container.id = `abc-${Date.now()}-${index}`;
+
+                // Replace pre with container
+                pre.parentElement.replaceChild(container, pre);
+
+                try {
+                    // Render ABC notation
+                    ABCJS.renderAbc(container.id, code, {
+                        responsive: 'resize',
+                        staffwidth: container.offsetWidth || 600,
+                        scale: 1.0,
+                        add_classes: true
+                    });
+                } catch (err) {
+                    console.error('ABC rendering error:', err);
+                    container.innerHTML = `<div class="render-error">❌ Music notation error: ${err.message}</div>`;
+                }
+            });
+        } catch (e) {
+            console.error('ABC initialization error:', e);
+        }
+    }
+}
+
+// Chart.js rendering
+function renderCharts(element) {
+    if (typeof Chart !== 'undefined') {
+        try {
+            // Find all chart code blocks
+            const chartBlocks = element.querySelectorAll('pre code.language-chart');
+            chartBlocks.forEach((block, index) => {
+                const code = block.textContent;
+                const pre = block.parentElement;
+
+                try {
+                    // Parse chart configuration
+                    const config = JSON.parse(code);
+
+                    // Create canvas for chart
+                    const container = document.createElement('div');
+                    container.className = 'chart-container';
+
+                    const canvas = document.createElement('canvas');
+                    canvas.id = `chart-${Date.now()}-${index}`;
+                    container.appendChild(canvas);
+
+                    // Replace pre with container
+                    pre.parentElement.replaceChild(container, pre);
+
+                    // Render chart
+                    new Chart(canvas, config);
+                } catch (err) {
+                    console.error('Chart rendering error:', err);
+                    const errorDiv = document.createElement('div');
+                    errorDiv.className = 'render-error';
+                    errorDiv.textContent = `❌ Chart rendering error: ${err.message}`;
+                    pre.parentElement.replaceChild(errorDiv, pre);
+                }
+            });
+        } catch (e) {
+            console.error('Chart.js initialization error:', e);
+        }
+    }
+}
+
+// Combined rendering function for all special content
+function renderSpecialContent(element) {
+    renderMath(element);
+    renderMermaid(element);
+    renderMusic(element);
+    renderCharts(element);
+}
 
 // Debug mode control
 const DEBUG_MODE = false; // Set to true for development, false for production
@@ -35,6 +269,7 @@ const refreshSuggestionsBtn = document.getElementById('refreshSuggestionsBtn');
 const historyToggleBtn = document.getElementById('historyToggleBtn');
 const conversationSidebar = document.getElementById('conversationSidebar');
 const newChatBtn = document.getElementById('newChatBtn');
+const deleteAllChatsBtn = document.getElementById('deleteAllChatsBtn');
 const conversationList = document.getElementById('conversationList');
 const container = document.querySelector('.container');
 
@@ -65,6 +300,25 @@ let isLoading = false;
 let conversationHistory = [];  // Store conversation history
 let currentAbortController = null;  // For stopping generation
 let lastUserQuestion = '';  // For regenerate function
+let lastFilterState = null;  // Track last filter state to detect changes
+let modalStack = [];  // Track which modals are open in order (for ESC key handling)
+
+// Modal stack management helpers
+function pushModal(modalElement, modalName) {
+    // Remove if already in stack (prevent duplicates)
+    modalStack = modalStack.filter(item => item.element !== modalElement);
+    // Add to end of stack (most recent)
+    modalStack.push({ element: modalElement, name: modalName });
+}
+
+function popModal(modalElement) {
+    modalStack = modalStack.filter(item => item.element !== modalElement);
+}
+
+function getTopmostModal() {
+    if (modalStack.length === 0) return null;
+    return modalStack[modalStack.length - 1];
+}
 
 // Initialize feature modules
 const errorHandler = new ErrorHandler();
@@ -75,14 +329,29 @@ const followUpQuestions = new FollowUpQuestions();  // Initialize follow-up ques
 
 // Initialize
 async function init() {
+    const startTime = performance.now();
+
+    // Synchronous setup
     initTheme();
-    await checkStatus();
     setupEventListeners();
     setupScrollButton();
-    await loadSuggestedQuestions();  // Load suggested questions after status check
+
+    // Parallel async operations
+    await Promise.all([
+        checkStatus(),
+        loadSuggestedQuestions()
+    ]);
 
     // Initialize AutoComplete after loading suggested questions
     await initializeAutoComplete();
+
+    // Initialize activity monitoring for auto-logout
+    if (Auth && typeof Auth.initActivityMonitor === 'function') {
+        Auth.initActivityMonitor();
+    }
+
+    const initTime = performance.now() - startTime;
+    logger.debug(`Core init completed in ${initTime.toFixed(2)}ms`);
 
     userInput.focus();
 }
@@ -90,9 +359,14 @@ async function init() {
 // Initialize AutoComplete
 async function initializeAutoComplete() {
     try {
-        const response = await fetch('/api/suggested-questions');
-        if (response.ok) {
-            const data = await response.json();
+        // Skip autocomplete if not authenticated (requires login)
+        const token = localStorage.getItem('access_token');
+        if (!token) {
+            return; // Silent skip - autocomplete is optional feature
+        }
+
+        const data = await Auth.apiCall('/api/suggested-questions');
+        if (data && data.questions) {
             const questions = data.questions || [];
             questionAutoComplete = new QuestionAutoComplete(userInput, questions);
         }
@@ -112,46 +386,102 @@ function setupEventListeners() {
     });
     exportBtn.addEventListener('click', exportHistory);
     importBtn.addEventListener('click', importHistory);
-    reindexBtn.addEventListener('click', reindexDocuments);
+
+    // Reindex button may not exist (moved to admin page)
+    if (reindexBtn) {
+        reindexBtn.addEventListener('click', reindexDocuments);
+    }
+
+    // Cancel reindex button event listener
+    const cancelReindexBtn = document.getElementById('cancelReindexBtn');
+    if (cancelReindexBtn) {
+        cancelReindexBtn.addEventListener('click', async () => {
+            // Show confirmation dialog
+            const confirmed = confirm('재색인을 중지하시겠습니까?\n\n진행 중인 작업이 취소되고, 이미 처리된 데이터는 손실될 수 있습니다.');
+
+            if (confirmed) {
+                try {
+                    console.log('🛑 Requesting reindex cancellation...');
+
+                    // Disable cancel button to prevent multiple clicks
+                    cancelReindexBtn.disabled = true;
+                    cancelReindexBtn.textContent = '🛑 취소 중...';
+
+                    const response = await fetch('/api/reindex/cancel', {
+                        method: 'POST'
+                    });
+
+                    const result = await response.json();
+                    console.log('Cancel response:', result);
+
+                    if (response.ok) {
+                        console.log('✅ Cancellation request sent successfully');
+                    } else {
+                        console.error('❌ Failed to cancel reindex:', result.detail);
+                        alert('재색인 취소에 실패했습니다: ' + result.detail);
+
+                        // Re-enable button on error
+                        cancelReindexBtn.disabled = false;
+                        cancelReindexBtn.textContent = '🛑 재색인 중지';
+                    }
+                } catch (error) {
+                    console.error('❌ Error cancelling reindex:', error);
+                    alert('재색인 취소 중 오류가 발생했습니다: ' + error.message);
+
+                    // Re-enable button on error
+                    cancelReindexBtn.disabled = false;
+                    cancelReindexBtn.textContent = '🛑 재색인 중지';
+                }
+            }
+        });
+    }
+
     themeToggle.addEventListener('click', toggleTheme);
 
     // Help modal event listeners
     helpBtn.addEventListener('click', () => {
         helpModal.classList.add('active');
+        pushModal(helpModal, 'help');
     });
 
     closeHelpModal.addEventListener('click', () => {
         helpModal.classList.remove('active');
+        popModal(helpModal);
     });
 
     // Close help modal when clicking outside
     helpModal.addEventListener('click', (e) => {
         if (e.target === helpModal) {
             helpModal.classList.remove('active');
+            popModal(helpModal);
         }
     });
 
     // Source modal event listeners
     closeSourceModal.addEventListener('click', () => {
         sourceModal.classList.remove('active');
+        popModal(sourceModal);
     });
 
     // Close modal when clicking outside
     sourceModal.addEventListener('click', (e) => {
         if (e.target === sourceModal) {
             sourceModal.classList.remove('active');
+            popModal(sourceModal);
         }
     });
 
     // Chunk viewer modal event listeners
     closeChunkViewerModal.addEventListener('click', () => {
         chunkViewerModal.classList.remove('active');
+        popModal(chunkViewerModal);
     });
 
     // Close modal when clicking outside
     chunkViewerModal.addEventListener('click', (e) => {
         if (e.target === chunkViewerModal) {
             chunkViewerModal.classList.remove('active');
+            popModal(chunkViewerModal);
         }
     });
 
@@ -175,19 +505,79 @@ function setupEventListeners() {
         container.classList.toggle('sidebar-active');
         historyToggleBtn.classList.toggle('active');
 
-        // Reload conversations when opening sidebar to get latest titles
+        // Update modal stack
         if (isOpening) {
+            pushModal(conversationSidebar, 'sidebar');
             await loadConversations();
+        } else {
+            popModal(conversationSidebar);
         }
     });
 
     newChatBtn.addEventListener('click', createNewConversation);
+
+    deleteAllChatsBtn.addEventListener('click', async () => {
+        // Check authentication (required to delete conversations)
+        const token = localStorage.getItem('access_token');
+        if (!token) {
+            alert('로그인이 필요합니다.');
+            return;
+        }
+
+        const conversationCount = document.querySelectorAll('.conversation-item').length;
+
+        if (conversationCount === 0) {
+            alert('삭제할 대화가 없습니다.');
+            return;
+        }
+
+        const confirmed = confirm(`정말로 모든 대화(${conversationCount}개)를 삭제하시겠습니까?\n\n이 작업은 되돌릴 수 없습니다.`);
+
+        if (!confirmed) {
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/conversations', {
+                method: 'DELETE',
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                }
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to delete all conversations');
+            }
+
+            const data = await response.json();
+
+            // Create new conversation (this clears session and shows welcome screen)
+            await createNewConversation();
+
+            // Reload conversation list (should be empty now)
+            await loadConversations();
+
+            alert(`${data.deleted_count}개의 대화가 삭제되었습니다.\n새 대화가 시작되었습니다.`);
+        } catch (error) {
+            console.error('Error deleting all conversations:', error);
+            alert('전체 삭제에 실패했습니다.');
+        }
+    });
 
     userInput.addEventListener('input', () => {
         autoResize();
         updateSendButton();
         updateCharCount();
         saveDraft(); // Auto-save draft
+    });
+
+    // Event delegation for source tags (handles dynamically created elements)
+    chatContainer.addEventListener('click', (e) => {
+        if (e.target.classList.contains('source-tag')) {
+            const filename = e.target.textContent;
+            console.log('[Event Delegation] Source tag clicked:', filename);
+            showSourceDetails(filename);
+        }
     });
 
     // Global keyboard shortcuts
@@ -202,44 +592,29 @@ function setupKeyboardShortcuts() {
             e.preventDefault();
             if (helpModal.classList.contains('active')) {
                 helpModal.classList.remove('active');
+                popModal(helpModal);
             } else {
                 helpModal.classList.add('active');
+                pushModal(helpModal, 'help');
             }
             return;
         }
 
-        // Esc - Close any open modal or panel
+        // Esc - Close only the topmost modal
         if (e.key === 'Escape') {
-            // Close help modal
-            if (helpModal.classList.contains('active')) {
-                helpModal.classList.remove('active');
-                return;
-            }
-            // Close settings panel
-            if (settingsPanel.classList.contains('active')) {
-                closeSettings();
-                return;
-            }
-            // Close docs modal
-            if (docsModal.classList.contains('active')) {
-                docsModal.classList.remove('active');
-                return;
-            }
-            // Close source modal
-            if (sourceModal.classList.contains('active')) {
-                sourceModal.classList.remove('active');
-                return;
-            }
-            // Close chunk viewer modal
-            if (chunkViewerModal.classList.contains('active')) {
-                chunkViewerModal.classList.remove('active');
-                return;
-            }
-            // Close conversation history sidebar
-            if (conversationSidebar.classList.contains('active')) {
-                conversationSidebar.classList.remove('active');
-                container.classList.remove('sidebar-active');
-                historyToggleBtn.classList.remove('active');
+            const topModal = getTopmostModal();
+            if (topModal) {
+                // Close the topmost modal
+                topModal.element.classList.remove('active');
+                popModal(topModal.element);
+
+                // Special handling for specific modals
+                if (topModal.name === 'settings') {
+                    closeSettings();
+                } else if (topModal.name === 'sidebar') {
+                    container.classList.remove('sidebar-active');
+                    historyToggleBtn.classList.remove('active');
+                }
                 return;
             }
         }
@@ -261,6 +636,7 @@ function setupKeyboardShortcuts() {
             } else {
                 settingsPanel.classList.add('active');
                 settingsOverlay.classList.add('active');
+                pushModal(settingsPanel, 'settings');
             }
         }
 
@@ -268,6 +644,67 @@ function setupKeyboardShortcuts() {
         if ((e.ctrlKey || e.metaKey) && e.key === 'e') {
             e.preventDefault();
             exportHistory();
+            return;
+        }
+
+        // Ctrl/Cmd + H - Toggle conversation history sidebar
+        if ((e.ctrlKey || e.metaKey) && e.key === 'h') {
+            e.preventDefault();
+            historyToggleBtn.click();
+            return;
+        }
+
+        // Ctrl/Cmd + D - Open document management
+        if ((e.ctrlKey || e.metaKey) && e.key === 'd') {
+            e.preventDefault();
+            const docModal = document.getElementById('documentModal');
+            if (docModal) {
+                docModal.classList.add('active');
+                pushModal(docModal, 'documents');
+                loadDocuments();
+            }
+            return;
+        }
+
+        // Ctrl/Cmd + I - Import history
+        if ((e.ctrlKey || e.metaKey) && e.key === 'i') {
+            e.preventDefault();
+            importHistory();
+            return;
+        }
+
+        // Ctrl/Cmd + Shift + D - Toggle dark mode
+        if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'D') {
+            e.preventDefault();
+            const currentTheme = document.documentElement.getAttribute('data-theme');
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+            document.documentElement.setAttribute('data-theme', newTheme);
+            localStorage.setItem('theme', newTheme);
+            const themeSwitch = document.getElementById('themeSwitch');
+            if (themeSwitch) {
+                themeSwitch.checked = newTheme === 'dark';
+            }
+            logger.info(`테마 변경: ${newTheme === 'dark' ? '다크 모드' : '라이트 모드'}`);
+            return;
+        }
+
+        // Ctrl/Cmd + B - Toggle sidebar (document filter)
+        if ((e.ctrlKey || e.metaKey) && e.key === 'b') {
+            e.preventDefault();
+            const filterBtn = document.getElementById('filter-toggle-btn');
+            if (filterBtn) {
+                filterBtn.click();
+            }
+            return;
+        }
+
+        // Ctrl/Cmd + Enter - Send message (when focused on input)
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+            if (document.activeElement === userInput) {
+                e.preventDefault();
+                sendBtn.click();
+                return;
+            }
         }
     });
 }
@@ -309,11 +746,35 @@ async function checkStatus() {
         const response = await fetch('/api/status');
         const data = await response.json();
 
+        // Update model information from server (관리자 페이지에서 변경 시 즉시 반영)
+        if (data.llm_model) {
+            currentSettings.llm_model = data.llm_model;
+        }
+        if (data.embedding_model) {
+            currentSettings.embedding_model = data.embedding_model;
+        }
+
+        // Show/hide reindex banner
+        const reindexBanner = document.getElementById('reindexBanner');
+        if (reindexBanner) {
+            if (data.is_reindexing) {
+                reindexBanner.classList.add('show');
+            } else {
+                reindexBanner.classList.remove('show');
+            }
+        }
+
         if (data.status === 'ready') {
             statusEl.textContent = '준비됨';
             statusEl.style.color = '#4ade80';
             docCountEl.textContent = `📄 문서 ${data.pdf_count}개 (청크 ${data.chunk_count}개)`;
             sendBtn.disabled = false;
+        } else if (data.status === 'reindexing') {
+            statusEl.textContent = '재색인 중...';
+            statusEl.style.color = '#fbbf24';
+            docCountEl.textContent = `📄 문서 ${data.pdf_count}개 (청크 ${data.chunk_count}개)`;
+            sendBtn.disabled = false;  // Allow queries during reindex
+            setTimeout(checkStatus, 2000);  // Check again in 2 seconds
         } else {
             statusEl.textContent = '초기화 중...';
             statusEl.style.color = '#fbbf24';
@@ -376,6 +837,7 @@ function validateInput(text) {
 
 // Load conversation list
 let isLoadingConversations = false;
+let showBookmarkedOnly = false;  // Filter state for showing only bookmarked conversations
 
 async function loadConversations() {
     // Prevent concurrent loads
@@ -387,18 +849,19 @@ async function loadConversations() {
     isLoadingConversations = true;
 
     try {
-        const response = await fetch('/api/conversations');
-        if (!response.ok) {
+        // Fetch conversations or bookmarked conversations based on filter state
+        const endpoint = showBookmarkedOnly ? '/api/conversations/bookmarked/list' : '/api/conversations';
+        const data = await Auth.apiCall(endpoint);
+        if (!data) {
             throw new Error('Failed to load conversations');
         }
-
-        const data = await response.json();
         const conversations = data.sessions || [];
 
         conversationList.innerHTML = '';
 
         if (conversations.length === 0) {
-            conversationList.innerHTML = '<div class="loading-conversations"><span>대화 기록이 없습니다</span></div>';
+            const emptyMessage = showBookmarkedOnly ? '북마크된 대화가 없습니다' : '대화 기록이 없습니다';
+            conversationList.innerHTML = `<div class="loading-conversations"><span>${emptyMessage}</span></div>`;
             return;
         }
 
@@ -407,10 +870,20 @@ async function loadConversations() {
             item.className = 'conversation-item';
             item.setAttribute('data-id', conv.id);
             const isCurrentSession = conv.id === currentSessionId;
+            const isBookmarked = conv.is_bookmarked === '1';
 
             if (isCurrentSession) {
                 item.classList.add('active');
             }
+
+            // Bookmark button (always visible, filled if bookmarked)
+            const bookmarkButtonHTML = `
+                <button class="conversation-bookmark-btn ${isBookmarked ? 'bookmarked' : ''}" title="${isBookmarked ? '북마크 해제' : '북마크'}" data-session-id="${conv.id}">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="${isBookmarked ? 'currentColor' : 'none'}" stroke="currentColor">
+                        <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
+            `;
 
             // Only show delete button if it's not the current session
             const deleteButtonHTML = isCurrentSession ? '' : `
@@ -424,17 +897,31 @@ async function loadConversations() {
             item.innerHTML = `
                 <div class="conversation-item-header">
                     <div class="conversation-title">${escapeHtml(conv.title)}</div>
-                    ${deleteButtonHTML}
+                    <div class="conversation-actions">
+                        ${bookmarkButtonHTML}
+                        ${deleteButtonHTML}
+                    </div>
                 </div>
                 <div class="conversation-time">${formatTimestamp(conv.updated_at)}</div>
             `;
 
             // Click to load conversation (use event delegation later, but keep individual for now)
             item.addEventListener('click', (e) => {
-                if (!e.target.closest('.conversation-delete-btn')) {
+                if (!e.target.closest('.conversation-bookmark-btn') && !e.target.closest('.conversation-delete-btn')) {
                     loadConversation(conv.id);
                 }
             }, { once: true }); // Use once:true to prevent duplicate listeners
+
+            // Bookmark button listener
+            const bookmarkBtn = item.querySelector('.conversation-bookmark-btn');
+            if (bookmarkBtn) {
+                bookmarkBtn.addEventListener('click', async (e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    const sessionId = bookmarkBtn.getAttribute('data-session-id');
+                    await toggleBookmark(sessionId);
+                }, { once: true });
+            }
 
             // Delete button - only add listener if button exists
             if (!isCurrentSession) {
@@ -463,22 +950,65 @@ async function loadConversations() {
     }
 }
 
+// Toggle bookmark for a conversation
+async function toggleBookmark(sessionId) {
+    try {
+        const data = await Auth.apiCall(`/api/conversations/${sessionId}/bookmark`, {
+            method: 'POST'
+        });
+
+        if (!data) {
+            throw new Error('Failed to toggle bookmark');
+        }
+
+        // Reload conversation list to reflect bookmark status
+        await loadConversations();
+
+        // Show brief feedback
+        devLog(`Bookmark ${data.is_bookmarked ? 'added' : 'removed'} for session ${sessionId}`);
+    } catch (error) {
+        console.error('Error toggling bookmark:', error);
+        alert('북마크 변경에 실패했습니다.');
+    }
+}
+
+// Toggle bookmark filter
+function toggleBookmarkFilter() {
+    showBookmarkedOnly = !showBookmarkedOnly;
+
+    // Update button state
+    const filterBtn = document.getElementById('bookmarkFilterBtn');
+    if (filterBtn) {
+        if (showBookmarkedOnly) {
+            filterBtn.classList.add('active');
+            filterBtn.title = '전체 대화 보기';
+        } else {
+            filterBtn.classList.remove('active');
+            filterBtn.title = '북마크만 보기';
+        }
+    }
+
+    // Reload conversations with filter
+    loadConversations();
+}
+
 // Create new conversation
 async function createNewConversation() {
     try {
-        const response = await fetch('/api/conversations', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            }
+        const data = await Auth.apiCall('/api/conversations', {
+            method: 'POST'
         });
 
-        if (!response.ok) {
+        if (!data) {
             throw new Error('Failed to create conversation');
         }
 
-        const data = await response.json();
         currentSessionId = data.session_id;
+
+        // Clear conversation history for new conversation
+        conversationHistory = [];
+        currentContextData = [];
+        saveHistory();
 
         // Show welcome screen for new conversation
         await showWelcomeScreen();
@@ -496,26 +1026,62 @@ async function createNewConversation() {
 // Load conversation messages
 async function loadConversation(sessionId) {
     try {
-        const response = await fetch(`/api/conversations/${sessionId}`);
-        if (!response.ok) {
+        const data = await Auth.apiCall(`/api/conversations/${sessionId}`);
+        if (!data) {
             throw new Error('Failed to load conversation');
         }
 
-        const data = await response.json();
         currentSessionId = sessionId;
 
         // Clear current chat UI
         clearChatUI();
 
+        // Clear and rebuild currentContextData from loaded messages
+        currentContextData = [];
+
+        // Clear and rebuild conversationHistory from loaded messages
+        conversationHistory = [];
+
         // Load messages
         data.messages.forEach(msg => {
             if (msg.role === 'user') {
                 addMessage(msg.content, 'user');
+                // Add to conversationHistory
+                conversationHistory.push({
+                    role: 'user',
+                    content: msg.content,
+                    timestamp: msg.timestamp
+                });
             } else if (msg.role === 'assistant') {
                 const sources = msg.metadata?.sources || [];
-                addMessage(msg.content, 'bot', sources);  // Use 'bot' type for markdown rendering
+                const messageDiv = addMessage(msg.content, 'bot', sources);  // Use 'bot' type for markdown rendering
+
+                // Add to conversationHistory
+                conversationHistory.push({
+                    role: 'assistant',
+                    content: msg.content,
+                    sources: sources,
+                    context: msg.metadata?.context || [],
+                    timestamp: msg.timestamp
+                });
+
+                // Add response time if metadata contains stats
+                if (msg.metadata?.elapsed_time) {
+                    const elapsed = msg.metadata.elapsed_time;
+                    const cached = msg.metadata.cached || false;
+                    const stats = msg.metadata.stats || null;
+                    addResponseTime(messageDiv, elapsed, cached, stats);
+                }
+
+                // Restore context data for source details modal
+                if (msg.metadata?.context && Array.isArray(msg.metadata.context)) {
+                    currentContextData.push(...msg.metadata.context);
+                }
             }
         });
+
+        // Save to localStorage
+        saveHistory();
 
         // Find and set last user question for regenerate function
         lastUserQuestion = '';  // Reset first
@@ -557,16 +1123,14 @@ async function deleteConversation(sessionId) {
     try {
         devLog('Deleting conversation:', sessionId);
 
-        const response = await fetch(`/api/conversations/${sessionId}`, {
+        const result = await Auth.apiCall(`/api/conversations/${sessionId}`, {
             method: 'DELETE'
         });
 
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.detail || 'Failed to delete conversation');
+        if (!result) {
+            throw new Error('Failed to delete conversation');
         }
 
-        const result = await response.json();
         devLog('Delete result:', result);
 
         // If deleted current conversation, create new one
@@ -677,42 +1241,56 @@ async function initConversationHistory() {
         // Clear chat UI to ensure fresh start
         clearChatUI();
 
-        // Load existing conversations first
-        const response = await fetch('/api/conversations');
-        if (response.ok) {
-            const data = await response.json();
-            const conversations = data.sessions || [];
+        // Check if user is authenticated
+        const token = localStorage.getItem('access_token');
 
-            // Load the most recent conversation
-            if (conversations.length > 0) {
-                const mostRecent = conversations[0];
-                const messageCount = parseInt(mostRecent.message_count || '0');
+        if (token) {
+            // User is authenticated - try to load existing conversations
+            const headers = {
+                'Authorization': `Bearer ${token}`
+            };
 
-                if (messageCount === 0) {
-                    // Reuse the empty conversation - show welcome screen
-                    currentSessionId = mostRecent.id;
-                    await showWelcomeScreen();
-                    devLog('Reusing empty conversation:', currentSessionId);
+            const response = await fetch('/api/conversations', { headers });
+            if (response.ok) {
+                const data = await response.json();
+                const conversations = data.sessions || [];
+
+                // Load the most recent conversation
+                if (conversations.length > 0) {
+                    const mostRecent = conversations[0];
+                    const messageCount = parseInt(mostRecent.message_count || '0');
+
+                    if (messageCount === 0) {
+                        // Reuse the empty conversation - show welcome screen
+                        currentSessionId = mostRecent.id;
+                        await showWelcomeScreen();
+                        devLog('Reusing empty conversation:', currentSessionId);
+                    } else {
+                        // Most recent has messages - load it to display
+                        devLog('Loading most recent conversation:', mostRecent.id);
+                        await loadConversation(mostRecent.id);
+                    }
                 } else {
-                    // Most recent has messages - load it to display
-                    devLog('Loading most recent conversation:', mostRecent.id);
-                    await loadConversation(mostRecent.id);
+                    // No conversations exist, create new one
+                    devLog('No conversations found, creating new one');
+                    await createNewConversation();
+                    await showWelcomeScreen();
                 }
+
+                // Load conversation list for sidebar (authenticated users only)
+                await loadConversations();
             } else {
-                // No conversations exist, create new one
-                devLog('No conversations found, creating new one');
+                // Token expired or invalid - create new conversation
+                console.log('Authentication failed, creating new conversation');
                 await createNewConversation();
                 await showWelcomeScreen();
             }
         } else {
-            // Error loading conversations, create new one
-            console.error('Failed to load conversations, creating new one');
+            // User is not authenticated - skip conversation loading, create new one
+            devLog('Not authenticated, creating new conversation');
             await createNewConversation();
             await showWelcomeScreen();
         }
-
-        // Load conversation list for sidebar
-        await loadConversations();
 
         devLog('Conversation history initialized');
     } catch (error) {
@@ -822,7 +1400,6 @@ async function sendMessage(regenerate = false) {
 
     // Abort any previous request before starting a new one
     if (currentAbortController) {
-        console.log('Aborting previous request');
         currentAbortController.abort();
     }
 
@@ -833,15 +1410,41 @@ async function sendMessage(regenerate = false) {
         // Get filter data based on active tab
         const { documentIds, groupIds } = getActiveFilterData();
 
+        // Check if filter state has changed (document scope changed)
+        const currentFilterState = JSON.stringify({ documentIds, groupIds });
+        if (lastFilterState !== null && lastFilterState !== currentFilterState) {
+            // Filter changed - reset conversation context
+            console.log('🔄 검색 범위 변경 감지 - 대화 컨텍스트 초기화');
+            conversationHistory = [];
+
+            // Create new session when filter changes
+            currentSessionId = generateSessionId();
+
+            // Show user notification
+            const notificationDiv = document.createElement('div');
+            notificationDiv.className = 'filter-change-notification';
+            notificationDiv.textContent = '📝 검색 범위가 변경되어 새로운 대화를 시작합니다';
+            chatContainer.appendChild(notificationDiv);
+            setTimeout(() => notificationDiv.remove(), 3000);
+        }
+        // Update last filter state
+        lastFilterState = currentFilterState;
+
         // Wrap fetch with ErrorHandler retry and timeout
         const response = await errorHandler.withTimeout(
             () => errorHandler.withRetry(
                 async () => {
+                    const token = Auth.getAccessToken();
+                    const headers = {
+                        'Content-Type': 'application/json',
+                    };
+                    if (token) {
+                        headers['Authorization'] = `Bearer ${token}`;
+                    }
+
                     const res = await fetch('/api/query/stream', {
                         method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
+                        headers: headers,
                         body: JSON.stringify({
                             question: question,
                             top_k: currentSettings.top_k,
@@ -868,10 +1471,7 @@ async function sendMessage(regenerate = false) {
             60000 // 60 second timeout (increased for LLM response generation)
         );
 
-        // Show streaming progress (StreamingVisualizer)
-        streamingVisualizer.showStreamingProgress(chatContainer);
-
-        // Create message container for streaming
+        // Create message container for streaming first
         const messageDiv = document.createElement('div');
         messageDiv.className = 'message bot';
         const contentDiv = document.createElement('div');
@@ -879,9 +1479,14 @@ async function sendMessage(regenerate = false) {
         messageDiv.appendChild(contentDiv);
         chatContainer.appendChild(messageDiv);
 
+        // Show streaming progress inside message container
+        streamingVisualizer.showStreamingProgress(messageDiv);
+
         let sources = null;
         let fullText = '';
         let tokenCount = 0;
+        let tokenStats = null;  // Store token generation statistics
+        let isFirstChunk = true;  // Track first chunk to hide progress indicator
 
         // Read stream
         const reader = response.body.getReader();
@@ -921,20 +1526,28 @@ async function sendMessage(regenerate = false) {
                                 cached: data.data.cached
                             });
                         } else if (data.type === 'chunk') {
+                            // Hide progress indicator on first chunk
+                            if (isFirstChunk) {
+                                streamingVisualizer.hide();
+                                isFirstChunk = false;
+                            }
+
                             fullText += data.data;
 
                             // Update token count (approximate by splitting on spaces)
                             tokenCount = fullText.split(/\s+/).filter(w => w.length > 0).length;
-                            streamingVisualizer.updateTokenCount(tokenCount);
 
                             // Server already filters <think> tags, so just render
                             try {
                                 contentDiv.innerHTML = marked.parse(fullText);
 
-                                // Highlight code blocks
+                                // Highlight code blocks first
                                 contentDiv.querySelectorAll('pre code').forEach((block) => {
                                     hljs.highlightElement(block);
                                 });
+
+                                // Render special content (math, diagrams, music, charts)
+                                renderSpecialContent(contentDiv);
 
                                 // Scroll to bottom
                                 chatContainer.scrollTop = chatContainer.scrollHeight;
@@ -942,6 +1555,10 @@ async function sendMessage(regenerate = false) {
                                 console.error('Render error:', renderError);
                                 // Continue streaming even if rendering fails
                             }
+                        } else if (data.type === 'stats') {
+                            // Capture token generation statistics
+                            tokenStats = data.data;
+                            devLog('📊 [STATS] Received token statistics:', tokenStats);
                         } else if (data.type === 'done') {
                             // Calculate response time
                             const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
@@ -964,8 +1581,8 @@ async function sendMessage(regenerate = false) {
                             // Save to localStorage
                             saveHistory();
 
-                            // Add timestamp
-                            addResponseTime(messageDiv, elapsed, data.data?.cached);
+                            // Add timestamp with token statistics
+                            addResponseTime(messageDiv, elapsed, data.data?.cached, tokenStats);
 
                             // Add action buttons first
                             addActionButtons(contentDiv, fullText);
@@ -1088,6 +1705,14 @@ function addMessage(text, type, sources = null) {
         // Render markdown
         contentDiv.innerHTML = marked.parse(text);
 
+        // Highlight code blocks
+        contentDiv.querySelectorAll('pre code').forEach((block) => {
+            hljs.highlightElement(block);
+        });
+
+        // Render special content (math, diagrams, music, charts)
+        renderSpecialContent(contentDiv);
+
         // Add sources if available
         if (sources && sources.length > 0) {
             // Create wrapper for sources section and action buttons
@@ -1201,35 +1826,362 @@ async function clearChat() {
 
 // Reindex documents
 async function reindexDocuments() {
-    if (!confirm('문서를 재색인하시겠습니까? 시간이 걸릴 수 있습니다.')) {
+    // Get modal elements
+    const modal = document.getElementById('reindexProgressModal');
+    const progressBar = document.getElementById('reindexProgressBar');
+    const progressPercent = document.getElementById('reindexProgressPercent');
+    const progressStep = document.getElementById('reindexProgressStep');
+    const progressStats = document.getElementById('reindexProgressStats');
+    const progressTime = document.getElementById('reindexProgressTime');
+
+    // Time tracking for remaining time calculation
+    let startTime = null;
+    let lastProgress = 0;
+
+    // Check if reindexing is already in progress
+    try {
+        const checkResponse = await fetch('/api/reindex/progress');
+        if (checkResponse.ok) {
+            const currentProgress = await checkResponse.json();
+            const inProgressSteps = ['문서 처리 중', '임베딩 생성 중', '데이터베이스 저장 중', '메타데이터 저장 중'];
+
+            if (inProgressSteps.includes(currentProgress.step)) {
+                // Already in progress - just show the modal
+                alert('⚠️ 재색인이 이미 진행 중입니다.\n\n진행 상황을 확인하세요.');
+
+                // Show modal with current progress
+                modal.style.display = 'flex';
+                reindexBtn.disabled = true;
+
+                // Set current progress
+                progressBar.style.width = `${currentProgress.progress}%`;
+                progressPercent.textContent = `${currentProgress.progress}%`;
+                progressStep.textContent = currentProgress.step;
+                if (currentProgress.current_item && currentProgress.total_items) {
+                    progressStats.textContent = `${currentProgress.current_item} / ${currentProgress.total_items}`;
+                } else {
+                    progressStats.textContent = '0 / 0';
+                }
+
+                // Start polling to monitor existing reindex
+                monitorReindexProgress(modal, progressBar, progressPercent, progressStep, progressStats);
+                return;
+            }
+        }
+    } catch (error) {
+        console.error('Failed to check reindex status:', error);
+        // If check fails, proceed with confirmation
+    }
+
+    // Not in progress - ask for confirmation
+    if (!confirm('문서를 재색인하시겠습니까?\n\n⏳ 재색인은 수 분이 걸릴 수 있습니다.\n✓ 진행 상황을 확인할 수 있습니다.')) {
         return;
     }
 
+    // Show modal
+    modal.style.display = 'flex';
     reindexBtn.disabled = true;
-    reindexBtn.textContent = '재색인 중...';
-    statusEl.textContent = '재색인 중...';
-    statusEl.style.color = '#fbbf24';
+
+    // Reset progress - force width update
+    progressBar.style.width = '0%';
+    progressBar.style.display = 'flex'; // Ensure it's visible
+    progressBar.style.background = 'linear-gradient(90deg, #667eea 0%, #764ba2 50%, #f093fb 100%)'; // Reset to original gradient
+    progressPercent.textContent = '0%';
+    progressStep.textContent = '재색인 시작 중...';
+    progressStats.textContent = '0 / 0';
+    progressTime.textContent = ''; // Reset time display
+
+    // Reset cancel button state
+    const cancelReindexBtn = document.getElementById('cancelReindexBtn');
+    if (cancelReindexBtn) {
+        cancelReindexBtn.disabled = false;
+        cancelReindexBtn.textContent = '🛑 재색인 중지';
+    }
+
+    // Reset time tracking variables
+    startTime = null;
+    lastProgress = 0;
+
+    // Debug: Log initial state
+    console.log('Progress bar reset. Width:', progressBar.style.width, 'Background:', progressBar.style.background, 'Element:', progressBar);
+
+    let progressInterval;
+    let consecutiveErrors = 0;
+    const MAX_CONSECUTIVE_ERRORS = 3;
 
     try {
+        // Start polling for progress
+        progressInterval = setInterval(async () => {
+            try {
+                const progressResponse = await fetch('/api/reindex/progress');
+
+                if (progressResponse.ok) {
+                    consecutiveErrors = 0; // Reset error counter on success
+                    const progressData = await progressResponse.json();
+
+                    // Update progress bar
+                    const progress = progressData.progress || 0;
+                    progressBar.style.width = `${progress}%`;
+                    progressPercent.textContent = `${progress}%`;
+
+                    // Calculate and update remaining time
+                    if (!startTime && progress > 0) {
+                        startTime = Date.now();
+                    }
+
+                    if (startTime && progress > lastProgress && progress > 0 && progress < 100) {
+                        const elapsedSeconds = (Date.now() - startTime) / 1000;
+                        const estimatedTotalSeconds = (elapsedSeconds / progress) * 100;
+                        const remainingSeconds = Math.max(0, estimatedTotalSeconds - elapsedSeconds);
+
+                        if (remainingSeconds > 0) {
+                            const minutes = Math.floor(remainingSeconds / 60);
+                            const seconds = Math.floor(remainingSeconds % 60);
+                            progressTime.textContent = `약 ${minutes}분 ${seconds}초 남음`;
+                        } else {
+                            progressTime.textContent = '곧 완료됩니다';
+                        }
+                    } else if (progress >= 100) {
+                        progressTime.textContent = '완료!';
+                    }
+                    lastProgress = progress;
+
+                    // Debug: Log progress update
+                    console.log(`Progress updated: ${progress}%, width: ${progressBar.style.width}, element:`, progressBar);
+
+                    // Update step text
+                    progressStep.textContent = progressData.step || '진행 중...';
+
+                    // Update stats if available
+                    if (progressData.current_item && progressData.total_items) {
+                        progressStats.textContent = `${progressData.current_item} / ${progressData.total_items} 문서`;
+                    } else {
+                        progressStats.textContent = '0 / 0 문서';
+                    }
+
+                    // Check for completion
+                    if (progressData.step === '완료') {
+                        clearInterval(progressInterval);
+
+                        // Wait a moment to show completion
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+
+                        // Hide modal
+                        modal.style.display = 'none';
+
+                        // Re-enable button
+                        reindexBtn.disabled = false;
+
+                        // Success message
+                        const docCount = vector_db ? vector_db.count_documents() : 'unknown';
+                        alert(`✅ 재색인이 완료되었습니다!`);
+                        await checkStatus();
+                    } else if (progressData.step === '오류 발생') {
+                        clearInterval(progressInterval);
+                        progressBar.style.background = 'linear-gradient(90deg, #ef4444, #dc2626)';
+
+                        await new Promise(resolve => setTimeout(resolve, 2000));
+
+                        modal.style.display = 'none';
+                        progressBar.style.background = '';
+                        reindexBtn.disabled = false;
+
+                        alert(`❌ 재색인 실패\n\n로그를 확인해주세요.`);
+                    } else if (progressData.step === '취소됨' || progressData.step === '취소 중...') {
+                        clearInterval(progressInterval);
+                        progressBar.style.background = 'linear-gradient(90deg, #f59e0b, #f97316)';
+
+                        await new Promise(resolve => setTimeout(resolve, 1500));
+
+                        modal.style.display = 'none';
+                        progressBar.style.background = '';
+                        reindexBtn.disabled = false;
+
+                        alert(`🛑 재색인이 취소되었습니다.`);
+                        await checkStatus();
+                    }
+                } else {
+                    consecutiveErrors++;
+                }
+            } catch (error) {
+                console.error('Failed to fetch progress:', error);
+                consecutiveErrors++;
+
+                // Stop polling after consecutive errors
+                if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+                    console.warn('Too many consecutive errors, stopping progress polling');
+                    clearInterval(progressInterval);
+                    progressStep.textContent = '서버 연결 실패';
+                }
+            }
+        }, 1000);
+
+        // Start reindexing (returns immediately)
         const response = await fetch('/api/reindex', {
             method: 'POST'
         });
 
         if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
         }
 
         const data = await response.json();
-        alert(data.message);
-        await checkStatus();
+        console.log(`Reindex started: ${data.message}`);
+
+        // Wait for progress polling to detect completion
+        // Progress interval will continue until completion or error is detected
 
     } catch (error) {
         console.error('Reindex failed:', error);
-        alert('재색인에 실패했습니다.');
+
+        // Clear progress polling
+        if (progressInterval) {
+            clearInterval(progressInterval);
+        }
+
+        // Update modal to show error
+        progressBar.style.width = '0%';
+        progressBar.style.background = 'linear-gradient(90deg, #ef4444, #dc2626)';
+        progressStep.textContent = '오류 발생';
+        progressDetails.textContent = error.message;
+
+        // Wait a moment to show error
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
+        // Hide modal
+        modal.style.display = 'none';
+        progressBar.style.background = '';
+
+        alert(`❌ 재색인 실패\n\n오류: ${error.message}\n\n로그를 확인해주세요.`);
     } finally {
         reindexBtn.disabled = false;
-        reindexBtn.textContent = '문서 재색인';
     }
+}
+
+// Monitor ongoing reindex progress (for duplicate prevention)
+function monitorReindexProgress(modal, progressBar, progressPercent, progressStep, progressStats) {
+    let consecutiveErrors = 0;
+    const MAX_CONSECUTIVE_ERRORS = 3;
+
+    const progressInterval = setInterval(async () => {
+        try {
+            const progressResponse = await fetch('/api/reindex/progress');
+
+            if (progressResponse.ok) {
+                consecutiveErrors = 0; // Reset error counter on success
+                const progressData = await progressResponse.json();
+
+                // Update progress bar
+                const progress = progressData.progress || 0;
+                progressBar.style.width = `${progress}%`;
+                progressPercent.textContent = `${progress}%`;
+
+                // Calculate and update remaining time (monitor mode)
+                if (!startTime && progress > 0) {
+                    startTime = Date.now();
+                }
+
+                if (startTime && progress > lastProgress && progress > 0 && progress < 100) {
+                    const elapsedSeconds = (Date.now() - startTime) / 1000;
+                    const estimatedTotalSeconds = (elapsedSeconds / progress) * 100;
+                    const remainingSeconds = Math.max(0, estimatedTotalSeconds - elapsedSeconds);
+
+                    if (remainingSeconds > 0) {
+                        const minutes = Math.floor(remainingSeconds / 60);
+                        const seconds = Math.floor(remainingSeconds % 60);
+                        progressTime.textContent = `약 ${minutes}분 ${seconds}초 남음`;
+                    } else {
+                        progressTime.textContent = '곧 완료됩니다';
+                    }
+                } else if (progress >= 100) {
+                    progressTime.textContent = '완료!';
+                }
+                lastProgress = progress;
+
+                // Debug: Log progress update
+                console.log(`[Monitor] Progress updated: ${progress}%, width: ${progressBar.style.width}, element:`, progressBar);
+
+                // Update step text
+                progressStep.textContent = progressData.step || '진행 중...';
+
+                // Update stats if available
+                if (progressData.current_item && progressData.total_items) {
+                    progressStats.textContent = `${progressData.current_item} / ${progressData.total_items} 문서`;
+                } else {
+                    progressStats.textContent = '0 / 0 문서';
+                }
+
+                // Check if completed or error
+                if (progressData.step === '완료') {
+                    clearInterval(progressInterval);
+
+                    // Wait a moment to show completion
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+
+                    // Hide modal
+                    modal.style.display = 'none';
+
+                    // Re-enable button
+                    reindexBtn.disabled = false;
+
+                    // Refresh status
+                    await checkStatus();
+                } else if (progressData.step === '오류 발생') {
+                    clearInterval(progressInterval);
+
+                    // Show error
+                    progressBar.style.background = 'linear-gradient(90deg, #ef4444, #dc2626)';
+
+                    // Wait a moment
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+
+                    // Hide modal
+                    modal.style.display = 'none';
+                    progressBar.style.background = '';
+
+                    // Re-enable button
+                    reindexBtn.disabled = false;
+                } else if (progressData.step === '취소됨' || progressData.step === '취소 중...') {
+                    clearInterval(progressInterval);
+
+                    // Show cancelled
+                    progressBar.style.background = 'linear-gradient(90deg, #f59e0b, #f97316)';
+
+                    // Wait a moment
+                    await new Promise(resolve => setTimeout(resolve, 1500));
+
+                    // Hide modal
+                    modal.style.display = 'none';
+                    progressBar.style.background = '';
+
+                    // Re-enable button
+                    reindexBtn.disabled = false;
+
+                    // Refresh status
+                    await checkStatus();
+                }
+            } else {
+                consecutiveErrors++;
+            }
+        } catch (error) {
+            console.error('Failed to fetch progress:', error);
+            consecutiveErrors++;
+
+            // Stop polling after consecutive errors
+            if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+                console.warn('Too many consecutive errors, stopping progress polling');
+                clearInterval(progressInterval);
+                progressStep.textContent = '서버 연결 실패';
+
+                // Wait a moment then hide modal
+                setTimeout(() => {
+                    modal.style.display = 'none';
+                    reindexBtn.disabled = false;
+                }, 3000);
+            }
+        }
+    }, 1000);
 }
 
 // Stop generation
@@ -1245,6 +2197,29 @@ function addActionButtons(contentDiv, text) {
     const actionsDiv = document.createElement('div');
     actionsDiv.className = 'message-actions';
 
+    // Feedback buttons (👍/👎) - always show
+    const feedbackDiv = document.createElement('div');
+    feedbackDiv.className = 'feedback-buttons';
+
+    const thumbsUpBtn = document.createElement('button');
+    thumbsUpBtn.className = 'action-btn feedback-btn thumbs-up-btn';
+    thumbsUpBtn.setAttribute('title', '도움이 되었어요');
+    thumbsUpBtn.setAttribute('aria-label', '긍정 평가');
+    thumbsUpBtn.setAttribute('data-feedback-type', 'positive');
+    thumbsUpBtn.innerHTML = '👍';
+    thumbsUpBtn.onclick = (e) => submitFeedback(e.target, 'positive');
+
+    const thumbsDownBtn = document.createElement('button');
+    thumbsDownBtn.className = 'action-btn feedback-btn thumbs-down-btn';
+    thumbsDownBtn.setAttribute('title', '개선이 필요해요');
+    thumbsDownBtn.setAttribute('aria-label', '부정 평가');
+    thumbsDownBtn.setAttribute('data-feedback-type', 'negative');
+    thumbsDownBtn.innerHTML = '👎';
+    thumbsDownBtn.onclick = (e) => submitFeedback(e.target, 'negative');
+
+    feedbackDiv.appendChild(thumbsUpBtn);
+    feedbackDiv.appendChild(thumbsDownBtn);
+
     // Copy button (icon only)
     const copyBtn = document.createElement('button');
     copyBtn.className = 'action-btn copy-btn';
@@ -1271,6 +2246,7 @@ function addActionButtons(contentDiv, text) {
     `;
     regenerateBtn.onclick = () => sendMessage(true);
 
+    actionsDiv.appendChild(feedbackDiv);
     actionsDiv.appendChild(copyBtn);
     actionsDiv.appendChild(regenerateBtn);
     contentDiv.appendChild(actionsDiv);
@@ -1281,6 +2257,29 @@ function addActionButtonsToWrapper(wrapperDiv, text) {
     const actionsDiv = document.createElement('div');
     actionsDiv.className = 'message-actions-inline';
 
+    // Feedback buttons (👍/👎)
+    const feedbackDiv = document.createElement('div');
+    feedbackDiv.className = 'feedback-buttons';
+
+    const thumbsUpBtn = document.createElement('button');
+    thumbsUpBtn.className = 'action-btn feedback-btn thumbs-up-btn';
+    thumbsUpBtn.setAttribute('title', '도움이 되었어요');
+    thumbsUpBtn.setAttribute('aria-label', '긍정 평가');
+    thumbsUpBtn.setAttribute('data-feedback-type', 'positive');
+    thumbsUpBtn.innerHTML = '👍';
+    thumbsUpBtn.onclick = (e) => submitFeedback(e.target, 'positive');
+
+    const thumbsDownBtn = document.createElement('button');
+    thumbsDownBtn.className = 'action-btn feedback-btn thumbs-down-btn';
+    thumbsDownBtn.setAttribute('title', '개선이 필요해요');
+    thumbsDownBtn.setAttribute('aria-label', '부정 평가');
+    thumbsDownBtn.setAttribute('data-feedback-type', 'negative');
+    thumbsDownBtn.innerHTML = '👎';
+    thumbsDownBtn.onclick = (e) => submitFeedback(e.target, 'negative');
+
+    feedbackDiv.appendChild(thumbsUpBtn);
+    feedbackDiv.appendChild(thumbsDownBtn);
+
     // Copy button (icon only)
     const copyBtn = document.createElement('button');
     copyBtn.className = 'action-btn copy-btn';
@@ -1307,6 +2306,7 @@ function addActionButtonsToWrapper(wrapperDiv, text) {
     `;
     regenerateBtn.onclick = () => sendMessage(true);
 
+    actionsDiv.appendChild(feedbackDiv);
     actionsDiv.appendChild(copyBtn);
     actionsDiv.appendChild(regenerateBtn);
     wrapperDiv.appendChild(actionsDiv);
@@ -1361,17 +2361,91 @@ async function copyToClipboard(text, button) {
     }
 }
 
+// Submit feedback (👍/👎)
+async function submitFeedback(button, feedbackType) {
+    try {
+        // Check if already submitted
+        if (button.classList.contains('feedback-submitted')) {
+            return;
+        }
+
+        // Get conversation_id and generate message_id
+        const conversationId = currentSessionId || 'anonymous';
+        const messageId = Date.now().toString(); // Use timestamp as message_id
+
+        // Send feedback to server
+        const data = await Auth.apiCall('/api/feedback', {
+            method: 'POST',
+            body: JSON.stringify({
+                conversation_id: conversationId,
+                message_id: messageId,
+                feedback_type: feedbackType
+            })
+        });
+
+        if (!data) {
+            throw new Error('피드백 전송 실패');
+        }
+
+        // Mark as submitted
+        button.classList.add('feedback-submitted');
+
+        // Disable both buttons in this feedback group
+        const feedbackDiv = button.parentElement;
+        const allButtons = feedbackDiv.querySelectorAll('.feedback-btn');
+        allButtons.forEach(btn => {
+            btn.disabled = true;
+            btn.style.opacity = '0.5';
+            btn.style.cursor = 'not-allowed';
+        });
+
+        // Highlight selected button
+        button.style.opacity = '1';
+        button.style.transform = 'scale(1.2)';
+        button.style.filter = 'drop-shadow(0 0 8px rgba(59, 130, 246, 0.5))';
+
+        // Show success message
+        const originalTitle = button.getAttribute('title');
+        button.setAttribute('title', '✓ 피드백 감사합니다!');
+
+        setTimeout(() => {
+            button.style.transform = 'scale(1)';
+            button.style.filter = '';
+        }, 300);
+
+        console.log(`✅ Feedback submitted: ${feedbackType}`);
+
+    } catch (error) {
+        console.error('Feedback submission failed:', error);
+
+        // Show error feedback
+        button.style.color = '#ef4444';
+        button.style.borderColor = '#ef4444';
+
+        setTimeout(() => {
+            button.style.color = '';
+            button.style.borderColor = '';
+        }, 2000);
+    }
+}
+
 // Add response time indicator
-function addResponseTime(messageDiv, elapsed, cached = false) {
+function addResponseTime(messageDiv, elapsed, cached = false, stats = null) {
     const timeDiv = document.createElement('div');
     timeDiv.className = 'response-time';
 
     const icon = cached ? '⚡' : '⏱️';
     const label = cached ? '캐시 응답' : '응답 시간';
 
+    // Build statistics text if available (only for non-cached responses)
+    let statsText = '';
+    if (stats && !cached) {
+        statsText = ` • 초당 ${stats.tokens_per_second}토큰 • ${stats.total_tokens}개 토큰 • 첫 토큰까지 ${stats.time_to_first_token}초`;
+    }
+
     timeDiv.innerHTML = `
         <span class="time-icon">${icon}</span>
-        <span class="time-text">${label}: ${elapsed}초</span>
+        <span class="time-text">${label}: ${elapsed}초${statsText}</span>
     `;
 
     // Add special styling for cached responses
@@ -1458,6 +2532,8 @@ function addErrorMessageWithRetry(errorText, question, errorDetail = null) {
 }
 
 // ===== Document Management =====
+// Note: Document management has been moved to admin page
+// Keep the code for backwards compatibility but check if elements exist
 const docsBtn = document.getElementById('docsBtn');
 const docsModal = document.getElementById('docsModal');
 const closeDocsModal = document.getElementById('closeDocsModal');
@@ -1467,30 +2543,41 @@ const uploadStatus = document.getElementById('uploadStatus');
 const docsList = document.getElementById('docsList');
 const refreshDocsBtn = document.getElementById('refreshDocsBtn');
 
-// Open modal
-docsBtn.addEventListener('click', () => {
-    docsModal.classList.add('active');
-    loadDocuments();
-});
+// Only initialize if elements exist (admin page has these features)
+if (docsBtn && docsModal) {
+    // Open modal
+    docsBtn.addEventListener('click', () => {
+        docsModal.classList.add('active');
+        pushModal(docsModal, 'docs');
+        loadDocuments();
+    });
+}
 
-// Close modal
-closeDocsModal.addEventListener('click', () => {
-    docsModal.classList.remove('active');
-});
-
-// Close modal when clicking outside
-docsModal.addEventListener('click', (e) => {
-    if (e.target === docsModal) {
+if (closeDocsModal && docsModal) {
+    // Close modal
+    closeDocsModal.addEventListener('click', () => {
         docsModal.classList.remove('active');
-    }
-});
+        popModal(docsModal);
+    });
+}
 
-// Upload area click
-uploadArea.addEventListener('click', () => {
-    fileInput.click();
-});
+if (docsModal) {
+    // Close modal when clicking outside
+    docsModal.addEventListener('click', (e) => {
+        if (e.target === docsModal) {
+            docsModal.classList.remove('active');
+            popModal(docsModal);
+        }
+    });
+}
 
-// File input change
+if (uploadArea && fileInput) {
+    // Upload area click
+    uploadArea.addEventListener('click', () => {
+        fileInput.click();
+    });
+}
+
 // Validate file type
 function isValidDocumentFile(file) {
     const fileName = file.name.toLowerCase();
@@ -1498,84 +2585,127 @@ function isValidDocumentFile(file) {
     return validExtensions.some(ext => fileName.endsWith(ext));
 }
 
-fileInput.addEventListener('change', (e) => {
-    if (e.target.files.length > 0) {
-        const file = e.target.files[0];
-        if (isValidDocumentFile(file)) {
-            uploadFile(file);
-        } else {
-            showUploadStatus('지원되지 않는 파일 형식입니다. 지원 형식: PDF, HWP, HWPX, DOC, DOCX, XLS, XLSX, PPT, PPTX, TXT', 'error');
+if (fileInput) {
+    // File input change
+    fileInput.addEventListener('change', (e) => {
+        if (e.target.files.length > 0) {
+            const file = e.target.files[0];
+            if (isValidDocumentFile(file)) {
+                uploadFile(file);
+            } else {
+                showUploadStatus('지원되지 않는 파일 형식입니다. 지원 형식: PDF, HWP, HWPX, DOC, DOCX, XLS, XLSX, PPT, PPTX, TXT', 'error');
+            }
         }
-    }
-});
+    });
+}
 
-// Drag and drop
-uploadArea.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    uploadArea.classList.add('dragover');
-});
+if (uploadArea) {
+    // Drag and drop
+    uploadArea.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        uploadArea.classList.add('dragover');
+    });
 
-uploadArea.addEventListener('dragleave', () => {
-    uploadArea.classList.remove('dragover');
-});
+    uploadArea.addEventListener('dragleave', () => {
+        uploadArea.classList.remove('dragover');
+    });
 
-uploadArea.addEventListener('drop', (e) => {
-    e.preventDefault();
-    uploadArea.classList.remove('dragover');
+    uploadArea.addEventListener('drop', (e) => {
+        e.preventDefault();
+        uploadArea.classList.remove('dragover');
 
-    if (e.dataTransfer.files.length > 0) {
-        const file = e.dataTransfer.files[0];
-        if (isValidDocumentFile(file)) {
-            uploadFile(file);
-        } else {
-            showUploadStatus('지원되지 않는 파일 형식입니다. 지원 형식: PDF, HWP, HWPX, DOC, DOCX, XLS, XLSX, PPT, PPTX, TXT', 'error');
+        if (e.dataTransfer.files.length > 0) {
+            const file = e.dataTransfer.files[0];
+            if (isValidDocumentFile(file)) {
+                uploadFile(file);
+            } else {
+                showUploadStatus('지원되지 않는 파일 형식입니다. 지원 형식: PDF, HWP, HWPX, DOC, DOCX, XLS, XLSX, PPT, PPTX, TXT', 'error');
+            }
         }
-    }
-});
+    });
+}
 
-// Refresh documents
-refreshDocsBtn.addEventListener('click', loadDocuments);
+if (refreshDocsBtn) {
+    // Refresh documents
+    refreshDocsBtn.addEventListener('click', loadDocuments);
+}
 
 // Upload file
 async function uploadFile(file) {
     const formData = new FormData();
     formData.append('file', file);
 
-    showUploadStatus(`업로드 중: ${file.name}`, 'uploading');
+    // 파일 정보 표시
+    const fileSizeMB = (file.size / 1024 / 1024).toFixed(2);
+    showUploadStatus(`📤 업로드 중: ${file.name} (${fileSizeMB}MB)`, 'uploading');
 
     try {
+        const authToken = Auth.getAccessToken();
+        const headers = {};
+        if (authToken) {
+            headers['Authorization'] = `Bearer ${authToken}`;
+        }
+
         const response = await fetch('/api/documents/upload', {
             method: 'POST',
+            headers: headers,
             body: formData
         });
 
         const result = await response.json();
 
         if (response.ok) {
-            showUploadStatus(
-                `✓ ${file.name} 업로드 및 색인 완료! (${result.chunk_count} 청크 생성)`,
-                'success'
-            );
+            // Check if it's a duplicate upload
+            if (result.is_duplicate) {
+                showUploadStatus(
+                    `✓ ${file.name} - 동일한 파일이 이미 존재합니다 (버전 ${result.current_version}, ${result.chunk_count} 청크)`,
+                    'success'
+                );
+            } else {
+                showUploadStatus(
+                    `✓ ${file.name} 업로드 및 색인 완료! (${result.chunk_count} 청크 생성)`,
+                    'success'
+                );
+            }
             fileInput.value = '';
-            // Reload documents and filter list
-            setTimeout(() => {
-                loadDocuments();
-                loadFilterDocuments();  // Refresh search scope filter
-                checkStatus();
-
-                // Update group tree (document count in groups)
-                loadGroupTree();
+            // Reload documents and filter list in parallel
+            setTimeout(async () => {
+                const refreshTasks = [
+                    loadDocuments(),
+                    loadFilterDocuments(),
+                    checkStatus(),
+                    loadGroupTree()
+                ];
 
                 // If group management modal is open and a group is selected, refresh its documents
                 if (selectedGroupForEdit) {
-                    loadGroupDocuments(selectedGroupForEdit);
+                    refreshTasks.push(loadGroupDocuments(selectedGroupForEdit));
                 }
+
+                await Promise.all(refreshTasks);
             }, 1000);
         } else {
-            showUploadStatus(`✗ 업로드 실패: ${result.detail}`, 'error');
+            // 상세한 에러 메시지 표시 (파일명 포함)
+            let errorMsg = `✗ ${file.name} 업로드 실패`;
+            if (result.detail) {
+                errorMsg += `\n사유: ${result.detail}`;
+            }
+            if (response.status === 413) {
+                errorMsg += '\n💡 파일 크기를 줄이거나 분할하여 업로드하세요.';
+            } else if (response.status === 400) {
+                errorMsg += '\n💡 지원되는 파일 형식인지 확인하세요.';
+            } else if (response.status === 409) {
+                errorMsg += '\n💡 기존 파일을 삭제하거나 다른 이름으로 업로드하세요.';
+            }
+            showUploadStatus(errorMsg, 'error');
         }
     } catch (error) {
-        showUploadStatus(`✗ 업로드 실패: ${error.message}`, 'error');
+        // 네트워크 또는 기타 에러
+        let errorMsg = `✗ ${file.name} 업로드 실패\n사유: ${error.message}`;
+        if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+            errorMsg += '\n💡 네트워크 연결을 확인하거나 서버 상태를 확인하세요.';
+        }
+        showUploadStatus(errorMsg, 'error');
     }
 }
 
@@ -1596,8 +2726,7 @@ async function loadDocuments() {
     docsList.innerHTML = '<div class="loading">문서 목록을 불러오는 중...</div>';
 
     try {
-        const response = await fetch('/api/documents');
-        const data = await response.json();
+        const data = await Auth.apiCall('/api/documents');
 
         if (data.documents.length === 0) {
             docsList.innerHTML = `
@@ -1629,6 +2758,9 @@ async function loadDocuments() {
                     <span class="doc-status ${doc.indexed ? 'indexed' : 'not-indexed'}">
                         ${doc.indexed ? '✓ 색인됨' : '✗ 미색인'}
                     </span>
+                    <button class="version-btn" onclick="showVersionModal('${doc.filename.replace(/'/g, "\\'")}')">
+                        🔄 버전
+                    </button>
                     <button class="delete-btn" onclick="deleteDocument('${doc.filename}')">
                         🗑️ 삭제
                     </button>
@@ -1649,6 +2781,7 @@ async function loadDocuments() {
 async function viewDocumentChunks(filename) {
     // Show modal
     chunkViewerModal.classList.add('active');
+    pushModal(chunkViewerModal, 'chunkViewer');
 
     // Set filename
     chunkViewerFilename.textContent = filename;
@@ -1711,22 +2844,35 @@ function escapeHtml(text) {
 
 // Delete document
 async function deleteDocument(filename) {
+    // Check authentication (required to delete documents)
+    const token = localStorage.getItem('access_token');
+    if (!token) {
+        showUploadStatus('✗ 로그인이 필요합니다', 'error');
+        return;
+    }
+
     if (!confirm(`"${filename}" 문서를 삭제하시겠습니까?\n\n이 작업은 되돌릴 수 없으며, 벡터 DB에서도 함께 삭제됩니다.`)) {
         return;
     }
 
     try {
         const response = await fetch(`/api/documents/${encodeURIComponent(filename)}`, {
-            method: 'DELETE'
+            method: 'DELETE',
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
         });
 
         const result = await response.json();
 
         if (response.ok) {
             showUploadStatus(`✓ ${filename} 삭제 완료`, 'success');
-            loadDocuments();
-            loadFilterDocuments();  // Refresh search scope filter
-            checkStatus();
+            // Parallel refresh of documents, filter, and status
+            await Promise.all([
+                loadDocuments(),
+                loadFilterDocuments(),
+                checkStatus()
+            ]);
         } else {
             showUploadStatus(`✗ 삭제 실패: ${result.detail}`, 'error');
         }
@@ -1755,6 +2901,20 @@ function formatDate(isoString) {
             day: 'numeric'
         });
     }
+}
+
+// Format date with time for version management (precise timestamp)
+function formatDateTime(isoString) {
+    const date = new Date(isoString);
+    return date.toLocaleString('ko-KR', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+    });
 }
 
 // ===== Settings Management =====
@@ -1828,341 +2988,457 @@ function loadSettings() {
 }
 
 function applySettings() {
-    topKSlider.value = currentSettings.top_k;
-    topKValue.textContent = currentSettings.top_k;
-
-    temperatureSlider.value = currentSettings.temperature;
-    temperatureValue.textContent = currentSettings.temperature.toFixed(1);
-
-    maxTokensSlider.value = currentSettings.max_tokens;
-    maxTokensValue.textContent = currentSettings.max_tokens;
-
-    cacheThresholdSlider.value = currentSettings.cache_threshold;
-    cacheThresholdValue.textContent = currentSettings.cache_threshold.toFixed(2);
-
-    cacheTTLSlider.value = currentSettings.cache_ttl;
-    cacheTTLValue.textContent = currentSettings.cache_ttl;
-
-    const llmSelect = document.getElementById('llmSelect');
-    if (llmSelect) {
-        llmSelect.value = currentSettings.llm_model;
+    if (topKSlider && topKValue) {
+        topKSlider.value = currentSettings.top_k;
+        topKValue.textContent = currentSettings.top_k;
     }
 
-    const embeddingSelect = document.getElementById('embeddingSelect');
-    if (embeddingSelect) {
-        embeddingSelect.value = currentSettings.embedding_model;
+    if (temperatureSlider && temperatureValue) {
+        temperatureSlider.value = currentSettings.temperature;
+        temperatureValue.textContent = currentSettings.temperature.toFixed(1);
     }
 
-    systemPrompt.value = currentSettings.system_prompt;
+    if (maxTokensSlider && maxTokensValue) {
+        maxTokensSlider.value = currentSettings.max_tokens;
+        maxTokensValue.textContent = currentSettings.max_tokens;
+    }
+
+    if (cacheThresholdSlider && cacheThresholdValue) {
+        cacheThresholdSlider.value = currentSettings.cache_threshold;
+        cacheThresholdValue.textContent = currentSettings.cache_threshold.toFixed(2);
+    }
+
+    if (cacheTTLSlider && cacheTTLValue) {
+        cacheTTLSlider.value = currentSettings.cache_ttl;
+        cacheTTLValue.textContent = currentSettings.cache_ttl;
+    }
+
+    const llmModelDisplay = document.getElementById('llmModelDisplay');
+    if (llmModelDisplay) {
+        llmModelDisplay.textContent = currentSettings.llm_model || '설정되지 않음';
+    }
+
+    const embeddingModelDisplay = document.getElementById('embeddingModelDisplay');
+    if (embeddingModelDisplay) {
+        embeddingModelDisplay.textContent = currentSettings.embedding_model || '설정되지 않음';
+    }
+
+    if (systemPrompt) {
+        systemPrompt.value = currentSettings.system_prompt;
+    }
 }
 
-// Load available LLM and Embedding models from server
+// Display current LLM and Embedding models
 async function loadAvailableModels() {
-    const llmSelect = document.getElementById('llmSelect');
-    const embeddingSelect = document.getElementById('embeddingSelect');
+    const llmModelDisplay = document.getElementById('llmModelDisplay');
+    const embeddingModelDisplay = document.getElementById('embeddingModelDisplay');
 
-    if (!llmSelect || !embeddingSelect) {
-        console.error('Model select elements not found');
+    if (!llmModelDisplay || !embeddingModelDisplay) {
+        console.error('Model display elements not found');
         return;
     }
 
-    console.log('Loading available models...');
-
-    try {
-        const response = await fetch('/api/models');
-        console.log('Models API response status:', response.status);
-
-        if (!response.ok) {
-            throw new Error(`Failed to load models: ${response.status}`);
-        }
-
-        const data = await response.json();
-        console.log('Models data:', data);
-        const llmModels = data.llm_models || [];
-        const embeddingModels = data.embedding_models || [];
-        console.log('Found LLM models:', llmModels.length, 'Embedding models:', embeddingModels.length);
-
-        // Load LLM models
-        llmSelect.innerHTML = '';
-        if (llmModels.length === 0) {
-            console.warn('No LLM models available');
-            llmSelect.innerHTML = '<option value="">다운로드된 LLM 모델이 없습니다</option>';
-            llmSelect.disabled = true;
-        } else {
-            llmModels.forEach(model => {
-                console.log('Adding LLM model:', model.label, '=', model.value);
-                const option = document.createElement('option');
-                option.value = model.value;
-                option.textContent = model.label;
-                llmSelect.appendChild(option);
-            });
-
-            if (currentSettings.llm_model) {
-                llmSelect.value = currentSettings.llm_model;
-            }
-            llmSelect.disabled = false;
-        }
-
-        // Load Embedding models
-        embeddingSelect.innerHTML = '';
-        if (embeddingModels.length === 0) {
-            console.warn('No embedding models available');
-            embeddingSelect.innerHTML = '<option value="">다운로드된 Embedding 모델이 없습니다</option>';
-            embeddingSelect.disabled = true;
-        } else {
-            embeddingModels.forEach(model => {
-                console.log('Adding Embedding model:', model.label, '=', model.value);
-                const option = document.createElement('option');
-                option.value = model.value;
-                option.textContent = model.label;
-                embeddingSelect.appendChild(option);
-            });
-
-            if (currentSettings.embedding_model) {
-                embeddingSelect.value = currentSettings.embedding_model;
-            }
-            embeddingSelect.disabled = false;
-        }
-
-        console.log('Models loaded successfully');
-
-    } catch (error) {
-        console.error('Failed to load available models:', error);
-        llmSelect.innerHTML = '<option value="">모델 로드 실패</option>';
-        llmSelect.disabled = true;
-        embeddingSelect.innerHTML = '<option value="">모델 로드 실패</option>';
-        embeddingSelect.disabled = true;
-    }
+    // Simply display the current models from settings
+    llmModelDisplay.textContent = currentSettings.llm_model || '설정되지 않음';
+    embeddingModelDisplay.textContent = currentSettings.embedding_model || '설정되지 않음';
 }
 
-// Open settings (with cache stats loading)
-settingsBtn.addEventListener('click', async () => {
+// Open settings panel (called from dropdown menu)
+async function openSettingsPanel() {
     settingsPanel.classList.add('active');
     settingsOverlay.classList.add('active');
+    pushModal(settingsPanel, 'settings');
+
+    // Fetch latest status to get current model info
+    try {
+        const response = await fetch('/api/status');
+        const data = await response.json();
+        if (data.llm_model) currentSettings.llm_model = data.llm_model;
+        if (data.embedding_model) currentSettings.embedding_model = data.embedding_model;
+    } catch (error) {
+        console.error('Failed to fetch latest model info:', error);
+    }
+
     await loadAvailableModels();  // Load available models when opening settings
     loadCacheStats();
-});
+    loadCacheEnabled();
+}
+
+// Note: settingsBtn now uses toggleSettingsDropdown() from index.html onclick attribute
 
 // Close settings
 function closeSettings() {
     settingsPanel.classList.remove('active');
     settingsOverlay.classList.remove('active');
+    popModal(settingsPanel);
     // Remove focus from settings button to clear outline
     settingsBtn.blur();
 }
 
-closeSettingsBtn.addEventListener('click', closeSettings);
-settingsOverlay.addEventListener('click', closeSettings);
+if (closeSettingsBtn) {
+    closeSettingsBtn.addEventListener('click', closeSettings);
+}
 
-// Update slider values in real-time
-topKSlider.addEventListener('input', (e) => {
-    topKValue.textContent = e.target.value;
-});
+if (settingsOverlay) {
+    settingsOverlay.addEventListener('click', closeSettings);
+}
 
-temperatureSlider.addEventListener('input', (e) => {
-    temperatureValue.textContent = parseFloat(e.target.value).toFixed(1);
-});
+// Update slider values in real-time (only if elements exist)
+if (topKSlider && topKValue) {
+    topKSlider.addEventListener('input', (e) => {
+        topKValue.textContent = e.target.value;
+    });
+}
 
-maxTokensSlider.addEventListener('input', (e) => {
-    maxTokensValue.textContent = e.target.value;
-});
+if (temperatureSlider && temperatureValue) {
+    temperatureSlider.addEventListener('input', (e) => {
+        temperatureValue.textContent = parseFloat(e.target.value).toFixed(1);
+    });
+}
 
-cacheThresholdSlider.addEventListener('input', (e) => {
-    cacheThresholdValue.textContent = parseFloat(e.target.value).toFixed(2);
-});
+if (maxTokensSlider && maxTokensValue) {
+    maxTokensSlider.addEventListener('input', (e) => {
+        maxTokensValue.textContent = e.target.value;
+    });
+}
 
-cacheTTLSlider.addEventListener('input', (e) => {
-    cacheTTLValue.textContent = e.target.value;
-});
+if (cacheThresholdSlider && cacheThresholdValue) {
+    cacheThresholdSlider.addEventListener('input', (e) => {
+        cacheThresholdValue.textContent = parseFloat(e.target.value).toFixed(2);
+    });
+}
+
+if (cacheTTLSlider && cacheTTLValue) {
+    cacheTTLSlider.addEventListener('input', (e) => {
+        cacheTTLValue.textContent = e.target.value;
+    });
+}
 
 // Save settings
-saveSettingsBtn.addEventListener('click', async () => {
-    const llmSelect = document.getElementById('llmSelect');
-    const embeddingSelect = document.getElementById('embeddingSelect');
-    const oldLLM = currentSettings.llm_model;
-    const newLLM = llmSelect.value;
-    const oldEmbedding = currentSettings.embedding_model;
-    const newEmbedding = embeddingSelect.value;
+if (saveSettingsBtn) {
+    saveSettingsBtn.addEventListener('click', async () => {
+        // 모델 설정은 관리자 페이지에서만 변경 가능하므로 현재 값 유지
+        currentSettings = {
+            top_k: topKSlider ? parseInt(topKSlider.value) : defaultSettings.top_k,
+            temperature: temperatureSlider ? parseFloat(temperatureSlider.value) : defaultSettings.temperature,
+            max_tokens: maxTokensSlider ? parseInt(maxTokensSlider.value) : defaultSettings.max_tokens,
+            cache_threshold: cacheThresholdSlider ? parseFloat(cacheThresholdSlider.value) : defaultSettings.cache_threshold,
+            cache_ttl: cacheTTLSlider ? parseInt(cacheTTLSlider.value) : defaultSettings.cache_ttl,
+            llm_model: currentSettings.llm_model,  // 현재 모델 유지 (읽기 전용)
+            embedding_model: currentSettings.embedding_model,  // 현재 모델 유지 (읽기 전용)
+            system_prompt: systemPrompt ? systemPrompt.value : defaultSettings.system_prompt
+        };
 
-    currentSettings = {
-        top_k: parseInt(topKSlider.value),
-        temperature: parseFloat(temperatureSlider.value),
-        max_tokens: parseInt(maxTokensSlider.value),
-        cache_threshold: parseFloat(cacheThresholdSlider.value),
-        cache_ttl: parseInt(cacheTTLSlider.value),
-        llm_model: newLLM,
-        embedding_model: newEmbedding,
-        system_prompt: systemPrompt.value
-    };
-
-    localStorage.setItem('chatSettings', JSON.stringify(currentSettings));
-
-    // Check if LLM model changed
-    if (oldLLM !== newLLM) {
-        try {
-            const response = await fetch('/api/change-llm', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ llm_model: newLLM })
-            });
-
-            if (!response.ok) {
-                throw new Error('Failed to change LLM model');
-            }
-
-            const result = await response.json();
-            alert(`LLM 모델이 ${result.llm_model}으로 변경되었습니다.`);
-        } catch (error) {
-            console.error('LLM model change failed:', error);
-            alert('LLM 모델 변경에 실패했습니다.');
-            return;
-        }
-    }
-
-    // Check if Embedding model changed
-    if (oldEmbedding !== newEmbedding) {
-        try {
-            const response = await fetch('/api/change-embedding', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ embedding_model: newEmbedding })
-            });
-
-            if (!response.ok) {
-                throw new Error('Failed to change Embedding model');
-            }
-
-            const result = await response.json();
-            alert(`Embedding 모델이 ${result.embedding_model}으로 변경되었습니다.\n\n⚠️ ${result.warning}`);
-        } catch (error) {
-            console.error('Embedding model change failed:', error);
-            alert('Embedding 모델 변경에 실패했습니다.');
-            return;
-        }
-    }
-
-    // Show success message
-    const originalText = saveSettingsBtn.textContent;
-    saveSettingsBtn.textContent = '✓ 저장됨!';
-    saveSettingsBtn.style.background = 'linear-gradient(135deg, #10b981 0%, #059669 100%)';
-
-    setTimeout(() => {
-        saveSettingsBtn.textContent = originalText;
-    }, 2000);
-
-    // Close settings panel
-    setTimeout(() => {
-        closeSettings();
-    }, 1000);
-});
-
-// Reset settings
-resetSettingsBtn.addEventListener('click', () => {
-    if (confirm('모든 설정을 기본값으로 복원하시겠습니까?')) {
-        currentSettings = { ...defaultSettings };
-        applySettings();
-        localStorage.removeItem('chatSettings');
+        localStorage.setItem('chatSettings', JSON.stringify(currentSettings));
 
         // Show success message
-        const originalText = resetSettingsBtn.textContent;
-        resetSettingsBtn.textContent = '✓ 복원됨!';
+        const originalText = saveSettingsBtn.textContent;
+        saveSettingsBtn.textContent = '✓ 저장됨!';
+        saveSettingsBtn.style.background = 'linear-gradient(135deg, #10b981 0%, #059669 100%)';
 
         setTimeout(() => {
-            resetSettingsBtn.textContent = originalText;
+            saveSettingsBtn.textContent = originalText;
         }, 2000);
-    }
-});
+
+        // Close settings panel
+        setTimeout(() => {
+            closeSettings();
+        }, 1000);
+    });
+}
+
+// Reset settings
+if (resetSettingsBtn) {
+    resetSettingsBtn.addEventListener('click', async () => {
+        if (confirm('모든 설정을 기본값으로 복원하시겠습니까?')) {
+            try {
+                // Fetch current admin-configured models from server
+                const response = await fetch('/api/status');
+                const data = await response.json();
+
+                // Reset to defaults, but use admin-configured models
+                currentSettings = {
+                    ...defaultSettings,
+                    llm_model: data.llm_model || defaultSettings.llm_model,
+                    embedding_model: data.embedding_model || defaultSettings.embedding_model
+                };
+
+                applySettings();
+                localStorage.removeItem('chatSettings');
+
+                // Show success message
+                const originalText = resetSettingsBtn.textContent;
+                resetSettingsBtn.textContent = '✓ 복원됨!';
+
+                setTimeout(() => {
+                    resetSettingsBtn.textContent = originalText;
+                }, 2000);
+            } catch (error) {
+                console.error('Failed to fetch current models:', error);
+                // Fallback to complete defaults if fetch fails
+                currentSettings = { ...defaultSettings };
+                applySettings();
+                localStorage.removeItem('chatSettings');
+
+                alert('기본값으로 복원되었습니다.\n(서버에서 현재 모델 정보를 가져오지 못했습니다)');
+            }
+        }
+    });
+}
 
 // Load cache statistics
 async function loadCacheStats() {
     try {
-        const response = await fetch('/api/cache/stats');
+        // Get DOM elements
+        const statTotalEntries = document.getElementById('statTotalEntries');
+        const statTotalQueries = document.getElementById('statTotalQueries');
+        const statCacheHits = document.getElementById('statCacheHits');
+        const statHitRate = document.getElementById('statHitRate');
+
+        // Check if elements exist (might not be on this page)
+        if (!statTotalEntries || !statTotalQueries || !statCacheHits || !statHitRate) {
+            return; // Elements don't exist, skip silently
+        }
+
+        // Check authentication (required for cache stats)
+        const token = localStorage.getItem('access_token');
+        if (!token) {
+            // Set default values for unauthenticated users
+            statTotalEntries.textContent = '-';
+            statTotalQueries.textContent = '-';
+            statCacheHits.textContent = '-';
+            statHitRate.textContent = '-';
+            return;
+        }
+
+        const response = await fetch('/api/cache/stats', {
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
         const stats = await response.json();
 
         if (response.ok) {
-            document.getElementById('statTotalEntries').textContent = stats.total_entries || 0;
-            document.getElementById('statTotalQueries').textContent = stats.total_queries || 0;
-            document.getElementById('statCacheHits').textContent = stats.cache_hits || 0;
+            statTotalEntries.textContent = stats.total_entries || 0;
+            statTotalQueries.textContent = stats.total_queries || 0;
+            statCacheHits.textContent = stats.cache_hits || 0;
 
             // Calculate hit rate
             const hitRate = stats.total_queries > 0
                 ? ((stats.cache_hits / stats.total_queries) * 100).toFixed(1) + '%'
                 : '0%';
-            document.getElementById('statHitRate').textContent = hitRate;
+            statHitRate.textContent = hitRate;
 
             // Update hit rate color based on percentage
-            const hitRateElement = document.getElementById('statHitRate');
             const hitRateValue = parseFloat(hitRate);
             if (hitRateValue >= 70) {
-                hitRateElement.style.color = '#059669'; // Green
+                statHitRate.style.color = '#059669'; // Green
             } else if (hitRateValue >= 40) {
-                hitRateElement.style.color = '#d97706'; // Orange
+                statHitRate.style.color = '#d97706'; // Orange
             } else {
-                hitRateElement.style.color = '#dc2626'; // Red
+                statHitRate.style.color = '#dc2626'; // Red
             }
         }
     } catch (error) {
         console.error('Failed to load cache stats:', error);
-        document.getElementById('statTotalEntries').textContent = 'Error';
-        document.getElementById('statHitRate').textContent = 'Error';
-        document.getElementById('statTotalQueries').textContent = 'Error';
-        document.getElementById('statCacheHits').textContent = 'Error';
+        // Safe error handling - only set if elements exist
+        const statTotalEntries = document.getElementById('statTotalEntries');
+        const statTotalQueries = document.getElementById('statTotalQueries');
+        const statCacheHits = document.getElementById('statCacheHits');
+        const statHitRate = document.getElementById('statHitRate');
+
+        if (statTotalEntries) statTotalEntries.textContent = 'Error';
+        if (statTotalQueries) statTotalQueries.textContent = 'Error';
+        if (statCacheHits) statCacheHits.textContent = 'Error';
+        if (statHitRate) statHitRate.textContent = 'Error';
     }
 }
 
 // Refresh stats button
-document.getElementById('refreshStatsBtn').addEventListener('click', loadCacheStats);
+const refreshStatsBtn = document.getElementById('refreshStatsBtn');
+if (refreshStatsBtn) {
+    refreshStatsBtn.addEventListener('click', loadCacheStats);
+}
 
 // Clear cache button
-clearCacheBtn.addEventListener('click', async () => {
-    if (!confirm('모든 캐시를 삭제하시겠습니까?')) {
-        return;
-    }
+if (clearCacheBtn) {
+    clearCacheBtn.addEventListener('click', async () => {
+        if (!confirm('모든 캐시를 삭제하시겠습니까?')) {
+            return;
+        }
 
+        try {
+            const response = await fetch('/api/cache/clear', {
+                method: 'POST'
+            });
+
+            const result = await response.json();
+
+            if (response.ok) {
+                const originalText = clearCacheBtn.textContent;
+                clearCacheBtn.textContent = `✓ ${result.entries_cleared}개 삭제됨`;
+
+                // Reload stats after clearing
+                setTimeout(() => {
+                    clearCacheBtn.textContent = originalText;
+                    loadCacheStats();
+                }, 1000);
+            } else {
+                alert(`캐시 삭제 실패: ${result.detail}`);
+            }
+        } catch (error) {
+            alert(`캐시 삭제 실패: ${error.message}`);
+        }
+    });
+}
+
+// Load cache enabled status
+async function loadCacheEnabled() {
     try {
-        const response = await fetch('/api/cache/clear', {
-            method: 'POST'
-        });
+        // Check authentication (required for cache settings)
+        const token = localStorage.getItem('access_token');
+        const toggle = document.getElementById('cacheEnabledToggle');
 
+        if (!token) {
+            // Disable toggle for unauthenticated users
+            if (toggle) {
+                toggle.checked = false;
+                toggle.disabled = true;
+            }
+            return;
+        }
+
+        const response = await fetch('/api/cache/enabled', {
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
         const result = await response.json();
 
         if (response.ok) {
-            const originalText = clearCacheBtn.textContent;
-            clearCacheBtn.textContent = `✓ ${result.entries_cleared}개 삭제됨`;
-
-            // Reload stats after clearing
-            setTimeout(() => {
-                clearCacheBtn.textContent = originalText;
-                loadCacheStats();
-            }, 1000);
-        } else {
-            alert(`캐시 삭제 실패: ${result.detail}`);
+            if (toggle) {
+                toggle.checked = result.enabled;
+                toggle.disabled = false;
+            }
         }
     } catch (error) {
-        alert(`캐시 삭제 실패: ${error.message}`);
+        console.error('Failed to load cache enabled status:', error);
     }
-});
+}
+
+// Cache enabled toggle
+const cacheEnabledToggle = document.getElementById('cacheEnabledToggle');
+if (cacheEnabledToggle) {
+    cacheEnabledToggle.addEventListener('change', async (e) => {
+        const enabled = e.target.checked;
+
+        try {
+            const response = await fetch('/api/cache/enabled', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ enabled: enabled })
+            });
+
+            const result = await response.json();
+
+            if (response.ok) {
+                // Show success feedback (briefly change appearance)
+                const message = enabled ? '✓ 캐시 활성화됨' : '✓ 캐시 비활성화됨';
+                const notification = document.createElement('div');
+                notification.textContent = message;
+                notification.style.cssText = `
+                    position: fixed;
+                    top: 20px;
+                    right: 20px;
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: white;
+                    padding: 12px 24px;
+                    border-radius: 8px;
+                    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+                    z-index: 10000;
+                    font-weight: 500;
+                `;
+                document.body.appendChild(notification);
+                setTimeout(() => notification.remove(), 2000);
+
+                // Reload stats
+                loadCacheStats();
+            } else {
+                alert(`캐시 설정 실패: ${result.detail}`);
+                // Revert toggle state
+                e.target.checked = !enabled;
+            }
+        } catch (error) {
+            alert(`캐시 설정 실패: ${error.message}`);
+            // Revert toggle state
+            e.target.checked = !enabled;
+        }
+    });
+}
 
 // ===== Source Details Modal =====
-function showSourceDetails(filename) {
-    devLog('showSourceDetails called for:', filename);
-    devLog('currentContextData:', currentContextData);
+async function showSourceDetails(filename) {
+    console.log('[showSourceDetails] Called for filename:', filename);
+    console.log('[showSourceDetails] currentContextData length:', currentContextData.length);
 
-    // Find all context items for this filename
-    const sourceContexts = currentContextData.filter(ctx => ctx.filename === filename);
+    // Find all context items for this filename in cache
+    let sourceContexts = currentContextData.filter(ctx => ctx.filename === filename);
 
-    devLog('sourceContexts found:', sourceContexts);
+    console.log('[showSourceDetails] Found in cache:', sourceContexts.length, 'items');
 
+    // If not found in cache, fetch from server
     if (sourceContexts.length === 0) {
-        console.error('No context found for filename:', filename);
-        console.error('Available filenames in currentContextData:',
-            currentContextData.map(ctx => ctx.filename));
-        alert('출처 정보를 찾을 수 없습니다.');
-        return;
+        console.log('[showSourceDetails] Not in cache, fetching from server...');
+        console.log('[showSourceDetails] API URL:', `/api/documents/${encodeURIComponent(filename)}/chunks`);
+
+        // Show loading indicator
+        sourceFilename.textContent = filename;
+        sourceScore.textContent = '로딩 중...';
+        sourceText.textContent = '📥 문서 내용을 불러오는 중입니다...\n잠시만 기다려주세요.';
+        sourceModal.classList.add('active');
+        pushModal(sourceModal, 'source');
+
+        try {
+            const response = await fetch(`/api/documents/${encodeURIComponent(filename)}/chunks`);
+            console.log('[showSourceDetails] Response status:', response.status, response.statusText);
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error('[showSourceDetails] Server error:', errorText);
+                throw new Error(`Server returned ${response.status}: ${response.statusText}`);
+            }
+
+            const data = await response.json();
+            console.log('[showSourceDetails] Received data:', {
+                filename: data.filename,
+                total_count: data.total_count,
+                chunks_count: data.chunks?.length
+            });
+
+            if (!data.chunks || data.chunks.length === 0) {
+                console.warn('[showSourceDetails] No chunks in response');
+                sourceModal.classList.remove('active');
+                alert(`출처 정보를 찾을 수 없습니다.\n파일명: ${filename}`);
+                return;
+            }
+
+            // Convert server chunks to context format
+            sourceContexts = data.chunks.map(chunk => ({
+                filename: filename,
+                text: chunk.text,
+                score: 1.0  // Default score for loaded chunks
+            }));
+
+            console.log('[showSourceDetails] Successfully loaded', sourceContexts.length, 'chunks from server');
+        } catch (error) {
+            console.error('[showSourceDetails] Error:', error);
+            console.error('[showSourceDetails] Error stack:', error.stack);
+            sourceModal.classList.remove('active');
+            alert(`출처 정보를 불러오는데 실패했습니다.\n파일명: ${filename}\n에러: ${error.message}`);
+            return;
+        }
     }
 
     // Use the first context item (or combine all if multiple)
@@ -2184,6 +3460,7 @@ function showSourceDetails(filename) {
 
     // Show modal
     sourceModal.classList.add('active');
+    pushModal(sourceModal, 'source');
 }
 
 // ===== Draft Auto-Save =====
@@ -2233,8 +3510,16 @@ function clearDraft() {
     localStorage.removeItem(DRAFT_KEY);
 }
 
+// Flag to allow navigation without warning
+window.allowNavigation = false;
+
 // Warn before leaving with unsaved draft
 window.addEventListener('beforeunload', (e) => {
+    // Skip warning if navigation is explicitly allowed
+    if (window.allowNavigation) {
+        return;
+    }
+
     const draft = userInput.value.trim();
     if (draft && !isLoading) {
         e.preventDefault();
@@ -2313,6 +3598,9 @@ function restoreChatUI() {
                 hljs.highlightElement(block);
             });
 
+            // Render special content (math, diagrams, music, charts)
+            renderSpecialContent(contentDiv);
+
             // Add action buttons first (to contentDiv, not messageDiv)
             addActionButtons(contentDiv, msg.content);
 
@@ -2356,31 +3644,137 @@ function clearHistory() {
     localStorage.removeItem(HISTORY_KEY);
 }
 
-// Export conversation history as JSON file
+// Export conversation history - show format selection modal
 function exportHistory() {
     if (conversationHistory.length === 0) {
         alert('저장할 대화 내용이 없습니다.');
         return;
     }
 
-    const dataStr = JSON.stringify(conversationHistory, null, 2);
-    const blob = new Blob([dataStr], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
+    const modal = document.getElementById('exportModal');
+    const messageCount = document.getElementById('exportMessageCount');
 
+    if (!modal || !messageCount) {
+        console.error('Export modal elements not found');
+        return;
+    }
+
+    // Update message count
+    messageCount.textContent = conversationHistory.length;
+
+    // Show modal
+    modal.classList.add('active');
+    pushModal(modal, 'export');
+}
+
+// Export as specific format
+function exportAsFormat(format) {
+    const date = new Date().toISOString().slice(0, 10);
+    let content, mimeType, extension;
+
+    switch (format) {
+        case 'json':
+            content = JSON.stringify(conversationHistory, null, 2);
+            mimeType = 'application/json';
+            extension = 'json';
+            break;
+
+        case 'txt':
+            content = conversationHistoryToText();
+            mimeType = 'text/plain';
+            extension = 'txt';
+            break;
+
+        case 'markdown':
+            content = conversationHistoryToMarkdown();
+            mimeType = 'text/markdown';
+            extension = 'md';
+            break;
+
+        default:
+            console.error('Unknown format:', format);
+            return;
+    }
+
+    // Create and download file
+    const blob = new Blob([content], { type: mimeType + ';charset=utf-8' });
+    const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `chat-history-${new Date().toISOString().slice(0, 10)}.json`;
+    link.download = `chat-history-${date}.${extension}`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+
+    // Close modal
+    const modal = document.getElementById('exportModal');
+    modal.classList.remove('active');
+    popModal(modal);
+
+    logger.info(`✅ 대화 내용을 ${format.toUpperCase()} 형식으로 내보냈습니다.`);
+}
+
+// Convert conversation history to plain text
+function conversationHistoryToText() {
+    const lines = [];
+    lines.push('='.repeat(60));
+    lines.push('📋 대화 내역');
+    lines.push(`📅 내보낸 날짜: ${new Date().toLocaleString('ko-KR')}`);
+    lines.push(`💬 총 메시지 수: ${conversationHistory.length}개`);
+    lines.push('='.repeat(60));
+    lines.push('');
+
+    conversationHistory.forEach((msg, index) => {
+        const role = msg.role === 'user' ? '👤 사용자' : '🤖 AI';
+        const timestamp = msg.timestamp ? new Date(msg.timestamp).toLocaleString('ko-KR') : '';
+
+        lines.push(`[${index + 1}] ${role}`);
+        if (timestamp) {
+            lines.push(`⏰ ${timestamp}`);
+        }
+        lines.push('-'.repeat(60));
+        lines.push(msg.content);
+        lines.push('');
+    });
+
+    return lines.join('\n');
+}
+
+// Convert conversation history to Markdown
+function conversationHistoryToMarkdown() {
+    const lines = [];
+    lines.push('# 📋 대화 내역\n');
+    lines.push(`> **내보낸 날짜**: ${new Date().toLocaleString('ko-KR')}  `);
+    lines.push(`> **총 메시지 수**: ${conversationHistory.length}개\n`);
+    lines.push('---\n');
+
+    conversationHistory.forEach((msg, index) => {
+        const role = msg.role === 'user' ? '👤 **사용자**' : '🤖 **AI**';
+        const timestamp = msg.timestamp ? new Date(msg.timestamp).toLocaleString('ko-KR') : '';
+
+        lines.push(`## ${index + 1}. ${role}\n`);
+        if (timestamp) {
+            lines.push(`*⏰ ${timestamp}*\n`);
+        }
+
+        // Format content with proper markdown
+        const content = msg.content
+            .replace(/```/g, '\n```')  // Ensure code blocks have line breaks
+            .trim();
+
+        lines.push(content + '\n');
+        lines.push('---\n');
+    });
+
+    return lines.join('\n');
 }
 
 // Import conversation history from JSON file
 function importHistory() {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = 'application/json';
+    input.accept = '.json,.txt,.md';
 
     input.onchange = async (e) => {
         const file = e.target.files[0];
@@ -2388,11 +3782,23 @@ function importHistory() {
 
         try {
             const text = await file.text();
-            const imported = JSON.parse(text);
+            const fileName = file.name.toLowerCase();
+            let imported;
+
+            // Parse based on file extension
+            if (fileName.endsWith('.json')) {
+                imported = parseJsonHistory(text);
+            } else if (fileName.endsWith('.txt')) {
+                imported = parseTextHistory(text);
+            } else if (fileName.endsWith('.md')) {
+                imported = parseMarkdownHistory(text);
+            } else {
+                throw new Error('지원하지 않는 파일 형식입니다. JSON, TXT, MD 파일만 가능합니다.');
+            }
 
             // Validate imported data
-            if (!Array.isArray(imported)) {
-                throw new Error('Invalid format: expected an array');
+            if (!Array.isArray(imported) || imported.length === 0) {
+                throw new Error('올바른 대화 내용을 찾을 수 없습니다.');
             }
 
             // Confirm overwrite
@@ -2407,13 +3813,146 @@ function importHistory() {
             saveHistory();
             restoreChatUI();
 
-            alert('대화 내용을 불러왔습니다.');
+            alert(`대화 내용을 불러왔습니다. (${imported.length}개 메시지)`);
         } catch (err) {
+            console.error('Import error:', err);
             alert(`파일을 불러오는데 실패했습니다: ${err.message}`);
         }
     };
 
     input.click();
+}
+
+// Parse JSON format
+function parseJsonHistory(text) {
+    const imported = JSON.parse(text);
+    if (!Array.isArray(imported)) {
+        throw new Error('Invalid JSON format: expected an array');
+    }
+    return imported;
+}
+
+// Parse TXT format
+function parseTextHistory(text) {
+    const messages = [];
+    const lines = text.split('\n');
+    let currentMessage = null;
+    let contentLines = [];
+    let inContent = false;
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+
+        // Detect message start: [N] 👤 사용자 or [N] 🤖 AI
+        const messageMatch = line.match(/^\[(\d+)\] (👤 사용자|🤖 AI)$/);
+        if (messageMatch) {
+            // Save previous message
+            if (currentMessage && contentLines.length > 0) {
+                currentMessage.content = contentLines.join('\n').trim();
+                messages.push(currentMessage);
+            }
+
+            // Start new message
+            const role = messageMatch[2] === '👤 사용자' ? 'user' : 'assistant';
+            currentMessage = { role, content: '' };
+            contentLines = [];
+            inContent = false;
+            continue;
+        }
+
+        // Skip separator lines
+        if (line.match(/^[-=]{10,}$/)) {
+            if (!inContent) {
+                inContent = true; // Content starts after separator
+            }
+            continue;
+        }
+
+        // Skip timestamp lines
+        if (line.match(/^⏰ /)) {
+            continue;
+        }
+
+        // Skip header lines
+        if (line.match(/^(📋 대화 내역|📅 내보낸 날짜|💬 총 메시지 수)/)) {
+            continue;
+        }
+
+        // Collect content lines
+        if (inContent && currentMessage) {
+            contentLines.push(line);
+        }
+    }
+
+    // Save last message
+    if (currentMessage && contentLines.length > 0) {
+        currentMessage.content = contentLines.join('\n').trim();
+        messages.push(currentMessage);
+    }
+
+    return messages;
+}
+
+// Parse Markdown format
+function parseMarkdownHistory(text) {
+    const messages = [];
+    const lines = text.split('\n');
+    let currentMessage = null;
+    let contentLines = [];
+    let inContent = false;
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+
+        // Detect message start: ## N. 👤 **사용자** or ## N. 🤖 **AI**
+        const messageMatch = line.match(/^## \d+\. (👤 \*\*사용자\*\*|🤖 \*\*AI\*\*)$/);
+        if (messageMatch) {
+            // Save previous message
+            if (currentMessage && contentLines.length > 0) {
+                currentMessage.content = contentLines.join('\n').trim();
+                messages.push(currentMessage);
+            }
+
+            // Start new message
+            const role = messageMatch[1].includes('사용자') ? 'user' : 'assistant';
+            currentMessage = { role, content: '' };
+            contentLines = [];
+            inContent = false;
+            continue;
+        }
+
+        // Skip timestamp lines
+        if (line.match(/^\*⏰ /)) {
+            inContent = true; // Content starts after timestamp
+            continue;
+        }
+
+        // Skip separator lines
+        if (line.match(/^---$/)) {
+            continue;
+        }
+
+        // Skip header lines
+        if (line.match(/^(# 📋 대화 내역|> \*\*내보낸 날짜|> \*\*총 메시지 수)/)) {
+            continue;
+        }
+
+        // Collect content lines
+        if (currentMessage) {
+            if (inContent || line.trim() !== '') {
+                inContent = true;
+                contentLines.push(line);
+            }
+        }
+    }
+
+    // Save last message
+    if (currentMessage && contentLines.length > 0) {
+        currentMessage.content = contentLines.join('\n').trim();
+        messages.push(currentMessage);
+    }
+
+    return messages;
 }
 
 // Copy to clipboard function
@@ -2702,7 +4241,7 @@ function updateCharCount() {
 
 // ===== Document Filter Functionality =====
 let availableDocuments = [];
-let selectedDocumentIds = new Set();
+window.selectedDocumentIds = new Set();
 
 // Toggle filter panel expansion/collapse
 function toggleFilterPanel() {
@@ -2721,10 +4260,38 @@ function toggleFilterPanel() {
 
 // Load available documents for filter from server
 async function loadFilterDocuments() {
+    const documentList = document.getElementById('filterDocumentList');
+
+    if (!documentList) {
+        console.warn('filterDocumentList element not found');
+        return;
+    }
+
     try {
-        const response = await fetch('/api/documents');
+        // Check if user is authenticated (required for documents API)
+        const token = localStorage.getItem('access_token');
+        if (!token) {
+            documentList.innerHTML = '<div class="loading-documents">로그인 후 문서 목록을 확인할 수 있습니다</div>';
+            return;
+        }
+
+        // Show loading state
+        documentList.innerHTML = '<div class="loading-documents">문서 목록을 불러오는 중...</div>';
+
+        const headers = {
+            'Authorization': `Bearer ${token}`
+        };
+
+        const response = await fetch('/api/documents', {
+            headers: headers,
+            signal: AbortSignal.timeout(10000) // 10 second timeout
+        });
+
         if (!response.ok) {
-            throw new Error('Failed to fetch documents');
+            if (response.status === 401) {
+                throw new Error('인증이 필요합니다');
+            }
+            throw new Error(`서버 오류: ${response.status}`);
         }
 
         const data = await response.json();
@@ -2732,8 +4299,13 @@ async function loadFilterDocuments() {
         renderFilterDocumentList();
     } catch (error) {
         console.error('Error loading filter documents:', error);
-        const documentList = document.getElementById('filterDocumentList');
-        documentList.innerHTML = '<div class="loading-documents" style="color: #ef4444;">문서 목록을 불러오는데 실패했습니다.</div>';
+        if (error.name === 'TimeoutError') {
+            documentList.innerHTML = '<div class="loading-documents" style="color: #ef4444;">⏱️ 시간 초과: 서버 응답이 없습니다.</div>';
+        } else if (error.message.includes('인증')) {
+            documentList.innerHTML = '<div class="loading-documents" style="color: #666;">🔒 로그인 후 이용 가능합니다.</div>';
+        } else {
+            documentList.innerHTML = '<div class="loading-documents" style="color: #ef4444;">❌ 문서 목록을 불러오는데 실패했습니다.<br><small>' + error.message + '</small></div>';
+        }
     }
 }
 
@@ -2741,8 +4313,13 @@ async function loadFilterDocuments() {
 function renderFilterDocumentList() {
     const documentList = document.getElementById('filterDocumentList');
 
+    if (!documentList) {
+        console.warn('filterDocumentList element not found');
+        return;
+    }
+
     if (availableDocuments.length === 0) {
-        documentList.innerHTML = '<div class="loading-documents">등록된 문서가 없습니다.</div>';
+        documentList.innerHTML = '<div class="loading-documents">📭 등록된 문서가 없습니다.</div>';
         return;
     }
 
@@ -2766,14 +4343,14 @@ function renderFilterDocumentList() {
 // Handle document checkbox selection
 function handleDocumentSelection(checkbox) {
     if (checkbox.checked) {
-        selectedDocumentIds.add(checkbox.value);
+        window.selectedDocumentIds.add(checkbox.value);
     } else {
-        selectedDocumentIds.delete(checkbox.value);
+        window.selectedDocumentIds.delete(checkbox.value);
     }
 
     // Auto-switch to "selected documents" mode if any document is selected
     const selectedMode = document.querySelector('input[name="filterMode"][value="selected"]');
-    if (selectedDocumentIds.size > 0 && selectedMode) {
+    if (window.selectedDocumentIds.size > 0 && selectedMode) {
         selectedMode.checked = true;
     }
 
@@ -2788,7 +4365,7 @@ function handleFilterModeChange(mode) {
         document.querySelectorAll('.document-item input[type="checkbox"]').forEach(cb => {
             cb.checked = false;
         });
-        selectedDocumentIds.clear();
+        window.selectedDocumentIds.clear();
         updateFilterTabCounts();
     }
 }
@@ -2801,11 +4378,11 @@ function getSelectedDocumentIds() {
         return null; // null means search all documents
     }
 
-    if (selectedDocumentIds.size === 0) {
+    if (window.selectedDocumentIds.size === 0) {
         return null; // If no documents selected, default to all
     }
 
-    return Array.from(selectedDocumentIds);
+    return Array.from(window.selectedDocumentIds);
 }
 
 /**
@@ -2822,8 +4399,8 @@ function getActiveFilterData() {
     if (activeTab === 'documents') {
         // Document filter is active
         const filterMode = document.querySelector('input[name="filterMode"]:checked')?.value;
-        if (filterMode === 'selected' && selectedDocumentIds && selectedDocumentIds.size > 0) {
-            documentIds = Array.from(selectedDocumentIds);
+        if (filterMode === 'selected' && window.selectedDocumentIds && window.selectedDocumentIds.size > 0) {
+            documentIds = Array.from(window.selectedDocumentIds);
         }
     } else if (activeTab === 'groups') {
         // Group filter is active
@@ -2873,13 +4450,12 @@ function initDocumentFilter() {
 async function loadSuggestedQuestions() {
     try {
         // Add cache-busting parameter to get fresh questions
-        const response = await fetch(`/api/suggested-questions?t=${Date.now()}`);
-        if (!response.ok) {
+        const data = await Auth.apiCall(`/api/suggested-questions?t=${Date.now()}`);
+        if (!data) {
             devWarn('Failed to load suggested questions');
             return;
         }
 
-        const data = await response.json();
         if (data.questions && data.questions.length > 0) {
             try {
                 displaySuggestedQuestions(data.questions);
@@ -3035,7 +4611,6 @@ async function initGroupManagement() {
         // Update initial tab counts
         updateFilterTabCounts();
 
-        console.log('Group management initialized successfully');
     } catch (error) {
         console.error('Failed to initialize group management:', error);
     }
@@ -3053,23 +4628,27 @@ function setupGroupModalHandlers() {
     if (groupManageBtn && groupModal) {
         groupManageBtn.addEventListener('click', async () => {
             groupModal.classList.add('active');
+            pushModal(groupModal, 'group');
 
-            // Load latest group tree data
-            await loadGroupTree();
+            // Parallel loading of group data, selected group docs, and assignable docs
+            const loadTasks = [
+                loadGroupTree(),
+                loadAllDocumentsForAssign()
+            ];
 
-            // If a group is currently selected, refresh its data
+            // Conditionally add selected group documents loading
             if (selectedGroupForEdit) {
-                await loadGroupDocuments(selectedGroupForEdit);
+                loadTasks.push(loadGroupDocuments(selectedGroupForEdit));
             }
 
-            // Reload assignable documents list
-            await loadAllDocumentsForAssign();
+            await Promise.all(loadTasks);
         });
     }
 
     if (closeGroupModal && groupModal) {
         closeGroupModal.addEventListener('click', () => {
             groupModal.classList.remove('active');
+            popModal(groupModal);
         });
     }
 
@@ -3078,6 +4657,7 @@ function setupGroupModalHandlers() {
         groupModal.addEventListener('click', (e) => {
             if (e.target === groupModal) {
                 groupModal.classList.remove('active');
+                popModal(groupModal);
             }
         });
     }
@@ -3091,6 +4671,7 @@ function setupGroupModalHandlers() {
     if (createGroupBtn && groupCreateModal) {
         createGroupBtn.addEventListener('click', () => {
             groupCreateModal.classList.add('active');
+            pushModal(groupCreateModal, 'groupCreate');
             populateParentGroupSelect();
         });
     }
@@ -3098,12 +4679,14 @@ function setupGroupModalHandlers() {
     if (closeGroupCreateModal && groupCreateModal) {
         closeGroupCreateModal.addEventListener('click', () => {
             groupCreateModal.classList.remove('active');
+            popModal(groupCreateModal);
         });
     }
 
     if (cancelGroupCreate && groupCreateModal) {
         cancelGroupCreate.addEventListener('click', () => {
             groupCreateModal.classList.remove('active');
+            popModal(groupCreateModal);
         });
     }
 
@@ -3177,7 +4760,7 @@ function updateFilterTabCounts() {
     const groupTab = document.querySelector('.filter-tab[data-tab="groups"]');
 
     if (documentTab) {
-        const docCount = selectedDocumentIds ? selectedDocumentIds.size : 0;
+        const docCount = window.selectedDocumentIds ? window.selectedDocumentIds.size : 0;
         const baseText = '문서별';
         documentTab.textContent = docCount > 0 ? `${baseText} (${docCount})` : baseText;
     }
@@ -3194,6 +4777,12 @@ function updateFilterTabCounts() {
  */
 async function loadGroupsIntoFilter() {
     try {
+        // Check if groupManager exists (may not be initialized if elements are missing)
+        if (!groupManager) {
+            console.warn('Group manager not initialized - skipping group filter load');
+            return;
+        }
+
         await groupManager.loadGroups();
         const groupFilterList = document.getElementById('groupFilterList');
 
@@ -3202,8 +4791,6 @@ async function loadGroupsIntoFilter() {
 
             // Setup filter change handler
             groupFilter.onFilterChanged = (selectedGroupIds) => {
-                console.log('Selected groups:', selectedGroupIds);
-
                 // Auto-select appropriate radio button based on group selection
                 const selectedRadio = document.querySelector('input[name="groupFilterMode"][value="selected"]');
                 const allRadio = document.querySelector('input[name="groupFilterMode"][value="all"]');
@@ -3354,7 +4941,9 @@ async function handleGroupCreate() {
         await groupManager.createGroup(groupData);
 
         // Close modal and reset form
-        document.getElementById('groupCreateModal').classList.remove('active');
+        const createModal = document.getElementById('groupCreateModal');
+        createModal.classList.remove('active');
+        popModal(createModal);
         document.getElementById('groupCreateForm').reset();
 
         // Reload trees
@@ -3469,8 +5058,7 @@ async function updateGroupDocCount(groupId) {
  */
 async function loadAllDocumentsForAssign() {
     try {
-        const response = await fetch('/api/documents');
-        const data = await response.json();
+        const data = await Auth.apiCall('/api/documents');
 
         const select = document.getElementById('documentSelectForAssign');
         if (!select) return;
@@ -3544,18 +5132,789 @@ async function handleDocumentAssign() {
     }
 }
 
+// ============================================
+// Admin Dashboard - Security Logs
+// ============================================
+
+let currentLogsPage = 0;
+const logsPerPage = 50;
+let currentLogFilters = {
+    level: '',
+    event_type: ''
+};
+
+// ============================================================================
+// v2.3.0: Document Version Management
+// ============================================================================
+
+// Show version management modal
+async function showVersionModal(filename) {
+    const modal = document.getElementById('versionModal');
+    const filenameElement = document.getElementById('versionFilename');
+    const versionsList = document.getElementById('versionsList');
+
+    if (!modal || !filenameElement || !versionsList) {
+        console.error('Version modal elements not found');
+        return;
+    }
+
+    // Set filename
+    filenameElement.textContent = filename;
+
+    // Show modal
+    modal.classList.add('active');
+    pushModal(modal, 'version');
+
+    // Load versions
+    await loadVersions(filename);
+}
+
+// Load versions for a document
+async function loadVersions(filename) {
+    const versionsList = document.getElementById('versionsList');
+    const versionsCount = document.getElementById('versionsCount');
+
+    versionsList.innerHTML = '<div class="loading">버전 목록을 불러오는 중...</div>';
+
+    try {
+        const response = await fetch(`/api/documents/${encodeURIComponent(filename)}/versions`);
+
+        if (!response.ok) {
+            throw new Error(`Failed to fetch versions: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+
+        if (!data.versions || data.versions.length === 0) {
+            versionsList.innerHTML = `
+                <div class="empty-state">
+                    <p>버전 이력이 없습니다</p>
+                    <p class="hint-text">파일을 업로드하면 첫 번째 버전이 생성됩니다</p>
+                </div>
+            `;
+            versionsCount.textContent = '버전 0개';
+            return;
+        }
+
+        // Update count
+        versionsCount.textContent = `총 ${data.total_count}개 버전`;
+
+        // Render versions (newest first)
+        versionsList.innerHTML = data.versions.map((ver, index) => `
+            <div class="version-item ${index === 0 ? 'latest-version' : ''}">
+                <div class="version-header">
+                    <div class="version-info">
+                        <span class="version-number">v${ver.version}</span>
+                        ${index === 0 ? '<span class="version-badge">최신</span>' : ''}
+                        <span class="version-date">${formatDateTime(ver.created_at)}</span>
+                    </div>
+                    <div class="version-actions">
+                        ${index !== 0 ? `
+                            <button class="version-action-btn" onclick="restoreVersion('${filename.replace(/'/g, "\\'")}', ${ver.version})" title="이 버전으로 복원">
+                                ↩️ 복원
+                            </button>
+                            <button class="version-action-btn" onclick="compareVersions('${filename.replace(/'/g, "\\'")}', ${ver.version}, ${data.versions[0].version})" title="최신 버전과 비교">
+                                🔍 비교
+                            </button>
+                        ` : `
+                            <span class="version-action-placeholder"></span>
+                            <span class="version-action-placeholder"></span>
+                        `}
+                        ${data.versions.length > 1 ? `
+                            <button class="version-action-btn delete" onclick="deleteVersion('${filename.replace(/'/g, "\\'")}', ${ver.version})" title="이 버전 삭제">
+                                🗑️ 삭제
+                            </button>
+                        ` : ''}
+                    </div>
+                </div>
+                <div class="version-meta">
+                    <span class="version-meta-item">📊 ${(ver.file_size / 1024 / 1024).toFixed(2)} MB</span>
+                    <span class="version-meta-item">📦 ${ver.chunk_count} 청크</span>
+                    <span class="version-meta-item">👤 ${ver.created_by === 'system' ? '시스템' : ver.created_by}</span>
+                    ${ver.comment ? `<span class="version-meta-item">💬 ${ver.comment}</span>` : ''}
+                </div>
+            </div>
+        `).join('');
+
+    } catch (error) {
+        console.error('Error loading versions:', error);
+        versionsList.innerHTML = `
+            <div class="empty-state">
+                <p>버전 목록을 불러오는데 실패했습니다</p>
+                <p class="hint-text">${error.message}</p>
+            </div>
+        `;
+        versionsCount.textContent = '';
+    }
+}
+
+// Restore a specific version
+async function restoreVersion(filename, version) {
+    if (!confirm(`"${filename}" 파일을 버전 ${version}으로 복원하시겠습니까?\n\n현재 파일이 이 버전의 내용으로 대체되며, 새로운 버전이 생성됩니다.`)) {
+        return;
+    }
+
+    const modal = document.getElementById('versionModal');
+    const versionsList = document.getElementById('versionsList');
+
+    // Show loading state
+    versionsList.innerHTML = '<div class="loading">버전을 복원하는 중...</div>';
+
+    try {
+        const response = await fetch(`/api/documents/${encodeURIComponent(filename)}/versions/${version}/restore`, {
+            method: 'POST'
+        });
+
+        const result = await response.json();
+
+        if (response.ok) {
+            showUploadStatus(`✓ 버전 ${version}으로 복원 완료`, 'success');
+
+            // Close modal
+            modal.classList.remove('active');
+
+            // Reload documents list
+            loadDocuments();
+            checkStatus();
+        } else {
+            showUploadStatus(`✗ 복원 실패: ${result.detail}`, 'error');
+            // Reload versions to reset UI
+            await loadVersions(filename);
+        }
+    } catch (error) {
+        showUploadStatus(`✗ 복원 실패: ${error.message}`, 'error');
+        await loadVersions(filename);
+    }
+}
+
+// Compare two versions
+async function compareVersions(filename, version1, version2) {
+    try {
+        const response = await fetch(`/api/documents/${encodeURIComponent(filename)}/versions/compare?version1=${version1}&version2=${version2}`);
+
+        if (!response.ok) {
+            throw new Error(`Failed to compare versions: ${response.statusText}`);
+        }
+
+        const comparison = await response.json();
+
+        // Show comparison modal
+        showComparisonModal(comparison);
+
+    } catch (error) {
+        console.error('Error comparing versions:', error);
+        showUploadStatus(`✗ 비교 실패: ${error.message}`, 'error');
+    }
+}
+
+// Show version comparison modal
+function showComparisonModal(comparison) {
+    const modal = document.getElementById('comparisonModal');
+    const content = document.getElementById('comparisonContent');
+
+    if (!modal || !content) {
+        console.error('Comparison modal elements not found');
+        return;
+    }
+
+    const v1 = comparison.version1;
+    const v2 = comparison.version2;
+    const diff = comparison.differences;
+
+    content.innerHTML = `
+        <div class="comparison-header">
+            <h3>${comparison.filename} 버전 비교</h3>
+        </div>
+
+        <div class="comparison-grid">
+            <div class="comparison-column">
+                <h4>버전 ${v1.version}</h4>
+                <div class="version-details">
+                    <div class="detail-row">
+                        <span class="detail-label">생성일:</span>
+                        <span class="detail-value">${formatDateTime(v1.created_at)}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">파일 크기:</span>
+                        <span class="detail-value">${(v1.file_size / 1024 / 1024).toFixed(2)} MB</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">청크 수:</span>
+                        <span class="detail-value">${v1.chunk_count}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">해시:</span>
+                        <span class="detail-value mono">${v1.file_hash.substring(0, 16)}...</span>
+                    </div>
+                    ${v1.comment ? `
+                    <div class="detail-row">
+                        <span class="detail-label">설명:</span>
+                        <span class="detail-value">${v1.comment}</span>
+                    </div>
+                    ` : ''}
+                </div>
+            </div>
+
+            <div class="comparison-column">
+                <h4>버전 ${v2.version}</h4>
+                <div class="version-details">
+                    <div class="detail-row">
+                        <span class="detail-label">생성일:</span>
+                        <span class="detail-value">${formatDateTime(v2.created_at)}</span>
+                    </div>
+                    <div class="detail-row ${diff.size_changed ? 'changed' : ''}">
+                        <span class="detail-label">파일 크기:</span>
+                        <span class="detail-value">
+                            ${(v2.file_size / 1024 / 1024).toFixed(2)} MB
+                            ${diff.size_changed ? `<span class="diff-badge">${diff.size_diff > 0 ? '+' : ''}${(diff.size_diff / 1024 / 1024).toFixed(2)} MB</span>` : ''}
+                        </span>
+                    </div>
+                    <div class="detail-row ${diff.chunk_count_diff !== 0 ? 'changed' : ''}">
+                        <span class="detail-label">청크 수:</span>
+                        <span class="detail-value">
+                            ${v2.chunk_count}
+                            ${diff.chunk_count_diff !== 0 ? `<span class="diff-badge">${diff.chunk_count_diff > 0 ? '+' : ''}${diff.chunk_count_diff}</span>` : ''}
+                        </span>
+                    </div>
+                    <div class="detail-row ${diff.content_changed ? 'changed' : ''}">
+                        <span class="detail-label">해시:</span>
+                        <span class="detail-value mono">
+                            ${v2.file_hash.substring(0, 16)}...
+                            ${diff.content_changed ? '<span class="diff-badge">변경됨</span>' : '<span class="diff-badge same">동일</span>'}
+                        </span>
+                    </div>
+                    ${v2.comment ? `
+                    <div class="detail-row">
+                        <span class="detail-label">설명:</span>
+                        <span class="detail-value">${v2.comment}</span>
+                    </div>
+                    ` : ''}
+                </div>
+            </div>
+        </div>
+
+        <div class="comparison-summary">
+            <h4>변경 사항 요약</h4>
+            <div class="summary-list">
+                <div class="summary-item ${diff.content_changed ? 'changed' : 'unchanged'}">
+                    <span class="summary-label">파일 내용</span>
+                    <span class="summary-value">${diff.content_changed ? '변경됨' : '동일함'}</span>
+                </div>
+                ${diff.size_changed ? `
+                <div class="summary-item changed">
+                    <span class="summary-label">파일 크기</span>
+                    <span class="summary-value">${diff.size_diff > 0 ? '↗' : '↘'} ${diff.size_diff > 0 ? '+' : ''}${(diff.size_diff / 1024 / 1024).toFixed(2)} MB</span>
+                </div>` : ''}
+                ${diff.chunk_count_diff !== 0 ? `
+                <div class="summary-item changed">
+                    <span class="summary-label">청크 수</span>
+                    <span class="summary-value">${diff.chunk_count_diff > 0 ? '↗' : '↘'} ${diff.chunk_count_diff > 0 ? '+' : ''}${diff.chunk_count_diff}</span>
+                </div>` : ''}
+            </div>
+        </div>
+    `;
+
+    modal.classList.add('active');
+    pushModal(modal, 'comparison');
+}
+
+// Delete a specific version
+async function deleteVersion(filename, version) {
+    // Check authentication (required to delete versions)
+    const token = localStorage.getItem('access_token');
+    if (!token) {
+        showUploadStatus('✗ 로그인이 필요합니다', 'error');
+        return;
+    }
+
+    if (!confirm(`"${filename}" 파일의 버전 ${version}을 삭제하시겠습니까?\n\n이 작업은 되돌릴 수 없습니다.`)) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/documents/${encodeURIComponent(filename)}/versions/${version}`, {
+            method: 'DELETE',
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+
+        const result = await response.json();
+
+        if (response.ok) {
+            showUploadStatus(`✓ 버전 ${version} 삭제 완료`, 'success');
+            // Reload versions
+            await loadVersions(filename);
+        } else {
+            showUploadStatus(`✗ 삭제 실패: ${result.detail}`, 'error');
+        }
+    } catch (error) {
+        showUploadStatus(`✗ 삭제 실패: ${error.message}`, 'error');
+    }
+}
+
+// Initialize version management and export modals
+function initVersionManagement() {
+    const versionModal = document.getElementById('versionModal');
+    const closeVersionModal = document.getElementById('closeVersionModal');
+    const comparisonModal = document.getElementById('comparisonModal');
+    const closeComparisonModal = document.getElementById('closeComparisonModal');
+    const exportModal = document.getElementById('exportModal');
+    const closeExportModal = document.getElementById('closeExportModal');
+
+    // Close version modal handlers
+    if (closeVersionModal) {
+        closeVersionModal.addEventListener('click', () => {
+            versionModal.classList.remove('active');
+            popModal(versionModal);
+        });
+    }
+
+    if (versionModal) {
+        versionModal.addEventListener('click', (e) => {
+            if (e.target === versionModal) {
+                versionModal.classList.remove('active');
+                popModal(versionModal);
+            }
+        });
+    }
+
+    // Close comparison modal handlers
+    if (closeComparisonModal) {
+        closeComparisonModal.addEventListener('click', () => {
+            comparisonModal.classList.remove('active');
+            popModal(comparisonModal);
+        });
+    }
+
+    if (comparisonModal) {
+        comparisonModal.addEventListener('click', (e) => {
+            if (e.target === comparisonModal) {
+                comparisonModal.classList.remove('active');
+                popModal(comparisonModal);
+            }
+        });
+    }
+
+    // Close export modal handlers
+    if (closeExportModal) {
+        closeExportModal.addEventListener('click', () => {
+            exportModal.classList.remove('active');
+            popModal(exportModal);
+        });
+    }
+
+    if (exportModal) {
+        exportModal.addEventListener('click', (e) => {
+            if (e.target === exportModal) {
+                exportModal.classList.remove('active');
+                popModal(exportModal);
+            }
+        });
+    }
+}
+
+// Initialize admin dashboard
+function initAdminDashboard() {
+    const adminModal = document.getElementById('adminModal');
+    const closeAdminModal = document.getElementById('closeAdminModal');
+    const applyLogFilters = document.getElementById('applyLogFilters');
+    const refreshLogs = document.getElementById('refreshLogs');
+    const prevLogsPage = document.getElementById('prevLogsPage');
+    const nextLogsPage = document.getElementById('nextLogsPage');
+
+    if (!adminModal) return;
+
+    // Close modal handlers
+    closeAdminModal?.addEventListener('click', () => {
+        adminModal.classList.remove('active');
+        popModal(adminModal);
+    });
+
+    adminModal.addEventListener('click', (e) => {
+        if (e.target === adminModal) {
+            adminModal.classList.remove('active');
+            popModal(adminModal);
+        }
+    });
+
+    // Filter handlers
+    applyLogFilters?.addEventListener('click', () => {
+        currentLogFilters.level = document.getElementById('logLevelFilter').value;
+        currentLogFilters.event_type = document.getElementById('logEventTypeFilter').value;
+        currentLogsPage = 0;
+        loadSecurityLogs();
+    });
+
+    refreshLogs?.addEventListener('click', () => {
+        loadSecurityLogs();
+    });
+
+    // Pagination handlers
+    prevLogsPage?.addEventListener('click', () => {
+        if (currentLogsPage > 0) {
+            currentLogsPage--;
+            loadSecurityLogs();
+        }
+    });
+
+    nextLogsPage?.addEventListener('click', () => {
+        currentLogsPage++;
+        loadSecurityLogs();
+    });
+}
+
+// Open admin dashboard
+async function goToAdmin() {
+    const adminModal = document.getElementById('adminModal');
+    if (!adminModal) return;
+
+    adminModal.classList.add('active');
+    pushModal(adminModal, 'admin');
+    await loadSecurityLogs();
+}
+
+// Load security logs
+async function loadSecurityLogs() {
+    const logsTableBody = document.getElementById('logsTableBody');
+    const prevBtn = document.getElementById('prevLogsPage');
+    const nextBtn = document.getElementById('nextLogsPage');
+    const paginationInfo = document.getElementById('logsPaginationInfo');
+
+    if (!logsTableBody) return;
+
+    logsTableBody.innerHTML = '<tr><td colspan="6" class="loading">로그를 불러오는 중...</td></tr>';
+
+    try {
+        const params = new URLSearchParams({
+            limit: logsPerPage.toString(),
+            offset: (currentLogsPage * logsPerPage).toString()
+        });
+
+        if (currentLogFilters.level) {
+            params.append('level', currentLogFilters.level);
+        }
+        if (currentLogFilters.event_type) {
+            params.append('event_type', currentLogFilters.event_type);
+        }
+
+        const token = sessionStorage.getItem('access_token');
+        const response = await fetch(`/api/auth/admin/security-logs?${params}`, {
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+
+        if (!response.ok) {
+            throw new Error('Failed to load security logs');
+        }
+
+        const data = await response.json();
+
+        if (!data.logs || data.logs.length === 0) {
+            logsTableBody.innerHTML = '<tr><td colspan="6" class="loading">로그가 없습니다.</td></tr>';
+            prevBtn.disabled = true;
+            nextBtn.disabled = true;
+            paginationInfo.textContent = '페이지 1';
+            return;
+        }
+
+        // Render logs
+        logsTableBody.innerHTML = '';
+        data.logs.forEach(log => {
+            const row = document.createElement('tr');
+
+            // Format timestamp
+            const timestamp = new Date(log.timestamp).toLocaleString('ko-KR');
+
+            // Event type translation
+            const eventTypeMap = {
+                'AUTH_LOGIN_SUCCESS': '로그인 성공',
+                'AUTH_LOGIN_FAILED': '로그인 실패',
+                'AUTH_LOGOUT': '로그아웃',
+                'RATE_LIMIT_EXCEEDED': 'Rate Limit 초과',
+                'BRUTE_FORCE_ATTEMPT': 'Brute Force 시도',
+                'UNAUTHORIZED_ACCESS': '무단 접근',
+                'TOKEN_ISSUED': '토큰 발급',
+                'TOKEN_INVALID': '유효하지 않은 토큰',
+                'TOKEN_EXPIRED': '토큰 만료',
+                'ACCOUNT_LOCKED': '계정 잠금',
+                'PERMISSION_DENIED': '권한 거부'
+            };
+            const eventTypeText = eventTypeMap[log.event_type] || log.event_type;
+
+            row.innerHTML = `
+                <td>${timestamp}</td>
+                <td><span class="log-level ${log.level}">${log.level}</span></td>
+                <td>${eventTypeText}</td>
+                <td>${log.user_id === 'anonymous' ? '익명' : log.user_id.substring(0, 8) + '...'}</td>
+                <td>${log.ip_address}</td>
+                <td>${log.message}</td>
+            `;
+
+            logsTableBody.appendChild(row);
+        });
+
+        // Update pagination
+        const currentPageNum = currentLogsPage + 1;
+        const totalPages = Math.ceil(data.total_count / logsPerPage);
+        paginationInfo.textContent = `페이지 ${currentPageNum} / ${totalPages} (총 ${data.total_count}개)`;
+
+        prevBtn.disabled = currentLogsPage === 0;
+        nextBtn.disabled = (currentLogsPage + 1) * logsPerPage >= data.total_count;
+
+    } catch (error) {
+        console.error('Failed to load security logs:', error);
+        logsTableBody.innerHTML = '<tr><td colspan="6" class="loading">로그 로딩 실패: ' + error.message + '</td></tr>';
+    }
+}
+
 // Start application when DOM is ready
+// ===== User Preferences Management =====
+
+/**
+ * Load user preferences from server
+ */
+async function loadUserPreferences() {
+    // Check if user is authenticated
+    if (!Auth || !Auth.isAuthenticated()) {
+        console.log('⏭️ 로그인하지 않음 - 설정 로드 건너뛰기');
+        return null;
+    }
+
+    try {
+        const result = await Auth.apiCall('/api/user/preferences', {
+            method: 'GET'
+        });
+
+        if (result && result.data) {
+            const preferences = result.data;
+            console.log('📋 사용자 설정 로드:', preferences);
+
+            // Apply preferences to UI
+            applyUserPreferences(preferences);
+
+            return preferences;
+        }
+    } catch (error) {
+        console.error('사용자 설정 로드 실패:', error);
+    }
+    return null;
+}
+
+/**
+ * Apply loaded preferences to UI
+ */
+function applyUserPreferences(preferences) {
+    if (!preferences) return;
+
+    // Apply active filter tab
+    if (preferences.active_filter_tab) {
+        const tabButton = document.querySelector(`.filter-tab[data-tab="${preferences.active_filter_tab}"]`);
+        if (tabButton) {
+            tabButton.click();
+        }
+    }
+
+    // Apply group filter mode
+    if (preferences.group_filter_mode) {
+        const radioButton = document.querySelector(`input[name="groupFilterMode"][value="${preferences.group_filter_mode}"]`);
+        if (radioButton) {
+            radioButton.checked = true;
+        }
+    }
+
+    // Apply selected document IDs
+    if (preferences.selected_document_ids && preferences.selected_document_ids.length > 0) {
+        // Wait for document filter to be initialized
+        setTimeout(() => {
+            if (window.selectedDocumentIds) {
+                window.selectedDocumentIds.clear();
+                preferences.selected_document_ids.forEach(id => {
+                    window.selectedDocumentIds.add(id);
+                });
+
+                // Update UI checkboxes
+                preferences.selected_document_ids.forEach(id => {
+                    const checkbox = document.querySelector(`input[type="checkbox"][value="${id}"]`);
+                    if (checkbox) {
+                        checkbox.checked = true;
+                    }
+                });
+
+                // Update filter mode radio to "selected" if documents are selected
+                if (preferences.selected_document_ids.length > 0) {
+                    const selectedModeRadio = document.querySelector('input[name="filterMode"][value="selected"]');
+                    if (selectedModeRadio) {
+                        selectedModeRadio.checked = true;
+                    }
+                }
+
+                updateFilterTabCounts();
+                console.log('✅ 선택된 문서 복원:', preferences.selected_document_ids.length);
+            }
+        }, 500);
+    }
+
+    // Apply selected group IDs
+    if (preferences.selected_group_ids && preferences.selected_group_ids.length > 0) {
+        // Wait for group filter to be initialized
+        setTimeout(() => {
+            if (groupFilter && typeof groupFilter.selectGroups === 'function') {
+                groupFilter.selectGroups(preferences.selected_group_ids);
+                console.log('✅ 선택된 그룹 복원:', preferences.selected_group_ids.length);
+            }
+        }, 1000);
+    }
+}
+
+/**
+ * Save user preferences to server
+ */
+async function saveUserPreferences() {
+    // Check if user is authenticated
+    if (!Auth || !Auth.isAuthenticated()) {
+        return false;
+    }
+
+    try {
+        // Gather current preferences
+        const activeTab = document.querySelector('.filter-tab.active')?.dataset.tab || 'documents';
+        const groupFilterMode = document.querySelector('input[name="groupFilterMode"]:checked')?.value || 'all';
+
+        const selectedDocIds = window.selectedDocumentIds ? Array.from(window.selectedDocumentIds) : [];
+        const selectedGrpIds = groupFilter && typeof groupFilter.getSelectedGroups === 'function'
+            ? groupFilter.getSelectedGroups()
+            : [];
+
+        const preferences = {
+            search_scope: "all",  // Legacy field
+            selected_document_ids: selectedDocIds,
+            selected_group_ids: selectedGrpIds,
+            active_filter_tab: activeTab,
+            group_filter_mode: groupFilterMode
+        };
+
+        const result = await Auth.apiCall('/api/user/preferences', {
+            method: 'PUT',
+            body: JSON.stringify(preferences)
+        });
+
+        if (result && result.success) {
+            console.log('✅ 사용자 설정 저장 완료');
+            return true;
+        }
+    } catch (error) {
+        console.error('사용자 설정 저장 실패:', error);
+    }
+    return false;
+}
+
+/**
+ * Setup auto-save for preferences
+ */
+function setupPreferencesAutoSave() {
+    // Save preferences when filter changes
+    const filterTabButtons = document.querySelectorAll('.filter-tab');
+    filterTabButtons.forEach(button => {
+        button.addEventListener('click', () => {
+            setTimeout(saveUserPreferences, 500);
+        });
+    });
+
+    // Save when document filter mode changes (전체 문서 / 선택한 문서만)
+    const documentFilterRadios = document.querySelectorAll('input[name="filterMode"]');
+    documentFilterRadios.forEach(radio => {
+        radio.addEventListener('change', saveUserPreferences);
+    });
+
+    // Save when group filter mode changes
+    const groupFilterRadios = document.querySelectorAll('input[name="groupFilterMode"]');
+    groupFilterRadios.forEach(radio => {
+        radio.addEventListener('change', (e) => {
+            // When "전체 그룹" (all) is selected, clear all individual group selections
+            if (e.target.value === 'all' && groupFilter) {
+                // Clear selected group IDs in the filter
+                groupFilter.clearSelection();
+
+                // Uncheck all group checkboxes in the UI
+                const groupCheckboxes = document.querySelectorAll('.filter-group-checkbox');
+                groupCheckboxes.forEach(checkbox => {
+                    checkbox.checked = false;
+                });
+
+                console.log('✅ 전체 그룹 선택 - 개별 그룹 선택 해제');
+            }
+
+            saveUserPreferences();
+        });
+    });
+
+    // Save when document selection changes
+    // (Will be triggered by document filter checkbox changes)
+    const documentFilterPanel = document.getElementById('filterDocumentList');
+    if (documentFilterPanel) {
+        documentFilterPanel.addEventListener('change', (e) => {
+            if (e.target.type === 'checkbox') {
+                setTimeout(saveUserPreferences, 300);
+            }
+        });
+    }
+
+    console.log('✅ 설정 자동 저장 설정 완료');
+}
+
 if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-        init();
-        initDocumentFilter();
-        initGroupManagement();
-        initConversationHistory();
+    document.addEventListener('DOMContentLoaded', async () => {
+        const startTime = performance.now();
+
+        // Phase 1: Core initialization (must complete first)
+        await init();
+
+        // Phase 2: Parallel initialization of independent modules
+        await Promise.all([
+            initDocumentFilter(),
+            initGroupManagement(),
+            initConversationHistory(),
+            initAdminDashboard(),
+            initVersionManagement()
+        ]);
+
+        const initTime = performance.now() - startTime;
+        logger.info(`✅ Initialization complete in ${initTime.toFixed(2)}ms`);
+
+        // Load and setup user preferences (after other init)
+        // Wait a bit longer to ensure all filters are fully loaded
+        setTimeout(async () => {
+            await loadUserPreferences();
+            setupPreferencesAutoSave();
+        }, 1500);
     });
 } else {
     // DOM already loaded
-    init();
-    initDocumentFilter();
-    initGroupManagement();
-    initConversationHistory();
+    (async () => {
+        const startTime = performance.now();
+
+        // Phase 1: Core initialization (must complete first)
+        await init();
+
+        // Phase 2: Parallel initialization of independent modules
+        await Promise.all([
+            initDocumentFilter(),
+            initGroupManagement(),
+            initConversationHistory(),
+            initAdminDashboard(),
+            initVersionManagement()
+        ]);
+
+        const initTime = performance.now() - startTime;
+        logger.info(`✅ Initialization complete in ${initTime.toFixed(2)}ms`);
+
+        // Load and setup user preferences (after other init)
+        // Wait a bit longer to ensure all filters are fully loaded
+        setTimeout(async () => {
+            await loadUserPreferences();
+            setupPreferencesAutoSave();
+        }, 1500);
+    })();
 }
