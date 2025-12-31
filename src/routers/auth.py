@@ -94,6 +94,21 @@ async def register(
     auth_service = AuthService(request.app.state.cache_manager.redis)
     redis = request.app.state.cache_manager.redis
 
+    # CAPTCHA 검증
+    from ..auth.captcha import CaptchaService
+    captcha_service = CaptchaService(redis)
+    if captcha_service.is_enabled():
+        success, error_msg = await captcha_service.verify_token(
+            token=user_data.captcha_token or "",
+            remote_ip=request.client.host if request.client else None,
+            action="register"
+        )
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=error_msg or "CAPTCHA 검증에 실패했습니다"
+            )
+
     try:
         user = await auth_service.create_user(user_data)
 
@@ -142,10 +157,26 @@ async def login(
     min_response_time_ms = 200 + secrets.randbelow(100)
 
     auth_service = AuthService(request.app.state.cache_manager.redis)
+    redis = request.app.state.cache_manager.redis
 
     try:
         # IP 주소 추출
         ip_address = request.client.host if request.client else None
+
+        # CAPTCHA 검증
+        from ..auth.captcha import CaptchaService
+        captcha_service = CaptchaService(redis)
+        if captcha_service.is_enabled():
+            success, error_msg = await captcha_service.verify_token(
+                token=credentials.captcha_token or "",
+                remote_ip=ip_address,
+                action="login"
+            )
+            if not success:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=error_msg or "CAPTCHA 검증에 실패했습니다"
+                )
 
         result = await auth_service.authenticate_user(credentials, ip_address)
 

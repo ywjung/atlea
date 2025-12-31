@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>로그인 - AI 챗봇</title>
+    <link rel="stylesheet" href="/static/auth.css">
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <!-- Google reCAPTCHA v3 -->
+    <script>
+        // reCAPTCHA Site Key를 서버에서 가져옴
+        window.RECAPTCHA_SITE_KEY = null;
+
+        // Site Key 로드 함수
+        async function loadRecaptchaSiteKey() {
+            try {
+                // 관리자 API로부터 site key 가져오기 (인증 불필요)
+                const response = await fetch('/api/admin/captcha');
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.site_key && data.site_key !== '설정되지 않음') {
+                        window.RECAPTCHA_SITE_KEY = data.site_key;
+
+                        // reCAPTCHA 스크립트 동적 로드
+                        const script = document.createElement('script');
+                        script.src = `https://www.google.com/recaptcha/api.js?render=${window.RECAPTCHA_SITE_KEY}`;
+                        document.head.appendChild(script);
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to load reCAPTCHA site key:', error);
+            }
+        }
+
+        // 페이지 로드 시 site key 로드
+        loadRecaptchaSiteKey();
+    </script>
+</head>
+<body>
+    <div class="auth-container">
+        <div class="auth-header">
+            <div class="auth-logo">🤖</div>
+            <h1>AI 챗봇 로그인</h1>
+            <p>계정에 로그인하여 챗봇을 사용하세요</p>
+        </div>
+
+        <div id="error-message" class="message error-message"></div>
+        <div id="success-message" class="message success-message"></div>
+
+        <form id="loginForm" class="auth-form">
+            <div class="form-group">
+                <label for="email">
+                    이메일 <span class="required">*</span>
+                </label>
+                <input
+                    type="email"
+                    id="email"
+                    class="form-input"
+                    placeholder="user@example.com"
+                    required
+                    autofocus
+                >
+            </div>
+
+            <div class="form-group">
+                <label for="password">
+                    비밀번호 <span class="required">*</span>
+                </label>
+                <input
+                    type="password"
+                    id="password"
+                    class="form-input"
+                    placeholder="비밀번호를 입력하세요"
+                    required
+                >
+            </div>
+
+            <button type="submit" class="btn btn-primary btn-block" id="loginBtn">
+                로그인
+            </button>
+        </form>
+
+        <div class="auth-links">
+            <a href="/static/register.html">계정이 없으신가요? 회원가입</a>
+            <a href="/static/reset-password.html">비밀번호를 잊으셨나요?</a>
+        </div>
+    </div>
+
+    <script src="/static/auth.js?v=2025-12-28-FIX-REDIRECT-LOOP"></script>
+    <script>
+        const form = document.getElementById('loginForm');
+        const loginBtn = document.getElementById('loginBtn');
+        const emailInput = document.getElementById('email');
+        const passwordInput = document.getElementById('password');
+
+        // 이미 로그인된 경우 메인 페이지로 리다이렉트
+        if (Auth.isAuthenticated()) {
+            window.location.href = '/';
+        }
+
+        // URL 파라미터에서 메시지 확인
+        const urlParams = new URLSearchParams(window.location.search);
+        const message = urlParams.get('message');
+        if (message) {
+            Auth.showSuccess(decodeURIComponent(message));
+        }
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            Auth.hideError();
+            Auth.hideSuccess();
+
+            const email = emailInput.value.trim();
+            const password = passwordInput.value;
+
+            if (!email || !password) {
+                Auth.showError('이메일과 비밀번호를 입력하세요');
+                return;
+            }
+
+            loginBtn.disabled = true;
+            loginBtn.textContent = '로그인 중...';
+
+            try {
+                // reCAPTCHA 토큰 생성 (활성화된 경우에만)
+                let captchaToken = null;
+                if (window.RECAPTCHA_SITE_KEY && typeof grecaptcha !== 'undefined') {
+                    try {
+                        captchaToken = await grecaptcha.execute(window.RECAPTCHA_SITE_KEY, { action: 'login' });
+                    } catch (captchaError) {
+                        console.error('reCAPTCHA error:', captchaError);
+                        // CAPTCHA 실패 시에도 계속 진행 (서버에서 처리)
+                    }
+                }
+
+                await Auth.login(email, password, captchaToken);
+
+                // 로그인 성공
+                Auth.showSuccess('로그인 성공! 리다이렉트 중...');
+
+                // 1초 후 메인 페이지로 이동
+                setTimeout(() => {
+                    const returnUrl = urlParams.get('return') || '/';
+                    window.location.href = returnUrl;
+                }, 1000);
+
+            } catch (error) {
+                console.error('Login error:', error);
+                let errorMessage = error.message;
+
+                // 특정 에러 메시지 처리
+                if (errorMessage.includes('잠겼습니다')) {
+                    Auth.showError(errorMessage);
+                } else if (errorMessage.includes('요청이 너무 많습니다')) {
+                    Auth.showError(errorMessage);
+                } else if (errorMessage.includes('유효하지 않은')) {
+                    Auth.showError('이메일 또는 비밀번호가 올바르지 않습니다');
+                } else {
+                    Auth.showError('로그인에 실패했습니다. 다시 시도해주세요.');
+                }
+
+                loginBtn.disabled = false;
+                loginBtn.textContent = '로그인';
+            }
+        });
+
+        // Enter 키 처리
+        passwordInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                form.dispatchEvent(new Event('submit'));
+            }
+        });
+    </script>
+</body>
+</html>
