@@ -231,7 +231,15 @@ app.add_middleware(
     allow_origins=config.CORS_ORIGINS,
     allow_credentials=config.CORS_ALLOW_CREDENTIALS,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["*"],
+    # Restrict allowed headers to only what's needed (security best practice)
+    allow_headers=[
+        "Authorization",      # JWT tokens
+        "Content-Type",       # JSON requests
+        "Accept",            # Content negotiation
+        "Accept-Language",   # Localization
+        "X-Request-ID",      # Request tracing
+        "X-CSRF-Token"       # CSRF protection
+    ],
     expose_headers=["X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset"]
 )
 
