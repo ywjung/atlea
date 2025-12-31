@@ -336,10 +336,14 @@ async function init() {
     setupEventListeners();
     setupScrollButton();
 
+    // Load settings from localStorage
+    loadSettings();
+
     // Parallel async operations
     await Promise.all([
         checkStatus(),
-        loadSuggestedQuestions()
+        loadSuggestedQuestions(),
+        loadSystemPromptFromServer()  // Load admin-configured system prompt
     ]);
 
     // Initialize AutoComplete after loading suggested questions
@@ -2987,6 +2991,38 @@ function loadSettings() {
     applySettings();
 }
 
+/**
+ * Load system prompt from server (admin-configured)
+ * This ensures the admin page's system prompt is actually used
+ */
+async function loadSystemPromptFromServer() {
+    try {
+        const response = await fetch('/api/admin/system-prompt');
+
+        if (response.ok) {
+            const data = await response.json();
+            if (data.system_prompt) {
+                // Update current settings with server's system prompt
+                currentSettings.system_prompt = data.system_prompt;
+
+                // Also update the UI if the element exists
+                if (systemPrompt) {
+                    systemPrompt.value = data.system_prompt;
+                }
+
+                logger.info('✅ System prompt loaded from server');
+                devLog('System prompt loaded:', data.system_prompt.substring(0, 100) + '...');
+            }
+        } else {
+            // If endpoint fails (e.g., not authenticated), use default
+            devLog('Using default system prompt (server prompt not available)');
+        }
+    } catch (error) {
+        // Silent fail - use default system prompt from localStorage/defaultSettings
+        devLog('Failed to load system prompt from server, using default:', error.message);
+    }
+}
+
 function applySettings() {
     if (topKSlider && topKValue) {
         topKSlider.value = currentSettings.top_k;
@@ -3059,6 +3095,9 @@ async function openSettingsPanel() {
         console.error('Failed to fetch latest model info:', error);
     }
 
+    // Load latest system prompt from server (admin-configured)
+    await loadSystemPromptFromServer();
+
     await loadAvailableModels();  // Load available models when opening settings
     loadCacheStats();
     loadCacheEnabled();
@@ -3118,6 +3157,7 @@ if (cacheTTLSlider && cacheTTLValue) {
 if (saveSettingsBtn) {
     saveSettingsBtn.addEventListener('click', async () => {
         // 모델 설정은 관리자 페이지에서만 변경 가능하므로 현재 값 유지
+        // 시스템 프롬프트도 관리자 페이지에서만 변경 가능 (서버에서 항상 로드)
         currentSettings = {
             top_k: topKSlider ? parseInt(topKSlider.value) : defaultSettings.top_k,
             temperature: temperatureSlider ? parseFloat(temperatureSlider.value) : defaultSettings.temperature,
@@ -3126,7 +3166,7 @@ if (saveSettingsBtn) {
             cache_ttl: cacheTTLSlider ? parseInt(cacheTTLSlider.value) : defaultSettings.cache_ttl,
             llm_model: currentSettings.llm_model,  // 현재 모델 유지 (읽기 전용)
             embedding_model: currentSettings.embedding_model,  // 현재 모델 유지 (읽기 전용)
-            system_prompt: systemPrompt ? systemPrompt.value : defaultSettings.system_prompt
+            system_prompt: currentSettings.system_prompt  // 서버에서 로드된 값 유지 (읽기 전용)
         };
 
         localStorage.setItem('chatSettings', JSON.stringify(currentSettings));
@@ -3152,7 +3192,7 @@ if (resetSettingsBtn) {
     resetSettingsBtn.addEventListener('click', async () => {
         if (confirm('모든 설정을 기본값으로 복원하시겠습니까?')) {
             try {
-                // Fetch current admin-configured models from server
+                // Fetch current admin-configured models and system prompt from server
                 const response = await fetch('/api/status');
                 const data = await response.json();
 
@@ -3162,6 +3202,9 @@ if (resetSettingsBtn) {
                     llm_model: data.llm_model || defaultSettings.llm_model,
                     embedding_model: data.embedding_model || defaultSettings.embedding_model
                 };
+
+                // Reload system prompt from server
+                await loadSystemPromptFromServer();
 
                 applySettings();
                 localStorage.removeItem('chatSettings');
@@ -3177,6 +3220,14 @@ if (resetSettingsBtn) {
                 console.error('Failed to fetch current models:', error);
                 // Fallback to complete defaults if fetch fails
                 currentSettings = { ...defaultSettings };
+
+                // Try to reload system prompt even on error
+                try {
+                    await loadSystemPromptFromServer();
+                } catch (e) {
+                    console.error('Failed to load system prompt:', e);
+                }
+
                 applySettings();
                 localStorage.removeItem('chatSettings');
 
