@@ -354,10 +354,54 @@ async function init() {
         Auth.initActivityMonitor();
     }
 
+    // Check authentication and update UI accordingly
+    checkAuthenticationStatus();
+
     const initTime = performance.now() - startTime;
     logger.debug(`Core init completed in ${initTime.toFixed(2)}ms`);
 
     userInput.focus();
+}
+
+/**
+ * Check authentication status and update UI
+ * Disables chat input for non-authenticated users
+ */
+function checkAuthenticationStatus() {
+    const token = localStorage.getItem('access_token');
+
+    if (!token) {
+        // Not authenticated - show login message and disable input
+        const loginMessage = document.createElement('div');
+        loginMessage.className = 'message bot';
+        loginMessage.innerHTML = `
+            <div class="message-content">
+                <p><strong>🔒 로그인이 필요합니다</strong></p>
+                <p>챗봇을 사용하려면 먼저 로그인해주세요.</p>
+                <p style="margin-top: 15px;">
+                    <a href="/login.html" style="
+                        display: inline-block;
+                        padding: 10px 20px;
+                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                        color: white;
+                        text-decoration: none;
+                        border-radius: 8px;
+                        font-weight: 500;
+                    ">로그인하기</a>
+                </p>
+            </div>
+        `;
+        chatContainer.appendChild(loginMessage);
+
+        // Disable input
+        userInput.disabled = true;
+        userInput.placeholder = '로그인 후 이용 가능합니다';
+        sendBtn.disabled = true;
+
+        logger.info('🔒 Chat disabled - authentication required');
+    } else {
+        logger.info('✅ User authenticated - chat enabled');
+    }
 }
 
 // Initialize AutoComplete
@@ -1310,6 +1354,16 @@ async function initConversationHistory() {
 
 // Send message with streaming
 async function sendMessage(regenerate = false) {
+    // Check authentication - chatbot requires login
+    const token = localStorage.getItem('access_token');
+    if (!token) {
+        // Not authenticated - redirect to login
+        if (confirm('챗봇을 사용하려면 로그인이 필요합니다.\n로그인 페이지로 이동하시겠습니까?')) {
+            window.location.href = '/login.html';
+        }
+        return;
+    }
+
     let question;
 
     if (regenerate) {
