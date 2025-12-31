@@ -196,22 +196,24 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         if request.url.path in ["/docs", "/redoc", "/openapi.json"]:
             response.headers["Content-Security-Policy"] = (
                 "default-src 'self'; "
-                "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://unpkg.com https://cdnjs.cloudflare.com; "
+                "script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: https://cdn.jsdelivr.net https://unpkg.com https://cdnjs.cloudflare.com; "
                 "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com https://cdnjs.cloudflare.com; "
                 "img-src 'self' data: https:; "
                 "font-src 'self' data: https://cdn.jsdelivr.net https://unpkg.com; "
                 "connect-src 'self'; "
+                "worker-src 'self' blob:; "
                 "frame-ancestors 'none';"
             )
         else:
             # Stricter CSP for main application
             response.headers["Content-Security-Policy"] = (
                 "default-src 'self'; "
-                "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
+                "script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
                 "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
                 "img-src 'self' data:; "
                 "font-src 'self' https://cdn.jsdelivr.net; "
                 "connect-src 'self' https://cdn.jsdelivr.net; "
+                "worker-src 'self' blob:; "
                 "frame-ancestors 'none';"
             )
 
