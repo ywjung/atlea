@@ -959,7 +959,8 @@ def get_redis_backup_info():
     try:
         backups = []
         if BACKUP_DIR.exists():
-            for backup_file in sorted(BACKUP_DIR.glob("dump_*.rdb"), reverse=True):
+            # Sort by file modification time (newest first)
+            for backup_file in sorted(BACKUP_DIR.glob("dump_*.rdb"), key=lambda x: x.stat().st_mtime, reverse=True):
                 stat = backup_file.stat()
                 created_at = datetime.fromtimestamp(stat.st_mtime)
                 age_seconds = (datetime.now() - created_at).total_seconds()
@@ -1633,15 +1634,35 @@ async def backup_scheduler():
 
                 if schedule.get("enabled"):
                     interval = schedule.get("interval", "daily")
+                    scheduled_minute = schedule.get("minute", 0)  # 기본값 0분
 
-                    # 간격에 따른 대기 시간 설정 (초 단위)
-                    intervals = {
-                        "hourly": 3600,      # 1시간
-                        "daily": 86400,      # 24시간
-                        "weekly": 604800     # 7일
-                    }
+                    # 현재 시간
+                    now = datetime.now()
 
-                    wait_time = intervals.get(interval, 86400)
+                    # 다음 실행 시간 계산
+                    if interval == "hourly":
+                        # 매시 N분에 실행
+                        next_run = now.replace(minute=scheduled_minute, second=0, microsecond=0)
+                        if next_run <= now:
+                            # 이미 지난 시간이면 다음 시간으로
+                            next_run += timedelta(hours=1)
+                    elif interval == "daily":
+                        # 매일 N시 M분에 실행 (여기서는 간단히 24시간 후)
+                        next_run = now + timedelta(days=1)
+                        next_run = next_run.replace(minute=scheduled_minute, second=0, microsecond=0)
+                    elif interval == "weekly":
+                        # 매주 같은 요일 N시 M분에 실행
+                        next_run = now + timedelta(weeks=1)
+                        next_run = next_run.replace(minute=scheduled_minute, second=0, microsecond=0)
+                    else:
+                        next_run = now + timedelta(hours=1)
+
+                    # 다음 실행까지 대기 시간 계산
+                    wait_seconds = (next_run - now).total_seconds()
+
+                    if wait_seconds > 0:
+                        logger.info(f"⏰ Next backup scheduled at {next_run.strftime('%Y-%m-%d %H:%M:%S')} (in {int(wait_seconds)} seconds)")
+                        await asyncio.sleep(wait_seconds)
 
                     # 백업 실행
                     try:
@@ -1727,9 +1748,7 @@ async def backup_scheduler():
                     except Exception as e:
                         logger.error(f"❌ Scheduled backup failed: {e}")
 
-                    # 다음 백업까지 대기
-                    logger.info(f"⏰ Next backup in {wait_time // 3600} hours")
-                    await asyncio.sleep(wait_time)
+                    # 루프 계속 (다음 실행 시간은 루프 시작에서 다시 계산됨)
                 else:
                     # 비활성화 상태면 1분마다 확인
                     await asyncio.sleep(60)
@@ -2242,12 +2261,11 @@ async def index_pdfs(doc_tracker: DocumentTracker, target_index: Optional[str] =
     """
     try:
         # Update progress: Step 1 - Processing documents
-        vector_db.client.hset("reindex:progress", mapping={
-            "step": "문서 처리 중",
-            "progress": "0",
-            "current_item": "",
-            "total_items": "0"
-        })
+        set_reindex_progress(
+            vector_db.client,
+            step="문서 처리 중",
+            progress="0"
+        )
 
         logger.info(f"Processing documents from {DATA_DIR}...")
 
@@ -2276,12 +2294,13 @@ async def index_pdfs(doc_tracker: DocumentTracker, target_index: Optional[str] =
         logger.info(f"📚 Processing {total_documents} documents → {total_chunks} chunks")
 
         # Update progress: Step 2 - Creating embeddings
-        vector_db.client.hset("reindex:progress", mapping={
-            "step": "임베딩 생성 중",
-            "progress": "0",
-            "current_item": "0",
-            "total_items": f"{total_documents}"
-        })
+        set_reindex_progress(
+            vector_db.client,
+            step="임베딩 생성 중",
+            progress="0",
+            current_item="0",
+            total_items=str(total_documents)
+        )
 
         # Create embeddings
         logger.info(f"Creating embeddings for {len(chunks)} chunks...")
@@ -2298,12 +2317,11 @@ async def index_pdfs(doc_tracker: DocumentTracker, target_index: Optional[str] =
             global should_cancel_reindex
             if should_cancel_reindex:
                 logger.warning("🛑 Reindexing cancelled by user")
-                vector_db.client.hset("reindex:progress", mapping={
-                    "step": "취소됨",
-                    "progress": "0",
-                    "current_item": "",
-                    "total_items": ""
-                })
+                set_reindex_progress(
+                    vector_db.client,
+                    step="취소됨",
+                    progress="0"
+                )
                 raise Exception("Reindexing cancelled by user")
 
             batch = texts[i:i + batch_size]
@@ -2325,22 +2343,22 @@ async def index_pdfs(doc_tracker: DocumentTracker, target_index: Optional[str] =
             processed_sources = set(chunk.get("source", "") for chunk in processed_chunks)
             current_documents = len(processed_sources)
 
-            vector_db.client.hset("reindex:progress", mapping={
-                "step": "임베딩 생성 중",
-                "progress": str(progress),
-                "current_item": str(current_documents),
-                "total_items": str(total_documents)
-            })
+            set_reindex_progress(
+                vector_db.client,
+                step="임베딩 생성 중",
+                progress=str(progress),
+                current_item=str(current_documents),
+                total_items=str(total_documents)
+            )
 
         embeddings = np.vstack(embeddings_list)
 
         # Update progress: Step 3 - Adding to database
-        vector_db.client.hset("reindex:progress", mapping={
-            "step": "데이터베이스 저장 중",
-            "progress": "50",
-            "current_item": "",
-            "total_items": ""
-        })
+        set_reindex_progress(
+            vector_db.client,
+            step="데이터베이스 저장 중",
+            progress="50"
+        )
 
         # Add to vector database (use target_index for Blue-Green deployment)
         if target_index:
@@ -2354,12 +2372,11 @@ async def index_pdfs(doc_tracker: DocumentTracker, target_index: Optional[str] =
         await asyncio.sleep(0)
 
         # Update progress: Step 4 - Saving metadata
-        vector_db.client.hset("reindex:progress", mapping={
-            "step": "메타데이터 저장 중",
-            "progress": "90",
-            "current_item": "",
-            "total_items": ""
-        })
+        set_reindex_progress(
+            vector_db.client,
+            step="메타데이터 저장 중",
+            progress="90"
+        )
 
         # Save metadata for future change detection
         logger.info("Saving document metadata...")
@@ -2378,22 +2395,23 @@ async def index_pdfs(doc_tracker: DocumentTracker, target_index: Optional[str] =
         vector_db.save_index_state(index_state)
 
         # Update progress: Completed
-        vector_db.client.hset("reindex:progress", mapping={
-            "step": "완료",
-            "progress": "100",
-            "current_item": str(len(chunks)),
-            "total_items": str(len(chunks))
-        })
+        set_reindex_progress(
+            vector_db.client,
+            step="완료",
+            progress="100",
+            current_item=str(len(chunks)),
+            total_items=str(len(chunks))
+        )
 
         logger.success(f"Indexed {len(chunks)} chunks from {len(set(chunk['filename'] for chunk in chunks))} documents")
     except Exception as e:
-        # Update progress: Error
-        vector_db.client.hset("reindex:progress", mapping={
-            "step": "오류 발생",
-            "progress": "0",
-            "current_item": str(e),
-            "total_items": ""
-        })
+        # Update progress: Error (with 1 hour TTL to auto-clear)
+        set_reindex_progress(
+            vector_db.client,
+            step="오류 발생",
+            progress="0",
+            current_item=str(e)
+        )
         logger.error(f"Failed to index documents: {e}")
         raise
 
@@ -2871,13 +2889,12 @@ async def run_reindex_task():
     import time
     start_time = time.time()
 
-    vector_db.client.hset("reindex:progress", mapping={
-        "step": "준비 중",
-        "progress": "0",
-        "current_item": "",
-        "total_items": "",
-        "start_time": str(start_time)
-    })
+    set_reindex_progress(
+        vector_db.client,
+        step="준비 중",
+        progress="0",
+        start_time=str(start_time)
+    )
 
     # Generate new index name with timestamp
     new_index_name = f"{vector_db.base_index_name}_v{int(start_time)}"
@@ -2891,12 +2908,11 @@ async def run_reindex_task():
         if not vector_db.create_new_index(new_index_name):
             raise Exception("Failed to create new index")
 
-        vector_db.client.hset("reindex:progress", mapping={
-            "step": "새 인덱스 구축 중",
-            "progress": "5",
-            "current_item": "",
-            "total_items": ""
-        })
+        set_reindex_progress(
+            vector_db.client,
+            step="새 인덱스 구축 중",
+            progress="5"
+        )
 
         logger.info("📋 Creating DocumentTracker...")
         doc_tracker = DocumentTracker(data_dir=DATA_DIR)
@@ -2913,12 +2929,11 @@ async def run_reindex_task():
 
         await index_pdfs(doc_tracker, target_index=new_index_name)
 
-        vector_db.client.hset("reindex:progress", mapping={
-            "step": "인덱스 전환 중",
-            "progress": "95",
-            "current_item": "",
-            "total_items": ""
-        })
+        set_reindex_progress(
+            vector_db.client,
+            step="인덱스 전환 중",
+            progress="95"
+        )
 
         logger.info(f"🔄 Swapping indexes: {old_index_name} → {new_index_name}")
         # Atomic swap - instant switch with zero downtime
@@ -2942,12 +2957,11 @@ async def run_reindex_task():
         logger.success(f"   Old index: {old_index_name}")
         logger.success(f"   New index: {new_index_name}")
 
-        vector_db.client.hset("reindex:progress", mapping={
-            "step": "완료",
-            "progress": "100",
-            "current_item": "",
-            "total_items": ""
-        })
+        set_reindex_progress(
+            vector_db.client,
+            step="완료",
+            progress="100"
+        )
 
     except Exception as e:
         logger.error(f"❌ Reindexing failed: {str(e)}")
@@ -2959,13 +2973,12 @@ async def run_reindex_task():
         except:
             pass
 
-        # Update progress to show error
-        vector_db.client.hset("reindex:progress", mapping={
-            "step": "오류 발생",
-            "progress": "0",
-            "current_item": "",
-            "total_items": ""
-        })
+        # Update progress to show error (with 1 hour TTL to auto-clear)
+        set_reindex_progress(
+            vector_db.client,
+            step="오류 발생",
+            progress="0"
+        )
     finally:
         # Clean up building marker
         vector_db.client.delete("index:building")
@@ -3289,6 +3302,44 @@ async def update_user_preferences(
         raise HTTPException(status_code=500, detail=safe_message)
 
 
+# ============================================================================
+# Reindex Progress Helper Functions
+# ============================================================================
+
+def set_reindex_progress(redis_client, step: str, progress: str = "0",
+                        current_item: str = "", total_items: str = "0",
+                        start_time: str = None, ttl: int = 3600):
+    """
+    재색인 진행 상태 설정 (자동 만료 포함)
+
+    Args:
+        redis_client: Redis 클라이언트
+        step: 진행 단계
+        progress: 진행률 (0-100)
+        current_item: 현재 처리 중인 항목
+        total_items: 전체 항목 수
+        start_time: 시작 시간 (선택사항)
+        ttl: 자동 만료 시간 (초, 기본 1시간)
+    """
+    mapping = {
+        "step": step,
+        "progress": progress,
+        "current_item": current_item,
+        "total_items": total_items
+    }
+    if start_time:
+        mapping["start_time"] = start_time
+
+    redis_client.hset("reindex:progress", mapping=mapping)
+    # 자동 만료 설정 (1시간 후 자동 삭제)
+    redis_client.expire("reindex:progress", ttl)
+
+
+def clear_reindex_progress(redis_client):
+    """재색인 진행 상태 초기화"""
+    redis_client.delete("reindex:progress")
+
+
 @app.post("/api/reindex", tags=["Documents"])
 async def reindex(
     request: Request,
@@ -3440,13 +3491,12 @@ async def cancel_reindex(
         should_cancel_reindex = True
         logger.info("🛑 Reindex cancellation requested by user")
 
-        # Update progress to show cancellation
-        vector_db.client.hset("reindex:progress", mapping={
-            "step": "취소 중...",
-            "progress": "0",
-            "current_item": "",
-            "total_items": ""
-        })
+        # Update progress to show cancellation (with 1 hour TTL to auto-clear)
+        set_reindex_progress(
+            vector_db.client,
+            step="취소 중...",
+            progress="0"
+        )
 
         return {
             "message": "재색인 취소가 요청되었습니다",
@@ -3455,6 +3505,36 @@ async def cancel_reindex(
     except Exception as e:
         logger.error(f"❌ Failed to cancel reindexing: {str(e)}")
         safe_message = get_safe_error_message(e, "cancel reindex endpoint")
+        raise HTTPException(status_code=500, detail=safe_message)
+
+
+@app.delete("/api/reindex/progress", tags=["Documents"])
+async def clear_reindex_progress_api(
+    request: Request,
+    user: dict = Depends(require_admin)
+):
+    """
+    재색인 진행 상태 초기화 (관리자 전용)
+
+    에러 상태에 갇힌 진행 상태를 수동으로 초기화합니다.
+    정상적인 경우 TTL에 의해 자동으로 만료되지만,
+    필요시 관리자가 수동으로 초기화할 수 있습니다.
+
+    Returns:
+        - success: 성공 여부
+        - message: 결과 메시지
+    """
+    try:
+        clear_reindex_progress(vector_db.client)
+        logger.info("🧹 Reindex progress state cleared by admin")
+
+        return {
+            "success": True,
+            "message": "진행 상태가 초기화되었습니다"
+        }
+    except Exception as e:
+        logger.error(f"❌ Failed to clear reindex progress: {str(e)}")
+        safe_message = get_safe_error_message(e, "clear reindex progress endpoint")
         raise HTTPException(status_code=500, detail=safe_message)
 
 

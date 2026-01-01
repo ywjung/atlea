@@ -1083,6 +1083,9 @@
                     🔍 모니터링 ▾
                 </button>
                 <div class="tab-dropdown-menu" id="dropdown-monitoring">
+                    <button class="tab-dropdown-item" onclick="switchTab('login-history')">
+                        🔑 로그인 히스토리
+                    </button>
                     <button class="tab-dropdown-item" onclick="switchTab('logs')">
                         🔐 보안 로그
                     </button>
@@ -1186,12 +1189,13 @@
                             <th>역할</th>
                             <th>가입일</th>
                             <th>마지막 로그인</th>
+                            <th>2FA QR</th>
                             <th>작업</th>
                         </tr>
                     </thead>
                     <tbody id="usersTableBody">
                         <tr>
-                            <td colspan="7" style="text-align: center; padding: 40px;">
+                            <td colspan="8" style="text-align: center; padding: 40px;">
                                 <div class="loading">사용자 목록 로딩 중</div>
                             </td>
                         </tr>
@@ -1203,6 +1207,83 @@
                 <button id="prevPage" onclick="changePage(-1)">이전</button>
                 <span class="page-info" id="pageInfo">1 / 1</span>
                 <button id="nextPage" onclick="changePage(1)">다음</button>
+            </div>
+        </div>
+
+        <!-- Login History Tab -->
+        <div id="login-history-tab" class="tab-content">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h2>🔑 로그인 히스토리</h2>
+                <button class="btn btn-primary" onclick="loadLoginHistory(true)">새로고침</button>
+            </div>
+
+            <!-- 필터 컨트롤 -->
+            <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap; margin-bottom: 15px;">
+                    <!-- 사용자 필터 -->
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <label for="loginHistoryUserFilter" style="font-weight: 500;">👤 사용자:</label>
+                        <select id="loginHistoryUserFilter" onchange="applyLoginHistoryFilters()" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; background: white; min-width: 200px;">
+                            <option value="">전체 사용자</option>
+                        </select>
+                    </div>
+
+                    <!-- 상태 필터 -->
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <label for="loginHistoryStatusFilter" style="font-weight: 500;">📊 상태:</label>
+                        <select id="loginHistoryStatusFilter" onchange="applyLoginHistoryFilters()" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; background: white;">
+                            <option value="">전체</option>
+                            <option value="success">✅ 성공</option>
+                            <option value="failed">❌ 실패</option>
+                            <option value="blocked">🚫 차단</option>
+                        </select>
+                    </div>
+
+                    <!-- 기간 선택 -->
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <label style="font-weight: 500;">📅 기간:</label>
+                        <button class="btn btn-secondary" onclick="setLoginHistoryTimeRange('24h')" style="padding: 6px 12px; font-size: 0.9em;">24시간</button>
+                        <button class="btn btn-secondary" onclick="setLoginHistoryTimeRange('7d')" style="padding: 6px 12px; font-size: 0.9em;">7일</button>
+                        <button class="btn btn-secondary" onclick="setLoginHistoryTimeRange('30d')" style="padding: 6px 12px; font-size: 0.9em;">30일</button>
+                    </div>
+
+                    <button class="btn btn-secondary" onclick="clearLoginHistoryFilters()" style="padding: 8px 16px;">필터 초기화</button>
+                </div>
+            </div>
+
+            <!-- 통계 -->
+            <div id="loginHistoryStats" style="margin-bottom: 15px; padding: 10px; background: #e3f2fd; border-radius: 4px; display: none;">
+                <span style="font-weight: 500;">📊 통계:</span>
+                <span id="loginHistoryTotalCount" style="margin-left: 10px;">전체: 0</span>
+                <span id="loginHistorySuccessCount" style="margin-left: 20px; color: #28a745;">✅ 성공: 0</span>
+                <span id="loginHistoryFailedCount" style="margin-left: 20px; color: #dc3545;">❌ 실패: 0</span>
+                <span id="loginHistoryBlockedCount" style="margin-left: 20px; color: #ffc107;">🚫 차단: 0</span>
+            </div>
+
+            <!-- 로그인 히스토리 테이블 -->
+            <div style="overflow-x: auto;">
+                <table id="loginHistoryTable">
+                    <thead>
+                        <tr>
+                            <th style="width: 240px; white-space: nowrap;">시간</th>
+                            <th style="width: 200px;">사용자</th>
+                            <th style="width: 120px;">IP 주소</th>
+                            <th style="width: 100px;">상태</th>
+                            <th>실패 사유</th>
+                        </tr>
+                    </thead>
+                    <tbody id="loginHistoryTableBody">
+                        <tr>
+                            <td colspan="5" style="text-align: center; padding: 40px; color: #666;">
+                                로그인 히스토리를 불러오는 중...
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- 페이지네이션 -->
+            <div id="loginHistoryPagination" style="margin-top: 20px; text-align: center;">
             </div>
         </div>
 
@@ -1735,19 +1816,39 @@
                     <div id="captcha-success" class="message success-message"></div>
 
                     <div style="background: #f9fafb; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                        <!-- 로그인 CAPTCHA 토글 -->
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid #e5e7eb;">
                             <div>
-                                <h4 style="margin: 0 0 5px 0;">CAPTCHA 상태</h4>
+                                <h4 style="margin: 0 0 5px 0;">🔐 로그인 CAPTCHA</h4>
                                 <p style="margin: 0; color: #666; font-size: 14px;">
-                                    봇 공격 방지 기능 (Google reCAPTCHA v3)
+                                    로그인 페이지에 CAPTCHA 적용
                                 </p>
                             </div>
                             <div style="display: flex; align-items: center; gap: 15px;">
-                                <span id="captchaStatus" style="font-size: 14px; font-weight: 600; padding: 6px 12px; border-radius: 20px; background: #e5e7eb; color: #6b7280;">
+                                <span id="captchaLoginStatus" style="font-size: 14px; font-weight: 600; padding: 6px 12px; border-radius: 20px; background: #e5e7eb; color: #6b7280;">
                                     확인 중...
                                 </span>
                                 <label class="switch">
-                                    <input type="checkbox" id="captchaToggle" onchange="toggleCaptcha()">
+                                    <input type="checkbox" id="captchaLoginToggle" onchange="toggleCaptcha('login')">
+                                    <span class="slider round"></span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- 회원가입 CAPTCHA 토글 -->
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                            <div>
+                                <h4 style="margin: 0 0 5px 0;">✍️ 회원가입 CAPTCHA</h4>
+                                <p style="margin: 0; color: #666; font-size: 14px;">
+                                    회원가입 페이지에 CAPTCHA 적용
+                                </p>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 15px;">
+                                <span id="captchaRegisterStatus" style="font-size: 14px; font-weight: 600; padding: 6px 12px; border-radius: 20px; background: #e5e7eb; color: #6b7280;">
+                                    확인 중...
+                                </span>
+                                <label class="switch">
+                                    <input type="checkbox" id="captchaRegisterToggle" onchange="toggleCaptcha('register')">
                                     <span class="slider round"></span>
                                 </label>
                             </div>
@@ -1755,12 +1856,12 @@
 
                         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; margin-top: 15px;">
                             <div style="background: white; padding: 15px; border-radius: 6px;">
-                                <div style="font-size: 12px; color: #666; margin-bottom: 5px;">설정 상태</div>
-                                <div id="captchaConfigStatus" style="font-size: 16px; font-weight: 600; color: #667eea;">-</div>
+                                <div style="font-size: 12px; color: #666; margin-bottom: 5px;">CAPTCHA 유형</div>
+                                <div id="captchaType" style="font-size: 12px; font-weight: 500; color: #666; word-break: break-all;">이미지 기반 수학 문제</div>
                             </div>
                             <div style="background: white; padding: 15px; border-radius: 6px;">
-                                <div style="font-size: 12px; color: #666; margin-bottom: 5px;">Site Key</div>
-                                <div id="captchaSiteKey" style="font-size: 12px; font-weight: 500; color: #666; word-break: break-all;">-</div>
+                                <div style="font-size: 12px; color: #666; margin-bottom: 5px;">설정 상태</div>
+                                <div id="captchaConfigStatus" style="font-size: 16px; font-weight: 600; color: #667eea;">-</div>
                             </div>
                         </div>
                     </div>
@@ -1768,24 +1869,164 @@
                     <div style="background: #f0f7ff; border-left: 4px solid #3b82f6; padding: 15px;">
                         <strong>ℹ️ CAPTCHA 정보:</strong>
                         <ul style="margin: 10px 0 0 0; padding-left: 20px; font-size: 14px; color: #666;">
-                            <li><strong>Google reCAPTCHA v3:</strong> 사용자 상호작용 없이 백그라운드에서 봇을 감지합니다</li>
-                            <li><strong>점수 기반 평가:</strong> 0.0~1.0 점수로 사용자를 평가 (0.5 이상이면 정상 사용자로 판단)</li>
-                            <li><strong>적용 대상:</strong> 로그인 및 회원가입 페이지에서 자동으로 작동합니다</li>
-                            <li><strong>설정 방법:</strong>
-                                <ol style="margin: 5px 0 0 0; padding-left: 20px;">
-                                    <li><a href="https://www.google.com/recaptcha/admin" target="_blank" style="color: #667eea;">Google reCAPTCHA</a>에서 사이트 등록</li>
-                                    <li>reCAPTCHA v3 선택</li>
-                                    <li>Site Key와 Secret Key를 환경변수에 설정:
-                                        <ul style="margin: 5px 0 0 0; padding-left: 20px; font-family: monospace; font-size: 12px;">
-                                            <li>RECAPTCHA_SITE_KEY=your_site_key</li>
-                                            <li>RECAPTCHA_SECRET_KEY=your_secret_key</li>
-                                        </ul>
-                                    </li>
-                                    <li>서버 재시작 후 관리자 페이지에서 활성화</li>
-                                </ol>
+                            <li><strong>이미지 기반 수학 문제 CAPTCHA:</strong> 이미지로 렌더링된 덧셈/뺄셈 문제로 봇을 차단하는 내부망용 CAPTCHA 시스템</li>
+                            <li><strong>내부망 지원:</strong> 인터넷 연결 없이 동작하므로 폐쇄망 환경에서 사용 가능</li>
+                            <li><strong>문제 유형:</strong> 1~20 범위의 덧셈/뺄셈 문제를 무작위로 생성하여 이미지화 (예: "7 + 3 = ?")</li>
+                            <li><strong>적용 대상:</strong> 로그인 및 회원가입 페이지에서 사용자에게 이미지 기반 수학 문제 제시</li>
+                            <li><strong>보안 기능:</strong>
+                                <ul style="margin: 5px 0 0 0; padding-left: 20px;">
+                                    <li>문제별 고유 ID로 세션 관리</li>
+                                    <li>5분 자동 만료로 무차별 대입 공격 차단</li>
+                                    <li>1회 사용 후 자동 삭제로 재사용 공격 방지</li>
+                                    <li>이미지화로 DOM 파싱 및 자동 읽기 방지</li>
+                                    <li>문자 회전, 노이즈, 왜곡으로 OCR 공격 차단</li>
+                                    <li>새로고침 버튼으로 새 문제 생성 가능</li>
+                                </ul>
                             </li>
-                            <li><strong>보안 효과:</strong> 자동화된 봇 공격, 무차별 대입 공격(Brute Force)을 효과적으로 차단합니다</li>
-                            <li><strong>사용자 경험:</strong> v3는 체크박스나 이미지 선택 없이 자동으로 작동하여 UX를 해치지 않습니다</li>
+                            <li><strong>보안 효과:</strong> 자동화된 봇 공격, 무차별 대입 공격(Brute Force), OCR 기반 우회를 효과적으로 차단</li>
+                            <li><strong>사용자 경험:</strong> 간단한 수학 문제로 사람과 봇을 구분하며, 시각적으로 명확한 UI 제공</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 2FA (Google OTP) Settings -->
+            <div class="card" style="margin-bottom: 20px;">
+                <div class="card-header">
+                    <h3 style="margin: 0;">🔐 2차 인증 (Google OTP) 설정</h3>
+                </div>
+                <div class="card-body">
+                    <div id="totp-error" class="message error-message"></div>
+                    <div id="totp-success" class="message success-message"></div>
+
+                    <div style="background: #f9fafb; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+                        <!-- 2FA 토글 -->
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                            <div>
+                                <h4 style="margin: 0 0 5px 0;">📱 Google OTP 2차 인증</h4>
+                                <p style="margin: 0; color: #666; font-size: 14px;">
+                                    로그인 시 Google Authenticator OTP 인증 필요
+                                </p>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 15px;">
+                                <span id="totpStatus" style="font-size: 14px; font-weight: 600; padding: 6px 12px; border-radius: 20px; background: #e5e7eb; color: #6b7280;">
+                                    확인 중...
+                                </span>
+                                <label class="switch">
+                                    <input type="checkbox" id="totpToggle" onchange="toggleTotp()">
+                                    <span class="slider round"></span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; margin-top: 15px;">
+                            <div style="background: white; padding: 15px; border-radius: 6px;">
+                                <div style="font-size: 12px; color: #666; margin-bottom: 5px;">인증 유형</div>
+                                <div id="totpType" style="font-size: 12px; font-weight: 500; color: #666;">TOTP (Time-based OTP)</div>
+                            </div>
+                            <div style="background: white; padding: 15px; border-radius: 6px;">
+                                <div style="font-size: 12px; color: #666; margin-bottom: 5px;">설정 상태</div>
+                                <div id="totpConfigStatus" style="font-size: 16px; font-weight: 600; color: #667eea;">-</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style="background: #f0f7ff; border-left: 4px solid #3b82f6; padding: 15px;">
+                        <strong>ℹ️ 2차 인증 정보:</strong>
+                        <ul style="margin: 10px 0 0 0; padding-left: 20px; font-size: 14px; color: #666;">
+                            <li><strong>Google OTP (TOTP):</strong> Google Authenticator 앱과 호환되는 시간 기반 일회용 비밀번호</li>
+                            <li><strong>설정 방법:</strong> 사용자 목록에서 각 사용자의 QR 코드를 스캔하여 Google Authenticator에 계정 추가</li>
+                            <li><strong>로그인 방식:</strong> 2FA 활성화 시, 비밀번호 입력 후 Google Authenticator의 6자리 코드 입력 필요</li>
+                            <li><strong>보안 기능:</strong>
+                                <ul style="margin: 5px 0 0 0; padding-left: 20px;">
+                                    <li>30초마다 갱신되는 6자리 일회용 코드</li>
+                                    <li>시간 기반 알고리즘으로 서버와 동기화</li>
+                                    <li>사용자별 고유 Secret Key로 보안 강화</li>
+                                    <li>±30초 시간 오차 허용으로 안정적 인증</li>
+                                    <li>QR 코드를 통한 간편한 초기 설정</li>
+                                </ul>
+                            </li>
+                            <li><strong>보안 효과:</strong> 비밀번호 유출 시에도 추가 인증 요구로 계정 보호</li>
+                            <li><strong>관리 기능:</strong> 사용자 목록에서 QR 코드 확인 및 Secret 재생성 가능</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Brute Force Protection Settings -->
+            <div class="card" style="margin-bottom: 20px;">
+                <div class="card-header">
+                    <h3 style="margin: 0;">🛡️ 브루트 포스 보호 설정</h3>
+                </div>
+                <div class="card-body">
+                    <div id="bf-error" class="message error-message"></div>
+                    <div id="bf-success" class="message success-message"></div>
+
+                    <div style="background: #f9fafb; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+                        <h4 style="margin: 0 0 15px 0;">🔐 계정 보호 설정</h4>
+
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px;">
+                            <div style="background: white; padding: 15px; border-radius: 6px;">
+                                <label style="display: block; font-size: 12px; color: #666; margin-bottom: 8px;">
+                                    계정 최대 실패 횟수
+                                </label>
+                                <input type="number" id="bfMaxAttempts" min="1" max="100"
+                                    style="width: 100%; padding: 8px; border: 1px solid #e5e7eb; border-radius: 4px;"
+                                    placeholder="5">
+                                <div style="font-size: 11px; color: #999; margin-top: 5px;">범위: 1-100회</div>
+                            </div>
+
+                            <div style="background: white; padding: 15px; border-radius: 6px;">
+                                <label style="display: block; font-size: 12px; color: #666; margin-bottom: 8px;">
+                                    계정 잠금 시간 (분)
+                                </label>
+                                <input type="number" id="bfLockoutMinutes" min="1" max="1440"
+                                    style="width: 100%; padding: 8px; border: 1px solid #e5e7eb; border-radius: 4px;"
+                                    placeholder="15">
+                                <div style="font-size: 11px; color: #999; margin-top: 5px;">범위: 1-1440분</div>
+                            </div>
+
+                            <div style="background: white; padding: 15px; border-radius: 6px;">
+                                <label style="display: block; font-size: 12px; color: #666; margin-bottom: 8px;">
+                                    IP 최대 실패 횟수
+                                </label>
+                                <input type="number" id="bfIpMaxAttempts" min="1" max="1000"
+                                    style="width: 100%; padding: 8px; border: 1px solid #e5e7eb; border-radius: 4px;"
+                                    placeholder="10">
+                                <div style="font-size: 11px; color: #999; margin-top: 5px;">범위: 1-1000회</div>
+                            </div>
+
+                            <div style="background: white; padding: 15px; border-radius: 6px;">
+                                <label style="display: block; font-size: 12px; color: #666; margin-bottom: 8px;">
+                                    IP 차단 시간 (분)
+                                </label>
+                                <input type="number" id="bfIpLockoutMinutes" min="1" max="1440"
+                                    style="width: 100%; padding: 8px; border: 1px solid #e5e7eb; border-radius: 4px;"
+                                    placeholder="30">
+                                <div style="font-size: 11px; color: #999; margin-top: 5px;">범위: 1-1440분</div>
+                            </div>
+                        </div>
+
+                        <button onclick="saveBruteForceConfig()"
+                            style="width: 100%; padding: 12px; background: #10b981; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">
+                            💾 설정 저장
+                        </button>
+                    </div>
+
+                    <div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px;">
+                        <strong>⚠️ 브루트 포스 보호 정보:</strong>
+                        <ul style="margin: 10px 0 0 0; padding-left: 20px; font-size: 14px; color: #666;">
+                            <li><strong>계정 보호:</strong> 동일 계정에 대한 반복적인 로그인 실패 시 계정을 일시적으로 잠금</li>
+                            <li><strong>IP 보호:</strong> 동일 IP에서 여러 계정 대상 무차별 대입 공격 차단</li>
+                            <li><strong>권장 설정:</strong>
+                                <ul style="margin: 5px 0 0 0; padding-left: 20px;">
+                                    <li>계정 최대 실패: 3-5회 (너무 낮으면 정상 사용자 불편)</li>
+                                    <li>계정 잠금 시간: 10-30분 (보안과 편의성 균형)</li>
+                                    <li>IP 최대 실패: 10-20회 (계정보다 관대하게)</li>
+                                    <li>IP 차단 시간: 30-60분 (공격자 제재)</li>
+                                </ul>
+                            </li>
+                            <li><strong>효과:</strong> 자동화된 비밀번호 추측 공격 및 계정 탈취 시도 방어</li>
                         </ul>
                     </div>
                 </div>
@@ -2018,6 +2259,16 @@
                         <button id="adminReindexBtn" onclick="adminStartReindex()" style="padding: 12px 24px; background: #667eea; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: 600;">
                             🔄 재색인 시작
                         </button>
+                        <button id="adminClearProgressBtn" onclick="adminClearReindexProgress()" style="padding: 12px 24px; background: #6c757d; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: 600; margin-left: 10px;">
+                            🧹 진행 상태 초기화
+                        </button>
+                    </div>
+
+                    <div style="margin-top: 15px; padding: 12px; background: #e7f3ff; border-left: 4px solid #2196f3; border-radius: 4px;">
+                        <p style="margin: 0; color: #1565c0; font-size: 14px;">
+                            <strong>💡 Tip:</strong> 재색인 에러 상태가 지속되면 "진행 상태 초기화" 버튼을 클릭하세요.
+                            에러 상태는 1시간 후 자동으로 초기화되지만, 즉시 초기화가 필요한 경우 이 버튼을 사용할 수 있습니다.
+                        </p>
                     </div>
 
                     <div id="adminReindexProgress" style="display: none; margin-top: 30px; padding: 20px; background: #f8f9fa; border-radius: 8px;">
@@ -2430,7 +2681,23 @@
                         <li><strong>백그라운드:</strong> 재색인 중에도 챗봇 정상 사용 가능</li>
                     </ul>
 
-                    <div style="margin-top: 20px; padding: 15px; background: #fff3cd; border-left: 4px solid #ffc107; border-radius: 4px;">
+                    <h4 style="color: #667eea; margin: 20px 0 15px 0;">🔄 자동 복구 기능 (NEW)</h4>
+                    <ul style="line-height: 1.8; color: #444;">
+                        <li><strong>자동 만료:</strong> 에러 발생 시 1시간 후 진행 상태 자동 초기화</li>
+                        <li><strong>무한 폴링 방지:</strong> 에러 상태가 영구히 남지 않도록 TTL 적용</li>
+                        <li><strong>수동 초기화:</strong> 필요시 진행 상태를 즉시 초기화 가능</li>
+                        <li><strong>안정성 향상:</strong> 서버 재시작 없이 자동으로 정상 상태 복구</li>
+                    </ul>
+
+                    <div style="margin-top: 20px; padding: 15px; background: #e7f3ff; border-left: 4px solid #2196f3; border-radius: 4px;">
+                        <p style="margin: 0 0 10px 0; color: #1565c0;"><strong>💡 개선된 기능:</strong></p>
+                        <p style="margin: 0; color: #1565c0; line-height: 1.6;">
+                            재색인 중 에러가 발생해도 1시간 후 자동으로 정상 상태로 복구됩니다.
+                            긴급한 경우 재색인 탭의 "진행 상태 초기화" 버튼으로 즉시 초기화할 수 있습니다.
+                        </p>
+                    </div>
+
+                    <div style="margin-top: 15px; padding: 15px; background: #fff3cd; border-left: 4px solid #ffc107; border-radius: 4px;">
                         <p style="margin: 0; color: #856404;"><strong>⚠️ 주의:</strong> 재색인 중에는 새로운 문서를 업로드하지 마세요. 완료 후 업로드를 권장합니다.</p>
                     </div>
                 </div>
@@ -2461,6 +2728,14 @@
                     <ul style="line-height: 1.8; color: #444;">
                         <li><strong>원인:</strong> 대용량 문서, 느린 모델, 캐시 미사용</li>
                         <li><strong>해결:</strong> 더 작은 모델 선택, 캐시 활성화, 문서 분할</li>
+                    </ul>
+
+                    <h4 style="color: #dc3545; margin: 20px 0 15px 0;">❌ 재색인 에러 상태 지속 (NEW)</h4>
+                    <ul style="line-height: 1.8; color: #444;">
+                        <li><strong>증상:</strong> "오류 발생" 상태가 계속되며 무한 폴링</li>
+                        <li><strong>자동 해결:</strong> 1시간 후 자동으로 진행 상태 초기화됨</li>
+                        <li><strong>수동 해결:</strong> 재색인 탭의 "진행 상태 초기화" 버튼 클릭</li>
+                        <li><strong>예방:</strong> TTL 기반 자동 만료로 영구 에러 상태 방지</li>
                     </ul>
 
                     <h4 style="color: #dc3545; margin: 20px 0 15px 0;">❌ 모델 목록 로드 실패</h4>
@@ -3041,6 +3316,51 @@
         </div>
     </div>
 
+    <!-- User TOTP QR Code Modal -->
+    <div id="userTotpModal" class="modal">
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header">
+                <h2>🔐 Google OTP 설정</h2>
+                <button class="modal-close" onclick="closeUserTotpModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div style="text-align: center;">
+                    <div style="margin-bottom: 20px;">
+                        <h3 id="userTotpEmail" style="margin: 0 0 10px 0; color: #667eea;"></h3>
+                        <p style="color: #666; font-size: 14px; margin: 0;">
+                            Google Authenticator 앱으로 아래 QR 코드를 스캔하세요
+                        </p>
+                    </div>
+
+                    <div id="userTotpQrContainer" style="margin: 20px 0;">
+                        <div style="text-align: center; padding: 40px; color: #666;">
+                            QR 코드를 불러오는 중...
+                        </div>
+                    </div>
+
+                    <div style="background: #f0f7ff; border-left: 4px solid #3b82f6; padding: 15px; text-align: left; margin-top: 20px;">
+                        <strong>ℹ️ 설정 방법:</strong>
+                        <ol style="margin: 10px 0 0 0; padding-left: 20px; font-size: 14px; color: #666;">
+                            <li>Google Authenticator 앱을 설치합니다</li>
+                            <li>앱에서 "QR 코드 스캔" 또는 "+" 버튼을 탭합니다</li>
+                            <li>위의 QR 코드를 카메라로 스캔합니다</li>
+                            <li>앱에 표시되는 6자리 코드를 로그인 시 입력합니다</li>
+                        </ol>
+                    </div>
+
+                    <div style="margin-top: 20px; display: flex; gap: 10px; justify-content: center;">
+                        <button id="resetTotpBtn" class="btn btn-danger" onclick="resetUserTotpConfirm()">
+                            🔄 Secret 재생성
+                        </button>
+                        <button class="btn btn-secondary" onclick="closeUserTotpModal()">
+                            닫기
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="/static/auth.js?v=2025-12-28-FIX-REDIRECT-LOOP"></script>
     <script src="/static/group-manager.js"></script>
     <script>
@@ -3178,7 +3498,7 @@
             const tbody = document.getElementById('usersTableBody');
 
             if (data.users.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 40px;">사용자가 없습니다</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 40px;">사용자가 없습니다</td></tr>';
                 return;
             }
 
@@ -3203,6 +3523,12 @@
                         </td>
                         <td>${createdAt}</td>
                         <td>${lastLogin}</td>
+                        <td style="text-align: center;">
+                            <button class="action-btn" onclick="showUserTotp('${u.user_id}')"
+                                    style="background: #667eea; color: white; padding: 6px 12px; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">
+                                📱 QR 보기
+                            </button>
+                        </td>
                         <td>
                             ${!isCurrentUser ? `
                                 <div class="action-buttons">
@@ -3428,6 +3754,9 @@
                 loadDashboard();  // 통합 API 사용
             } else if (tabName === 'users') {
                 loadUsers();
+            } else if (tabName === 'login-history') {
+                populateLoginHistoryUserFilter();
+                loadLoginHistory();
             } else if (tabName === 'logs') {
                 loadLogs();
             } else if (tabName === 'audit') {
@@ -3783,6 +4112,221 @@
 
         function goToMain() {
             window.location.href = '/';
+        }
+
+        // ====================================================================
+        // 로그인 히스토리 관리 함수
+        // ====================================================================
+
+        let loginHistoryData = [];
+        let loginHistoryCurrentPage = 1;
+        let loginHistoryPageSize = 50;
+        let loginHistoryFilters = {
+            user_id: '',
+            status: '',
+            start_time: '',
+            end_time: ''
+        };
+
+        // 로그인 히스토리 로드
+        async function loadLoginHistory(forceRefresh = false) {
+            try {
+                // 쿼리 파라미터 구성
+                const params = new URLSearchParams();
+                params.append('page', loginHistoryCurrentPage);
+                params.append('page_size', loginHistoryPageSize);
+
+                if (loginHistoryFilters.user_id) params.append('user_id', loginHistoryFilters.user_id);
+                if (loginHistoryFilters.status) params.append('status', loginHistoryFilters.status);
+                if (loginHistoryFilters.start_time) params.append('start_time', loginHistoryFilters.start_time);
+                if (loginHistoryFilters.end_time) params.append('end_time', loginHistoryFilters.end_time);
+
+                const url = `/api/auth/admin/login-history?${params.toString()}`;
+                console.log('Loading login history:', url);
+
+                const data = await Auth.apiCall(url);
+                console.log('Login history response:', data);
+
+                loginHistoryData = data.history || [];
+                displayLoginHistory(data);
+                updateLoginHistoryStats(data.history || []);
+
+            } catch (error) {
+                console.error('Failed to load login history:', error);
+                document.getElementById('loginHistoryTableBody').innerHTML = `
+                    <tr>
+                        <td colspan="5" style="text-align: center; padding: 40px; color: var(--danger-color);">
+                            로그인 히스토리를 불러오는데 실패했습니다
+                        </td>
+                    </tr>
+                `;
+            }
+        }
+
+        // 로그인 히스토리 표시
+        function displayLoginHistory(data) {
+            const tbody = document.getElementById('loginHistoryTableBody');
+            const { history = [], total = 0, page = 1, total_pages = 1 } = data;
+
+            if (history.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="5" style="text-align: center; padding: 40px; color: #666;">
+                            로그인 히스토리가 없습니다
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+
+            tbody.innerHTML = history.map(entry => {
+                const timestamp = new Date(entry.timestamp).toLocaleString('ko-KR');
+                const statusIcon = entry.status === 'success' ? '✅' : (entry.status === 'failed' ? '❌' : '🚫');
+                const statusText = entry.status === 'success' ? '성공' : (entry.status === 'failed' ? '실패' : '차단');
+                const statusColor = entry.status === 'success' ? '#28a745' : (entry.status === 'failed' ? '#dc3545' : '#ffc107');
+
+                return `
+                    <tr>
+                        <td style="white-space: nowrap;">${timestamp}</td>
+                        <td>
+                            ${entry.email || 'N/A'}<br>
+                            <small style="color: #666;">(${entry.username || 'N/A'})</small>
+                        </td>
+                        <td>${entry.ip_address || 'N/A'}</td>
+                        <td style="color: ${statusColor}; font-weight: 500;">${statusIcon} ${statusText}</td>
+                        <td>${entry.failure_reason || '-'}</td>
+                    </tr>
+                `;
+            }).join('');
+
+            // 페이지네이션 업데이트
+            updateLoginHistoryPagination(page, total_pages, total);
+        }
+
+        // 로그인 히스토리 통계 업데이트
+        function updateLoginHistoryStats(history) {
+            if (!history || history.length === 0) {
+                document.getElementById('loginHistoryStats').style.display = 'none';
+                return;
+            }
+
+            const stats = {
+                total: history.length,
+                success: history.filter(e => e.status === 'success').length,
+                failed: history.filter(e => e.status === 'failed').length,
+                blocked: history.filter(e => e.status === 'blocked').length
+            };
+
+            document.getElementById('loginHistoryTotalCount').textContent = `전체: ${stats.total}`;
+            document.getElementById('loginHistorySuccessCount').textContent = `✅ 성공: ${stats.success}`;
+            document.getElementById('loginHistoryFailedCount').textContent = `❌ 실패: ${stats.failed}`;
+            document.getElementById('loginHistoryBlockedCount').textContent = `🚫 차단: ${stats.blocked}`;
+            document.getElementById('loginHistoryStats').style.display = 'block';
+        }
+
+        // 페이지네이션 업데이트
+        function updateLoginHistoryPagination(currentPage, totalPages, totalRecords) {
+            const pagination = document.getElementById('loginHistoryPagination');
+
+            if (totalPages <= 1) {
+                pagination.innerHTML = '';
+                return;
+            }
+
+            let html = '<div style="display: flex; align-items: center; justify-content: center; gap: 10px;">';
+
+            // 이전 버튼
+            if (currentPage > 1) {
+                html += `<button class="btn btn-secondary" onclick="changeLoginHistoryPage(${currentPage - 1})">◀ 이전</button>`;
+            }
+
+            // 페이지 번호
+            html += `<span style="padding: 0 15px;">페이지 ${currentPage} / ${totalPages} (총 ${totalRecords}개)</span>`;
+
+            // 다음 버튼
+            if (currentPage < totalPages) {
+                html += `<button class="btn btn-secondary" onclick="changeLoginHistoryPage(${currentPage + 1})">다음 ▶</button>`;
+            }
+
+            html += '</div>';
+            pagination.innerHTML = html;
+        }
+
+        // 페이지 변경
+        function changeLoginHistoryPage(page) {
+            loginHistoryCurrentPage = page;
+            loadLoginHistory();
+        }
+
+        // 필터 적용
+        function applyLoginHistoryFilters() {
+            const userFilter = document.getElementById('loginHistoryUserFilter').value;
+            const statusFilter = document.getElementById('loginHistoryStatusFilter').value;
+
+            loginHistoryFilters.user_id = userFilter;
+            loginHistoryFilters.status = statusFilter;
+            loginHistoryCurrentPage = 1; // 필터 변경 시 첫 페이지로
+            loadLoginHistory();
+        }
+
+        // 시간 범위 설정
+        function setLoginHistoryTimeRange(range) {
+            const now = new Date();
+            let startTime = null;
+
+            switch(range) {
+                case '24h':
+                    startTime = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+                    break;
+                case '7d':
+                    startTime = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+                    break;
+                case '30d':
+                    startTime = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+                    break;
+            }
+
+            if (startTime) {
+                loginHistoryFilters.start_time = startTime.toISOString();
+                loginHistoryFilters.end_time = now.toISOString();
+            } else {
+                loginHistoryFilters.start_time = '';
+                loginHistoryFilters.end_time = '';
+            }
+
+            loginHistoryCurrentPage = 1;
+            loadLoginHistory();
+        }
+
+        // 필터 초기화
+        function clearLoginHistoryFilters() {
+            document.getElementById('loginHistoryUserFilter').value = '';
+            document.getElementById('loginHistoryStatusFilter').value = '';
+            loginHistoryFilters = {
+                user_id: '',
+                status: '',
+                start_time: '',
+                end_time: ''
+            };
+            loginHistoryCurrentPage = 1;
+            loadLoginHistory();
+        }
+
+        // 사용자 목록을 필터 드롭다운에 채우기
+        async function populateLoginHistoryUserFilter() {
+            try {
+                const data = await Auth.apiCall('/api/auth/admin/users?page=1&page_size=1000');
+                const select = document.getElementById('loginHistoryUserFilter');
+
+                if (data && data.users) {
+                    const options = data.users.map(user =>
+                        `<option value="${user.user_id}">${user.email} (${user.username})</option>`
+                    ).join('');
+                    select.innerHTML = '<option value="">전체 사용자</option>' + options;
+                }
+            } catch (error) {
+                console.error('Failed to load users for filter:', error);
+            }
         }
 
         // ====================================================================
@@ -4924,6 +5468,8 @@
                 adminLoadSystemPrompt();
                 loadRateLimitConfig();
                 loadCaptchaConfig();
+                loadTotpConfig();
+                loadBruteForceConfig();
             }
             if (tabName === 'documents') {
                 adminLoadDocuments();
@@ -6062,6 +6608,44 @@
             }
         }
 
+        async function adminClearReindexProgress() {
+            if (!confirm('재색인 진행 상태를 초기화하시겠습니까?\n\n⚠️ 이 작업은 에러 상태에 갇힌 진행 상태를 즉시 제거합니다.\n정상적으로는 1시간 후 자동으로 초기화됩니다.')) {
+                return;
+            }
+
+            try {
+                const result = await Auth.apiCall('/api/reindex/progress', {
+                    method: 'DELETE'
+                });
+
+                // 폴링 중지
+                if (reindexInterval) {
+                    clearInterval(reindexInterval);
+                    reindexInterval = null;
+                }
+
+                // 진행률 숨김
+                const progressDiv = document.getElementById('adminReindexProgress');
+                if (progressDiv) progressDiv.style.display = 'none';
+
+                // 버튼 상태 복원
+                const startBtn = document.getElementById('adminReindexBtn');
+                if (startBtn) {
+                    startBtn.disabled = false;
+                    startBtn.textContent = '🔄 재색인 시작';
+                    startBtn.style.opacity = '1';
+                    startBtn.style.cursor = 'pointer';
+                }
+
+                Auth.showSuccess('✅ ' + result.message);
+                setTimeout(() => Auth.hideSuccess(), 3000);
+
+            } catch (error) {
+                console.error('Error clearing reindex progress:', error);
+                Auth.showError('진행 상태 초기화에 실패했습니다: ' + error.message);
+            }
+        }
+
         // ============================================
         // 청크 뷰어 기능
         // ============================================
@@ -7027,7 +7611,7 @@
                 // Get the latest backup info from backups array
                 if (backups && backups.length > 0) {
                     const latestBackup = backups[0]; // Backups are sorted by created_at DESC
-                    const backupType = latestBackup.backup_type === 'auto' ? '자동' : '수동';
+                    const backupType = latestBackup.type === 'auto' ? '자동' : '수동';
                     lastBackup = `${formatBackupTime(latestBackup.created_at)} (${backupType})`;
                 } else {
                     lastBackup = '없음';
@@ -7482,14 +8066,16 @@
                 const data = await Auth.apiCall('/api/admin/captcha');
 
                 // UI 업데이트
-                document.getElementById('captchaToggle').checked = data.enabled;
-                document.getElementById('captchaSiteKey').textContent =
-                    data.site_key || '설정되지 않음';
+                document.getElementById('captchaLoginToggle').checked = data.login_enabled;
+                document.getElementById('captchaRegisterToggle').checked = data.register_enabled;
+                document.getElementById('captchaType').textContent =
+                    data.type === 'image_math' ? '이미지 기반 수학 문제' : '설정되지 않음';
                 document.getElementById('captchaConfigStatus').textContent =
                     data.configured ? '✅ 설정 완료' : '⚠️ 미설정';
 
                 // 상태 표시 업데이트
-                updateCaptchaStatus(data.enabled);
+                updateCaptchaStatus('login', data.login_enabled);
+                updateCaptchaStatus('register', data.register_enabled);
 
             } catch (error) {
                 console.error('Error loading CAPTCHA config:', error);
@@ -7499,19 +8085,30 @@
 
         /**
          * CAPTCHA 토글
+         * @param {string} action - 'login' 또는 'register'
          */
-        async function toggleCaptcha() {
-            const toggle = document.getElementById('captchaToggle');
+        async function toggleCaptcha(action) {
+            const toggleId = action === 'login' ? 'captchaLoginToggle' : 'captchaRegisterToggle';
+            const toggle = document.getElementById(toggleId);
             const enabled = toggle.checked;
 
             try {
+                // 두 설정 중 하나만 업데이트
+                const requestBody = {};
+                if (action === 'login') {
+                    requestBody.login_enabled = enabled;
+                } else {
+                    requestBody.register_enabled = enabled;
+                }
+
                 const data = await Auth.apiCall('/api/admin/captcha', {
                     method: 'PUT',
-                    body: JSON.stringify({ enabled })
+                    body: JSON.stringify(requestBody)
                 });
 
                 // 상태 업데이트
-                updateCaptchaStatus(data.enabled);
+                updateCaptchaStatus('login', data.login_enabled);
+                updateCaptchaStatus('register', data.register_enabled);
                 showCaptchaSuccess(data.message);
 
                 // 3초 후 메시지 자동 숨김
@@ -7529,9 +8126,12 @@
 
         /**
          * CAPTCHA 상태 표시 업데이트
+         * @param {string} action - 'login' 또는 'register'
+         * @param {boolean} enabled - 활성화 여부
          */
-        function updateCaptchaStatus(enabled) {
-            const statusEl = document.getElementById('captchaStatus');
+        function updateCaptchaStatus(action, enabled) {
+            const statusId = action === 'login' ? 'captchaLoginStatus' : 'captchaRegisterStatus';
+            const statusEl = document.getElementById(statusId);
 
             if (enabled) {
                 statusEl.textContent = '활성화됨';
@@ -7570,6 +8170,293 @@
         function hideCaptchaMessages() {
             document.getElementById('captcha-error').style.display = 'none';
             document.getElementById('captcha-success').style.display = 'none';
+        }
+
+        // ====================================================================
+        // 2FA (TOTP) 설정 관리
+        // ====================================================================
+
+        // 현재 QR 코드를 표시하는 사용자 ID 저장
+        let currentTotpUserId = null;
+
+        /**
+         * 2FA 설정 로드
+         */
+        async function loadTotpConfig() {
+            try {
+                const data = await Auth.apiCall('/api/admin/totp');
+
+                // UI 업데이트
+                document.getElementById('totpToggle').checked = data.enabled;
+                document.getElementById('totpConfigStatus').textContent =
+                    data.configured ? '✅ 설정 완료' : '⚠️ 미설정';
+
+                // 상태 표시 업데이트
+                updateTotpStatus(data.enabled);
+
+            } catch (error) {
+                console.error('Error loading 2FA config:', error);
+                showTotpError('2FA 설정을 불러올 수 없습니다: ' + error.message);
+            }
+        }
+
+        /**
+         * 2FA 토글
+         */
+        async function toggleTotp() {
+            const toggle = document.getElementById('totpToggle');
+            const enabled = toggle.checked;
+
+            try {
+                const data = await Auth.apiCall('/api/admin/totp', {
+                    method: 'PUT',
+                    body: JSON.stringify({ enabled: enabled })
+                });
+
+                // 상태 업데이트
+                updateTotpStatus(data.enabled);
+                showTotpSuccess(data.message);
+
+                // 3초 후 메시지 숨김
+                setTimeout(() => hideTotpMessages(), 3000);
+
+            } catch (error) {
+                console.error('Error toggling 2FA:', error);
+                // 에러 발생 시 토글 원래대로 되돌림
+                toggle.checked = !enabled;
+                showTotpError('2FA 설정 변경 실패: ' + error.message);
+            }
+        }
+
+        /**
+         * 2FA 상태 표시 업데이트
+         * @param {boolean} enabled - 활성화 여부
+         */
+        function updateTotpStatus(enabled) {
+            const statusEl = document.getElementById('totpStatus');
+
+            if (enabled) {
+                statusEl.textContent = '활성화됨';
+                statusEl.style.background = '#dcfce7';
+                statusEl.style.color = '#166534';
+            } else {
+                statusEl.textContent = '비활성화됨';
+                statusEl.style.background = '#fee2e2';
+                statusEl.style.color = '#991b1b';
+            }
+        }
+
+        /**
+         * 2FA 에러 메시지 표시
+         */
+        function showTotpError(message) {
+            const errorEl = document.getElementById('totp-error');
+            errorEl.textContent = message;
+            errorEl.style.display = 'block';
+            document.getElementById('totp-success').style.display = 'none';
+        }
+
+        /**
+         * 2FA 성공 메시지 표시
+         */
+        function showTotpSuccess(message) {
+            const successEl = document.getElementById('totp-success');
+            successEl.textContent = message;
+            successEl.style.display = 'block';
+            document.getElementById('totp-error').style.display = 'none';
+        }
+
+        /**
+         * 2FA 메시지 숨김
+         */
+        function hideTotpMessages() {
+            document.getElementById('totp-error').style.display = 'none';
+            document.getElementById('totp-success').style.display = 'none';
+        }
+
+        /**
+         * 사용자 2FA QR 코드 표시
+         * @param {string} userId - 사용자 ID
+         */
+        async function showUserTotp(userId) {
+            currentTotpUserId = userId;
+
+            try {
+                // API 호출하여 QR 코드 가져오기
+                const data = await Auth.apiCall(`/api/admin/users/${userId}/totp`);
+
+                // 모달에 정보 표시
+                document.getElementById('userTotpEmail').textContent = data.email;
+
+                // QR 코드 이미지 표시
+                const qrContainer = document.getElementById('userTotpQrContainer');
+                if (data.qr_code) {
+                    qrContainer.innerHTML = `
+                        <img src="${data.qr_code}" alt="QR Code"
+                             style="max-width: 250px; width: 100%; border: 2px solid #e5e7eb; border-radius: 8px; padding: 10px; background: white;" />
+                    `;
+                } else {
+                    qrContainer.innerHTML = `
+                        <div style="color: #dc3545; padding: 20px;">
+                            QR 코드를 생성할 수 없습니다
+                        </div>
+                    `;
+                }
+
+                // 모달 표시
+                document.getElementById('userTotpModal').style.display = 'flex';
+
+            } catch (error) {
+                console.error('Error loading user TOTP:', error);
+                alert('QR 코드를 불러오는데 실패했습니다: ' + error.message);
+            }
+        }
+
+        /**
+         * 사용자 2FA QR 코드 모달 닫기
+         */
+        function closeUserTotpModal() {
+            document.getElementById('userTotpModal').style.display = 'none';
+            currentTotpUserId = null;
+        }
+
+        /**
+         * 사용자 TOTP Secret 재생성 확인
+         */
+        function resetUserTotpConfirm() {
+            if (!currentTotpUserId) return;
+
+            if (confirm('이 사용자의 2FA Secret을 재생성하시겠습니까?\n\n기존 Google Authenticator 연동이 해제되며, 새로운 QR 코드로 다시 설정해야 합니다.')) {
+                resetUserTotp(currentTotpUserId);
+            }
+        }
+
+        /**
+         * 사용자 TOTP Secret 재생성
+         * @param {string} userId - 사용자 ID
+         */
+        async function resetUserTotp(userId) {
+            try {
+                const data = await Auth.apiCall(`/api/admin/users/${userId}/totp/reset`, {
+                    method: 'POST'
+                });
+
+                // 성공 메시지
+                alert('2FA Secret이 재생성되었습니다. 새로운 QR 코드로 다시 설정해주세요.');
+
+                // QR 코드 다시 표시
+                showUserTotp(userId);
+
+            } catch (error) {
+                console.error('Error resetting user TOTP:', error);
+                alert('Secret 재생성에 실패했습니다: ' + error.message);
+            }
+        }
+
+        // 모달 외부 클릭 시 닫기
+        window.onclick = function(event) {
+            const totpModal = document.getElementById('userTotpModal');
+            if (event.target === totpModal) {
+                closeUserTotpModal();
+            }
+        };
+
+        // ====================================================================
+        // 브루트 포스 보호 설정 관리
+        // ====================================================================
+
+        /**
+         * 브루트 포스 보호 설정 로드
+         */
+        async function loadBruteForceConfig() {
+            try {
+                const data = await Auth.apiCall('/api/admin/brute-force');
+
+                // 설정값을 입력 필드에 표시 (분 단위로 변환)
+                document.getElementById('bfMaxAttempts').value = data.max_attempts;
+                document.getElementById('bfLockoutMinutes').value = Math.round(data.lockout_duration / 60);
+                document.getElementById('bfIpMaxAttempts').value = data.ip_max_attempts;
+                document.getElementById('bfIpLockoutMinutes').value = Math.round(data.ip_lockout_duration / 60);
+
+                console.log('브루트 포스 보호 설정 로드 완료:', data);
+            } catch (error) {
+                console.error('Error loading brute force config:', error);
+                showBfError('브루트 포스 보호 설정을 불러올 수 없습니다: ' + error.message);
+            }
+        }
+
+        /**
+         * 브루트 포스 보호 설정 저장
+         */
+        async function saveBruteForceConfig() {
+            hideBfMessages();
+
+            try {
+                const maxAttempts = parseInt(document.getElementById('bfMaxAttempts').value);
+                const lockoutMinutes = parseInt(document.getElementById('bfLockoutMinutes').value);
+                const ipMaxAttempts = parseInt(document.getElementById('bfIpMaxAttempts').value);
+                const ipLockoutMinutes = parseInt(document.getElementById('bfIpLockoutMinutes').value);
+
+                // 입력 검증
+                if (!maxAttempts || maxAttempts < 1 || maxAttempts > 100) {
+                    showBfError('계정 최대 실패 횟수는 1-100 사이여야 합니다');
+                    return;
+                }
+                if (!lockoutMinutes || lockoutMinutes < 1 || lockoutMinutes > 1440) {
+                    showBfError('계정 잠금 시간은 1-1440분 사이여야 합니다');
+                    return;
+                }
+                if (!ipMaxAttempts || ipMaxAttempts < 1 || ipMaxAttempts > 1000) {
+                    showBfError('IP 최대 실패 횟수는 1-1000 사이여야 합니다');
+                    return;
+                }
+                if (!ipLockoutMinutes || ipLockoutMinutes < 1 || ipLockoutMinutes > 1440) {
+                    showBfError('IP 차단 시간은 1-1440분 사이여야 합니다');
+                    return;
+                }
+
+                // API 호출 (분을 초로 변환)
+                const data = await Auth.apiCall('/api/admin/brute-force', 'PUT', {
+                    max_attempts: maxAttempts,
+                    lockout_duration: lockoutMinutes * 60,
+                    ip_max_attempts: ipMaxAttempts,
+                    ip_lockout_duration: ipLockoutMinutes * 60
+                });
+
+                showBfSuccess(data.message);
+                console.log('브루트 포스 보호 설정 저장 완료:', data);
+            } catch (error) {
+                console.error('Error saving brute force config:', error);
+                showBfError('브루트 포스 보호 설정 저장 실패: ' + error.message);
+            }
+        }
+
+        /**
+         * 브루트 포스 보호 에러 메시지 표시
+         */
+        function showBfError(message) {
+            const errorEl = document.getElementById('bf-error');
+            errorEl.textContent = message;
+            errorEl.style.display = 'block';
+            document.getElementById('bf-success').style.display = 'none';
+        }
+
+        /**
+         * 브루트 포스 보호 성공 메시지 표시
+         */
+        function showBfSuccess(message) {
+            const successEl = document.getElementById('bf-success');
+            successEl.textContent = message;
+            successEl.style.display = 'block';
+            document.getElementById('bf-error').style.display = 'none';
+        }
+
+        /**
+         * 브루트 포스 보호 메시지 숨김
+         */
+        function hideBfMessages() {
+            document.getElementById('bf-error').style.display = 'none';
+            document.getElementById('bf-success').style.display = 'none';
         }
 
     </script>
