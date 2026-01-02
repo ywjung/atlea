@@ -1,0 +1,263 @@
+name: Security Scan & SBOM Generation
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  schedule:
+    # Run every Sunday at 2 AM UTC
+    - cron: '0 2 * * 0'
+  workflow_dispatch: # Allow manual trigger
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  sbom-and-scan:
+    name: Generate SBOM and Scan Vulnerabilities
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: 'maven'
+
+      - name: Install Python security tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install pip-audit safety cyclonedx-bom
+
+      - name: Install Python dependencies
+        run: |
+          pip install -r requirements.txt
+
+      # ============================================================
+      # Python SBOM Generation
+      # ============================================================
+      - name: Generate Python SBOM (CycloneDX)
+        run: |
+          mkdir -p sbom
+          pip-audit --requirement requirements.txt --format cyclonedx-json --output sbom/python-sbom-cyclonedx.json || true
+          pip list --format=json > sbom/python-packages.json
+          pip freeze > sbom/python-frozen-requirements.txt
+
+      - name: Scan Python vulnerabilities with pip-audit
+        id: python-scan
+        run: |
+          mkdir -p sbom/scans
+          TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+
+          # Run pip-audit and capture exit code
+          set +e
+          pip-audit --requirement requirements.txt --format json --output sbom/scans/python-vulnerabilities-$TIMESTAMP.json
+          AUDIT_EXIT_CODE=$?
+
+          pip-audit --requirement requirements.txt > sbom/scans/python-vulnerabilities-$TIMESTAMP.txt || true
+
+          # Create symlink to latest
+          ln -sf python-vulnerabilities-$TIMESTAMP.json sbom/scans/python-vulnerabilities-latest.json
+          ln -sf python-vulnerabilities-$TIMESTAMP.txt sbom/scans/python-vulnerabilities-latest.txt
+
+          # Check if critical vulnerabilities exist
+          if [ $AUDIT_EXIT_CODE -ne 0 ]; then
+            echo "python_vulns=true" >> $GITHUB_OUTPUT
+          else
+            echo "python_vulns=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Scan Python vulnerabilities with Safety
+        run: |
+          TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+          safety check --file requirements.txt --json > sbom/scans/python-safety-$TIMESTAMP.json 2>&1 || true
+          safety check --file requirements.txt > sbom/scans/python-safety-$TIMESTAMP.txt 2>&1 || true
+
+      # ============================================================
+      # Java SBOM Generation
+      # ============================================================
+      - name: Generate Java SBOM (CycloneDX)
+        working-directory: document-service
+        run: |
+          mvn org.cyclonedx:cyclonedx-maven-plugin:2.8.2:makeAggregateBom \
+            -DoutputFormat=json -DoutputName=java-sbom-cyclonedx || true
+
+          # Move SBOM to sbom directory
+          if [ -f "target/java-sbom-cyclonedx.json" ]; then
+            mv target/java-sbom-cyclonedx.json ../sbom/
+          elif [ -f "target/bom.json" ]; then
+            mv target/bom.json ../sbom/java-sbom-cyclonedx.json
+          fi
+
+          # Generate dependency tree
+          mvn dependency:tree -DoutputFile=../sbom/java-dependency-tree.txt || true
+          mvn dependency:list -DoutputFile=../sbom/java-dependencies.txt || true
+
+      - name: Scan Java vulnerabilities with OWASP Dependency-Check
+        id: java-scan
+        working-directory: document-service
+        run: |
+          TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+
+          # Run OWASP Dependency-Check
+          set +e
+          mvn org.owasp:dependency-check-maven:11.1.1:check \
+            -DfailBuildOnCVSS=0 \
+            -Dformat=JSON,HTML \
+            -DoutputDirectory=../sbom/scans \
+            -DdataDirectory=./owasp-data
+
+          OWASP_EXIT_CODE=$?
+
+          # Rename generated reports
+          if [ -f "../sbom/scans/dependency-check-report.json" ]; then
+            mv ../sbom/scans/dependency-check-report.json ../sbom/scans/java-vulnerabilities-$TIMESTAMP.json
+            ln -sf java-vulnerabilities-$TIMESTAMP.json ../sbom/scans/java-vulnerabilities-latest.json
+          fi
+
+          if [ -f "../sbom/scans/dependency-check-report.html" ]; then
+            mv ../sbom/scans/dependency-check-report.html ../sbom/scans/java-vulnerabilities-$TIMESTAMP.html
+            ln -sf java-vulnerabilities-$TIMESTAMP.html ../sbom/scans/java-vulnerabilities-latest.html
+          fi
+
+          # Check for critical vulnerabilities
+          if [ $OWASP_EXIT_CODE -ne 0 ]; then
+            echo "java_vulns=true" >> $GITHUB_OUTPUT
+          else
+            echo "java_vulns=false" >> $GITHUB_OUTPUT
+          fi
+
+      # ============================================================
+      # Combined Report
+      # ============================================================
+      - name: Generate combined vulnerability report
+        run: |
+          TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+
+          cat > sbom/scans/VULNERABILITY_REPORT_$TIMESTAMP.md << 'EOF'
+          # Vulnerability Scan Report
+
+          **Generated**: $(date)
+          **Workflow**: ${{ github.workflow }}
+          **Run ID**: ${{ github.run_id }}
+          **Commit**: ${{ github.sha }}
+
+          ## Summary
+
+          - **Python Vulnerabilities**: ${{ steps.python-scan.outputs.python_vulns }}
+          - **Java Vulnerabilities**: ${{ steps.java-scan.outputs.java_vulns }}
+
+          ## Scan Results
+
+          ### Python
+          See: \`python-vulnerabilities-latest.txt\`
+
+          ### Java
+          See: \`java-vulnerabilities-latest.html\`
+
+          ## Actions Required
+
+          If vulnerabilities are found, review and update dependencies:
+          \`\`\`bash
+          ./scripts/update_dependencies.sh
+          \`\`\`
+          EOF
+
+          ln -sf VULNERABILITY_REPORT_$TIMESTAMP.md sbom/scans/VULNERABILITY_REPORT_LATEST.md
+
+      # ============================================================
+      # Upload Artifacts
+      # ============================================================
+      - name: Upload SBOM artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-reports-${{ github.run_number }}
+          path: |
+            sbom/*.json
+            sbom/*.txt
+            sbom/scans/*.json
+            sbom/scans/*.html
+            sbom/scans/*.md
+          retention-days: 90
+
+      # ============================================================
+      # GitHub Security Integration
+      # ============================================================
+      - name: Upload Python SBOM to GitHub Dependency Graph
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: advanced-security/sbom-generator-action@v0.0.1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # ============================================================
+      # Fail on Critical Vulnerabilities
+      # ============================================================
+      - name: Check for critical vulnerabilities
+        run: |
+          CRITICAL_FOUND=false
+
+          # Check Python scan results
+          if [ "${{ steps.python-scan.outputs.python_vulns }}" == "true" ]; then
+            if grep -qi "critical" sbom/scans/python-vulnerabilities-latest.txt 2>/dev/null; then
+              echo "❌ Critical Python vulnerabilities found!"
+              CRITICAL_FOUND=true
+            fi
+          fi
+
+          # Check Java scan results
+          if [ "${{ steps.java-scan.outputs.java_vulns }}" == "true" ]; then
+            if grep -qi "critical" sbom/scans/java-vulnerabilities-latest.html 2>/dev/null; then
+              echo "❌ Critical Java vulnerabilities found!"
+              CRITICAL_FOUND=true
+            fi
+          fi
+
+          if [ "$CRITICAL_FOUND" == "true" ]; then
+            echo ""
+            echo "🔴 Critical security vulnerabilities detected!"
+            echo "📋 Review the scan results and update dependencies immediately."
+            echo ""
+            exit 1
+          else
+            echo "✅ No critical vulnerabilities detected"
+          fi
+
+      # ============================================================
+      # Summary
+      # ============================================================
+      - name: Create job summary
+        if: always()
+        run: |
+          echo "## 🔒 Security Scan Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Component | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ steps.python-scan.outputs.python_vulns }}" == "true" ]; then
+            echo "| Python | ⚠️ Vulnerabilities Found |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Python | ✅ No Vulnerabilities |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "${{ steps.java-scan.outputs.java_vulns }}" == "true" ]; then
+            echo "| Java | ⚠️ Vulnerabilities Found |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Java | ✅ No Vulnerabilities |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📦 Artifacts" >> $GITHUB_STEP_SUMMARY
+          echo "- SBOM files generated and uploaded" >> $GITHUB_STEP_SUMMARY
+          echo "- Vulnerability scan reports available in artifacts" >> $GITHUB_STEP_SUMMARY
