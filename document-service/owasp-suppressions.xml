@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<suppressions xmlns="https://jeremylong.github.io/DependencyCheck/dependency-suppression.1.3.xsd">
+    <!--
+        OWASP Dependency-Check Suppressions
+
+        This file contains false positive suppressions for CVEs that:
+        1. Don't apply to our usage of the library
+        2. Have been verified as not affecting our application
+        3. Are awaiting patches but have mitigations in place
+
+        WARNING: Only add suppressions after thorough security review!
+
+        Format:
+        <suppress>
+            <notes>Reason for suppression</notes>
+            <packageUrl regex="true">^pkg:maven/group.id/artifact.id@.*$</packageUrl>
+            <cve>CVE-YYYY-NNNNN</cve>
+        </suppress>
+    -->
+
+    <!-- Example: Suppress false positive for test dependencies -->
+    <!--
+    <suppress>
+        <notes>
+            CVE only affects test scope, not production runtime
+        </notes>
+        <packageUrl regex="true">^pkg:maven/org\.springframework\.boot/spring\-boot\-starter\-test@.*$</packageUrl>
+        <cve>CVE-XXXX-XXXXX</cve>
+    </suppress>
+    -->
+
+</suppressions>

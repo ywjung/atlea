@@ -1,0 +1,84 @@
+server:
+  port: 8081
+  tomcat:
+    max-swallow-size: 52428800  # 50MB
+    threads:
+      max: 200              # Maximum worker threads (default: 200)
+      min-spare: 10         # Minimum spare threads (default: 10)
+    connection-timeout: 20000  # 20 seconds
+    accept-count: 100       # Maximum queue length for incoming connection requests
+    max-connections: 10000  # Maximum number of connections
+  compression:
+    enabled: true
+    mime-types: application/json,text/plain,text/html
+    min-response-size: 1024  # 1KB
+
+spring:
+  application:
+    name: document-service
+  servlet:
+    multipart:
+      enabled: true
+      max-file-size: 50MB
+      max-request-size: 52MB  # Security: Slightly larger to account for headers
+      file-size-threshold: 2MB  # Write to disk after 2MB
+  main:
+    banner-mode: off
+    allow-bean-definition-overriding: true
+  cache:
+    type: caffeine
+    caffeine:
+      spec: maximumSize=100,expireAfterWrite=1h
+    cache-names: documentExtraction
+  task:
+    execution:
+      pool:
+        core-size: 4
+        max-size: 16
+        queue-capacity: 100
+        keep-alive: 60s
+      thread-name-prefix: async-exec-
+
+logging:
+  level:
+    root: WARN  # Security: Reduce verbosity in production
+    com.chatbot.document: INFO  # Security: Changed from DEBUG to INFO
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+  file:
+    name: logs/document-service.log
+    max-size: 10MB
+    max-history: 30
+    total-size-cap: 1GB
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+      base-path: /management  # Security: Hide from default /actuator path
+  endpoint:
+    health:
+      show-details: when-authorized  # Security: Only show details to authorized users
+      show-components: when-authorized
+  metrics:
+    enable:
+      jvm: true
+      process: true
+      system: true
+      tomcat: true
+      http: true
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+  server:
+    port: 8082  # Separate port for management endpoints
+
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    enabled: true
+    display-request-duration: true
+    operations-sorter: method
