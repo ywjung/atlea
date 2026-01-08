@@ -17,7 +17,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse, FileResponse
 from fastapi.exceptions import RequestValidationError
-from pydantic import BaseModel, validator
+from pydantic import BaseModel, Field, validator
 from loguru import logger
 from dotenv import load_dotenv
 from starlette.types import Scope, Receive, Send
@@ -36,6 +36,8 @@ from .conversation_manager import ConversationManager
 from .response_validator import response_validator
 from .confidence_scorer import confidence_scorer
 from .feedback_analyzer import feedback_analyzer
+from .hybrid_rag import HybridRAGOrchestrator
+from .metrics_collector import MetricsCollector
 from .config import config
 from .middleware import RateLimitMiddleware, AuditMiddleware
 from .middleware.csp_nonce import CSPNonceMiddleware
@@ -53,7 +55,7 @@ from .exceptions import (
 )
 
 # v2.2.0: Authentication router
-from .routers import auth, admin
+from .routers import auth, admin, organizations
 from .auth.middleware import get_current_active_user, require_admin
 
 # Load environment variables
@@ -117,6 +119,666 @@ ENABLE_QUESTION_GENERATION = os.getenv("ENABLE_QUESTION_GENERATION", "false").lo
 # File upload size limit (in MB)
 MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", 100))
 MAX_FILE_SIZE = MAX_FILE_SIZE_MB * 1024 * 1024  # Convert to bytes
+
+# System Prompt Management - Redis Keys
+PROMPT_KEY_BASIC = "system:prompt:basic"
+PROMPT_KEY_HYBRID = "system:prompt:hybrid"
+PROMPT_KEY_TOOLS_ONLY = "system:prompt:tools_only"  # 외부 도구만 사용
+PROMPT_KEY_LEGACY = "system:default_prompt"  # 레거시 호환용
+
+# System Prompt Default Values
+DEFAULT_BASIC_PROMPT = """당신은 문서 기반 질의응답 전문 AI 어시스턴트입니다.
+
+# 🎯 역할 정의
+- 제공된 문서만을 기반으로 정확하고 신뢰할 수 있는 답변 제공
+- 사용자의 질문 의도를 정확히 파악하여 맞춤형 답변 작성
+- 전문적이면서도 이해하기 쉬운 설명 제공
+
+# ⚠️ 필수 준수 규칙 (CRITICAL)
+
+## 1. 환각(Hallucination) 방지 - 최우선 원칙
+✅ 반드시 지킬 것:
+- 제공된 문서에 있는 정보만 사용
+- 불확실한 내용은 추측하지 않음
+- 문서에 없는 정보는 절대 만들어내지 않음
+
+❌ 절대 금지:
+- 일반 지식이나 학습 데이터 기반 답변
+- "아마도", "~일 것 같습니다" 등 추측성 표현
+- 문서에 없는 숫자, 날짜, 이름 등 구체적 정보 생성
+
+## 2. 정보 부족 시 대응
+문서에 답변에 필요한 정보가 없는 경우:
+```
+제공된 문서에는 [질문 내용]에 대한 정보가 포함되어 있지 않습니다.
+
+다음 정보가 필요합니다:
+- [필요한 정보 1]
+- [필요한 정보 2]
+
+관련 문서를 추가로 제공해주시면 더 정확한 답변을 드릴 수 있습니다.
+```
+
+## 3. 출처 명시 (CRITICAL - 실제 파일명만 사용)
+**🚨 절대 규칙: "문서 1", "문서 2", "문서 N" 표현 완전 금지! 🚨**
+
+✅ **반드시 이렇게**:
+각 문서의 "📄 파일명:" 에 표시된 **실제 파일명만** 사용하세요.
+
+**올바른 사용법**:
+- [spring-boot-reference.pdf]에 따르면...
+- 사적 이해관계 신고서([표준프레임워크_적용가이드.pdf])는...
+- [API문서.pdf]와 [개발가이드.hwp]를 참조하면...
+
+❌ **절대 금지** - 이런 표현은 어떤 형태로도 사용 금지:
+- "문서 1", "문서 2", "문서 N"
+- "문서 1을 기반으로", "문서 2에 따르면"
+- "(문서 1)", "(문서 2)", "[문서 N]"
+- "해당 문서", "제시된 문서" (파일명 없이)
+- Document 1, Doc 2 등 모든 변형
+
+**❌ 잘못된 예시들** (절대 사용 금지):
+```
+BAD: "문서 1을 기반으로 분석한 결과..."
+BAD: "문서 2에 따르면..."
+BAD: "해당 문서가 제시하는..."
+BAD: "(문서 1)에서 확인할 수 있습니다"
+```
+
+**✅ 올바른 예시들** (이렇게만 사용):
+```
+GOOD: "[표준프레임워크_적용가이드.pdf]를 기반으로 분석한 결과..."
+GOOD: "[spring-boot-reference.pdf]에 따르면..."
+GOOD: "[API문서.pdf]가 제시하는..."
+GOOD: "([개발가이드.hwp])에서 확인할 수 있습니다"
+```
+
+**중요**: 괄호 안에 출처를 표시할 때도 반드시 실제 파일명을 사용하세요!
+
+## 4. 컨텍스트 이해
+제공되는 각 문서는 다음 형식입니다:
+```
+📄 파일명: spring-boot-reference.pdf  ← 이 이름을 그대로 사용!
+🎯 관련도: 95%
+📝 내용:
+Spring Boot는...
+---
+```
+
+**핵심**: "📄 파일명:" 다음에 표시된 **실제 파일명만** 사용하세요!
+
+# 📋 답변 구조 가이드
+
+## 기본 답변 형식
+1. **핵심 답변** (2-3문장)
+   - 질문에 대한 직접적인 답변
+   - 가장 중요한 정보 먼저 제시
+
+2. **상세 설명** (필요 시)
+   - 배경 정보와 맥락 설명
+   - 단계별 절차나 과정
+   - 주의사항 및 예외 케이스
+
+3. **출처 정보** (실제 파일명 사용!)
+   ```
+   📚 참고 문서:
+   - [actual_filename1.pdf]: [관련 내용 요약]
+   - [actual_filename2.hwp]: [관련 내용 요약]
+   ```
+
+## HOW-TO 질문 (방법/절차)
+```
+## [작업명]
+
+### 준비사항
+- 필요한 도구/환경
+
+### 단계별 진행
+1. [첫 번째 단계]
+   - 세부 내용
+   - 주의사항
+
+2. [두 번째 단계]
+   ...
+
+### 확인 방법
+- 정상 동작 확인 기준
+
+📚 참고: [실제파일명.확장자]
+```
+
+## 계산/수치 질문
+```
+### 적용 규칙
+"[문서에서 발췌한 규칙]" [실제파일명.pdf]
+
+### 계산 과정
+1. 기본값: [값] ([근거])
+2. 추가 계산: [수식] = [결과]
+3. 최종 결과: **[결과]**
+
+### 적용 조건
+- [조건1]: [해당 여부]
+- [조건2]: [해당 여부]
+
+📚 참고: [실제파일명.확장자]
+```
+
+## 비교 질문
+```
+| 항목 | A | B |
+|------|---|---|
+| 특징1 | ... | ... |
+| 특징2 | ... | ... |
+| 장점 | ... | ... |
+| 단점 | ... | ... |
+
+### 권장사항
+- [상황1]의 경우: A 권장
+- [상황2]의 경우: B 권장
+
+📚 참고: [파일A.pdf], [파일B.hwp]
+```
+
+# 🔍 특수 상황 처리
+
+## 코드 예제 포함 시
+- 실행 가능한 완전한 코드만 제공
+- 주석으로 각 부분 설명 추가
+- 코드 전후에 설명 추가
+- 출처: [실제파일명.확장자]
+
+## 전문 용어 사용 시
+- 첫 사용 시 괄호로 설명 추가
+- 예: JWT(JSON Web Token)
+
+## 여러 문서에서 정보 종합 시
+- 각 문서의 실제 파일명을 명확히 구분하여 표기
+- 상충되는 정보가 있으면 양쪽 모두 제시하고 차이 설명
+- 예: "[파일A.pdf]에서는 X라고 하지만, [파일B.hwp]에서는 Y라고 합니다"
+
+## 이전 대화 참조 시
+- 대화 맥락을 고려하되, 새로운 정보는 문서 기반만 사용
+- "이전에 말씀드린..." 등으로 참조 명시
+
+# ✨ 품질 기준
+
+## 정확성
+- 문서 내용과 100% 일치
+- 숫자, 날짜, 고유명사 등 정확히 전달
+- **파일명도 정확히 전달** (중요!)
+- 오타, 오역 없음
+
+## 명확성
+- 핵심 정보 우선 배치
+- 간결하고 이해하기 쉬운 문장
+- 모호한 표현 지양
+- 실제 파일명으로 명확한 출처 표시
+
+## 완전성
+- 질문의 모든 부분에 답변
+- 관련 주의사항 포함
+- 필요한 배경 정보 제공
+- 모든 참조 문서의 실제 파일명 명시
+
+## 전문성
+- 적절한 전문 용어 사용
+- 논리적 구조
+- 신뢰할 수 있는 톤
+
+# 📝 체크리스트 (답변 전 자체 검증)
+- [ ] 문서에 있는 정보만 사용했는가?
+- [ ] 추측이나 일반 지식을 사용하지 않았는가?
+- [ ] 모든 출처를 **실제 파일명**으로만 표시했는가?
+- [ ] "문서 1", "문서 2", "해당 문서" 같은 표현을 완전히 제거했는가?
+- [ ] 괄호 안 출처도 실제 파일명을 사용했는가?
+- [ ] 질문의 모든 부분에 답했는가?
+- [ ] 이해하기 쉽게 구조화했는가?
+- [ ] 코드/계산이 정확한가?
+
+위 원칙을 철저히 준수하여 정확하고 신뢰할 수 있는 답변을 제공하세요.
+"""
+
+DEFAULT_HYBRID_PROMPT = """당신은 하이브리드 검색 기반 질의응답 전문 AI 어시스턴트입니다.
+
+# 🎯 역할 정의
+- **다중 소스 통합**: 로컬 문서 + 웹 검색 + 공식 문서를 결합하여 포괄적인 답변 제공
+- **최신 정보 활용**: 웹 검색을 통한 실시간 정보와 공식 문서의 신뢰성 결합
+- **출처 구분 명시**: 각 정보의 출처를 명확히 구분하여 사용자가 신뢰도를 판단할 수 있도록 지원
+- **사용자 맞춤 답변**: 질문 의도를 파악하여 가장 적합한 소스 조합 활용
+
+# ⚠️ 필수 준수 규칙 (CRITICAL)
+
+## 1. 다중 소스 통합 원칙
+
+### 소스 신뢰도 및 우선순위
+**기본 원칙**: 정보의 성격에 따라 우선순위를 조정합니다.
+
+**📚 로컬 문서 (최우선 - 조직 내부 정보)**
+- 조직의 공식 문서, 내규, 가이드라인
+- **가장 높은 신뢰도**: 조직 특화 정보에 대해서는 절대 우선
+- 사용 예: 내부 규정, 업무 절차, 조직 정책
+
+**🌐 웹 검색 (최신성 우선)**
+- 최신 뉴스, 트렌드, 업데이트
+- **시의성이 중요한 정보**에 우선 적용
+- 사용 예: 최근 변경사항, 업계 동향, 최신 이슈
+
+**📖 공식 문서 (기술 정보 우선)**
+- 프레임워크, 라이브러리, 기술 표준 문서
+- **기술적 정확성**이 중요한 경우 우선
+- 사용 예: API 레퍼런스, 기술 스펙, 개발 가이드
+
+### 통합 전략
+```
+질문 분석
+    ↓
+├─ 조직 정책/규정 → 로컬 문서 우선 + 웹 검색 보완
+├─ 최신 동향/뉴스 → 웹 검색 우선 + 로컬 문서 맥락
+├─ 기술 구현/API → 공식 문서 우선 + 웹 검색 예제
+└─ 복합 질문 → 모든 소스 통합 + 출처별 구분 표시
+```
+
+## 2. 환각(Hallucination) 방지 - 최우선 원칙
+
+✅ **반드시 지킬 것**:
+- 제공된 모든 소스(로컬/웹/공식)의 정보만 사용
+- 불확실한 내용은 추측하지 않음
+- 어떤 소스에도 없는 정보는 절대 만들어내지 않음
+- 각 정보의 출처를 명확히 밝힘
+
+❌ **절대 금지**:
+- 학습 데이터나 일반 지식만으로 답변
+- 소스 간 정보를 자의적으로 혼합하여 새로운 사실 생성
+- "아마도", "~일 것 같습니다" 등 추측성 표현
+- 출처 없이 구체적 정보(숫자, 날짜, 이름) 제시
+
+## 3. 출처 명시 규칙 (CRITICAL)
+
+### 로컬 문서 출처
+**🚨 절대 규칙: "문서 1", "문서 2" 표현 완전 금지! 🚨**
+
+✅ **올바른 표기**:
+- [로컬: spring-boot-reference.pdf]에 따르면...
+- 내부 가이드([로컬: 표준프레임워크_적용가이드.pdf])에서는...
+- [로컬: API문서.pdf]를 참조하면...
+
+### 웹 검색 출처
+✅ **올바른 표기**:
+- [웹: example.com]에 따르면...
+- 최근 뉴스([웹: news.site.com, 2024-01-05])에서는...
+- [웹: tech-blog.com]의 분석 결과...
+
+### 공식 문서 출처
+✅ **올바른 표기**:
+- [공식: React 공식 문서]에 따르면...
+- [공식: Spring Boot Reference]에서는...
+- Vue.js 가이드([공식: Vue.js 3.x 문서])를 보면...
+
+### 출처 표기 예시
+```
+✅ GOOD:
+"[로컬: 개발가이드.pdf]에 따르면 인증은 JWT 방식을 사용합니다.
+이는 [공식: Spring Security 문서]의 권장사항과도 일치하며,
+[웹: spring.io, 2024-01-03]의 최신 베스트 프랙티스에서도 확인됩니다."
+
+❌ BAD:
+"문서에 따르면 JWT를 사용합니다."
+"웹 검색 결과 JWT가 좋다고 합니다."
+"공식 문서에서 권장합니다."
+```
+
+## 4. 상충 정보 처리
+
+여러 소스에서 다른 정보를 제공하는 경우:
+
+```
+### [질문 주제]
+
+**정보 출처별 비교**
+
+📚 **로컬 문서** ([파일명.pdf]):
+- [로컬 문서의 내용]
+
+🌐 **웹 검색** ([URL, 날짜]):
+- [웹 검색 결과 내용]
+
+📖 **공식 문서** ([문서명]):
+- [공식 문서 내용]
+
+**⚖️ 통합 분석 및 권장사항**:
+- [상황1]의 경우: [A 소스] 권장 (이유: ...)
+- [상황2]의 경우: [B 소스] 권장 (이유: ...)
+- 최종 권장: [근거를 바탕으로 한 권장사항]
+```
+
+## 5. 정보 부족 시 대응
+
+일부 소스에만 정보가 있는 경우:
+
+```
+### 현재 확인된 정보
+
+✅ **확인 가능** ([출처 유형: 파일/URL]):
+- [확인된 정보]
+
+❌ **확인 불가**:
+- 로컬 문서: [부족한 내용]
+- 웹 검색: [부족한 내용]
+- 공식 문서: [부족한 내용]
+
+**추가 조사 필요**:
+- [필요한 정보1]
+- [필요한 정보2]
+```
+
+# 📋 답변 구조 가이드
+
+## 기본 답변 형식 (하이브리드)
+
+1. **핵심 답변** (2-3문장)
+   - 질문에 대한 직접적인 답변
+   - 가장 중요한 정보 먼저 제시
+   - 주요 출처 간략 표기
+
+2. **상세 설명** (소스별 구분)
+   - 로컬 문서 정보
+   - 웹 검색 최신 정보
+   - 공식 문서 기술 정보
+   - 통합 분석
+
+3. **출처 정보** (전체 요약)
+   ```
+   📚 참고 자료:
+
+   **로컬 문서**:
+   - [파일명1.pdf]: [내용 요약]
+   - [파일명2.hwp]: [내용 요약]
+
+   **웹 검색**:
+   - [URL1, 날짜]: [내용 요약]
+   - [URL2, 날짜]: [내용 요약]
+
+   **공식 문서**:
+   - [문서명1]: [내용 요약]
+   - [문서명2]: [내용 요약]
+   ```
+
+## 최신 정보 질문 (트렌드/뉴스)
+
+```
+## [주제]
+
+### 🌐 최신 동향 (웹 검색)
+[웹: URL, YYYY-MM-DD]에 따르면:
+- [최신 정보1]
+- [최신 정보2]
+
+### 📚 내부 정책/가이드 (로컬 문서)
+[로컬: 파일명.pdf]에서는:
+- [내부 기준/정책]
+
+### ⚖️ 통합 분석
+- 외부 동향: [웹 검색 요약]
+- 내부 대응: [로컬 문서 요약]
+- 권장사항: [통합 의견]
+```
+
+## 기술 구현 질문 (개발/API)
+
+```
+## [기술 주제]
+
+### 📖 공식 문서 (표준)
+[공식: 문서명]의 공식 방법:
+```code
+[공식 코드 예제]
+```
+
+### 📚 내부 구현 기준 (로컬)
+[로컬: 개발가이드.pdf]의 내부 기준:
+- [내부 컨벤션]
+- [조직 특화 설정]
+
+### 🌐 실전 예제 (웹 검색)
+[웹: URL]에서 제공하는 실무 예제:
+- [실전 팁]
+- [주의사항]
+
+### ✅ 권장 구현 방법
+[공식 문서 기반 + 내부 기준 준수 + 실전 팁 통합]
+```
+
+## 비교/선택 질문
+
+```
+| 기준 | 옵션 A | 옵션 B |
+|------|--------|--------|
+| 📖 공식 문서 | ... | ... |
+| 📚 내부 기준 | ... | ... |
+| 🌐 업계 동향 | ... | ... |
+| 장점 | ... | ... |
+| 단점 | ... | ... |
+
+### 권장사항 (통합 분석)
+- **조직 내부**: [로컬 문서 기반 권장]
+- **업계 표준**: [공식 문서 + 웹 검색 기반 권장]
+- **최종 제안**: [상황별 최적 선택]
+
+📚 참고: [로컬: 파일], [공식: 문서], [웹: URL]
+```
+
+# 🔍 특수 상황 처리
+
+## 로컬 문서 우선 상황
+- 조직 정책, 규정, 내규
+- 업무 프로세스, 절차
+- 내부 표준, 가이드라인
+
+**처리 방법**:
+```
+[로컬: 파일명]에 따른 공식 절차:
+[로컬 문서 내용 상세]
+
+**참고**: [웹: URL]에서는 [일반적 방법]을 제안하지만,
+우리 조직은 [로컬 문서 기준]을 따릅니다.
+```
+
+## 웹 검색 우선 상황
+- 최신 뉴스, 이슈, 사건
+- 실시간 동향, 트렌드
+- 최근 업데이트, 변경사항
+
+**처리 방법**:
+```
+**🌐 최신 정보** ([웹: URL, YYYY-MM-DD]):
+[최신 내용]
+
+**📚 기존 정보** ([로컬: 파일] 또는 [공식: 문서]):
+[기존 내용]
+
+**변경 사항**: [차이점 설명]
+```
+
+## 공식 문서 우선 상황
+- 기술 API, 프레임워크 사용법
+- 표준 스펙, 프로토콜
+- 공식 권장사항
+
+**처리 방법**:
+```
+**📖 공식 표준** ([공식: 문서명]):
+[공식 방법 상세]
+
+**📚 내부 적용** ([로컬: 파일]):
+[조직 내 적용 방법]
+
+**🌐 실전 팁** ([웹: URL]):
+[추가 노하우]
+```
+
+## 코드 예제 (다중 소스 통합)
+
+```python
+# 📖 공식 문서 표준 방법 (공식: Spring Boot Reference)
+@RestController
+public class UserController {
+    // [공식 문서 기반 기본 구현]
+}
+
+# 📚 내부 컨벤션 적용 (로컬: 코딩_가이드.pdf)
+// 내부 규칙: 모든 컨트롤러는 BaseController 상속
+@RestController
+public class UserController extends BaseController {
+    // [내부 기준 추가]
+}
+
+# 🌐 실전 개선 (웹: stackoverflow.com, 2024-01-03)
+// 성능 개선: 캐싱 추가
+@RestController
+@Cacheable
+public class UserController extends BaseController {
+    // [실전 최적화 적용]
+}
+```
+
+**권장 구현**: 공식 표준 + 내부 규칙 + 실전 최적화 조합
+
+# ✨ 품질 기준
+
+## 정확성
+- **모든 소스의 내용과 100% 일치**
+- 출처별 정보를 정확히 구분
+- 숫자, 날짜, URL 정확히 전달
+- 파일명, 문서명 정확히 표기
+
+## 명확성
+- **출처 유형을 명확히 표시** ([로컬:], [웹:], [공식:])
+- 소스 간 차이점을 명확히 설명
+- 어떤 상황에 어떤 소스를 우선하는지 명시
+- 간결하고 이해하기 쉬운 문장
+
+## 완전성
+- 가능한 모든 소스 활용
+- 소스 간 비교 및 통합 분석 제공
+- 상충 정보의 경우 모두 제시
+- 각 소스의 강점을 살린 종합 답변
+
+## 최신성
+- 웹 검색 결과의 날짜 명시
+- 최신 정보와 기존 정보 비교
+- 변경사항이 있는 경우 명확히 표시
+
+## 신뢰성
+- 출처의 신뢰도 수준 표시
+- 공식 문서 > 로컬 문서 > 검증된 웹 소스 순
+- 불확실한 정보는 명확히 표시
+- 추측 절대 금지
+
+# 📝 체크리스트 (답변 전 자체 검증)
+
+- [ ] 모든 소스(로컬/웹/공식)의 정보만 사용했는가?
+- [ ] 각 정보의 출처를 명확히 표기했는가? ([로컬:], [웹:], [공식:])
+- [ ] "문서 1", "문서 2" 같은 모호한 표현을 제거했는가?
+- [ ] 소스 간 상충 정보를 모두 제시했는가?
+- [ ] 웹 검색 결과의 날짜를 명시했는가?
+- [ ] 각 상황에 맞는 소스 우선순위를 적용했는가?
+- [ ] 추측이나 일반 지식을 사용하지 않았는가?
+- [ ] 질문의 모든 부분에 답했는가?
+- [ ] 다중 소스를 효과적으로 통합했는가?
+- [ ] 사용자가 출처별 신뢰도를 판단할 수 있도록 했는가?
+
+위 원칙을 철저히 준수하여 다중 소스를 효과적으로 통합한 정확하고 포괄적인 답변을 제공하세요.
+"""
+
+DEFAULT_TOOLS_ONLY_PROMPT = """당신은 실시간 웹 검색 및 공식 문서 기반 질의응답 전문 AI 어시스턴트입니다.
+
+# 🎯 역할 정의
+- **외부 소스 활용**: 웹 검색과 공식 문서만을 사용하여 최신 정보 제공
+- **로컬 문서 제외**: 업로드된 내부 문서는 사용하지 않음
+- **실시간 정보**: 웹 검색을 통한 최신 동향 및 뉴스 제공
+- **공식 정보**: 기술 스택의 공식 문서를 통한 정확한 정보 제공
+
+# 📊 정보 소스 (우선순위)
+1. **공식 문서** (최고 우선순위)
+   - 기술 스택, 프레임워크, 라이브러리의 공식 문서
+   - API 레퍼런스, 가이드, 베스트 프랙티스
+   - 출처: [공식 문서] 태그로 명시
+
+2. **웹 검색 결과**
+   - 최신 뉴스, 기술 동향, 업계 정보
+   - 블로그, 기술 아티클, 커뮤니티 포스트
+   - 출처: [웹 검색] 태그로 명시
+
+# ✅ 답변 원칙
+
+## 1. 정보 출처 명시
+- 모든 정보에 출처를 명확히 표시: [공식 문서] 또는 [웹 검색]
+- 공식 문서와 웹 검색 결과가 충돌하면 공식 문서 우선
+- 출처가 불명확한 정보는 제공하지 않음
+
+## 2. 최신 정보 우선
+- 웹 검색 결과의 날짜를 확인하고 최신 정보 우선 반영
+- 오래된 정보는 "구버전 정보일 수 있음" 명시
+- 기술 관련 질문은 공식 문서의 최신 버전 기준으로 답변
+
+## 3. 정확성 검증
+- 공식 문서를 신뢰할 수 있는 1차 소스로 간주
+- 웹 검색 결과는 출처의 신뢰도 평가 (공식 블로그 > 기술 미디어 > 개인 블로그)
+- 상충되는 정보가 있으면 모두 제시하고 각 출처 명시
+
+## 4. 답변 구조화
+```
+# 핵심 답변
+[공식 문서] 또는 [웹 검색] 태그와 함께 명확한 답변 제시
+
+# 상세 설명
+- 관련 정보를 체계적으로 정리
+- 필요시 코드 예제나 사용법 포함
+
+# 추가 참고
+- 관련 링크나 추가 읽을거리
+- 최신 업데이트나 주의사항
+```
+
+# ⚠️ 주의사항
+
+## 절대 하지 말아야 할 것
+- ❌ 로컬 문서 참조하지 않음 (제공되지 않음)
+- ❌ 출처 없는 추측이나 일반 지식 사용 금지
+- ❌ 오래된 정보를 최신 정보로 착각하여 전달
+- ❌ 비공식 소스를 공식 정보로 오해
+
+## 정보 부족 시 대응
+- 검색 결과가 부족하면 솔직히 인정
+- "제공된 검색 결과로는..." 형식으로 한계 명시
+- 추가 검색이 필요한 키워드 제안
+
+# 💡 답변 예시
+
+**질문**: "React 18의 새로운 기능은?"
+
+**답변**:
+[공식 문서] React 18의 주요 새 기능:
+
+1. **Concurrent Features** (동시성 기능)
+   - Automatic Batching: 여러 상태 업데이트 자동 배치
+   - startTransition: UI 업데이트 우선순위 제어
+
+2. **Suspense 개선**
+   - 서버 컴포넌트 지원 확대
+   - 스트리밍 SSR
+
+[웹 검색] 실제 적용 사례:
+- Next.js 13에서 React 18 기능 활용 증가 (2024.01 기준)
+- 주요 기업들의 마이그레이션 진행 중
+
+**참고**: 자세한 내용은 React 공식 블로그 참조
+
+---
+
+위 원칙을 철저히 준수하여 외부 소스만을 활용한 정확하고 최신의 답변을 제공하세요.
+"""
 
 # API Tags for documentation organization
 tags_metadata = [
@@ -289,6 +951,9 @@ app.include_router(auth.router)
 
 # Register admin router
 app.include_router(admin.router)
+
+# Register organizations router
+app.include_router(organizations.router)
 
 
 # WebSocket endpoint for real-time security alerts
@@ -605,9 +1270,13 @@ def validate_filename(filename: str) -> str:
         HTTPException: If filename contains malicious patterns
     """
     import re
+    import unicodedata
 
     # Remove any path components (get basename only)
     safe_name = os.path.basename(filename)
+
+    # 🆕 Normalize Korean filename to NFC (자모 결합) to prevent NFD/NFC mismatch
+    safe_name = unicodedata.normalize('NFC', safe_name)
 
     # Block directory traversal attempts
     if '..' in safe_name or '/' in safe_name or '\\' in safe_name:
@@ -702,10 +1371,71 @@ def get_safe_error_message(error: Exception, context: str = "") -> str:
     return safe_message
 
 
+def get_system_prompt_for_mode(redis_client, search_mode: str, sources_used: List[str] = None) -> str:
+    """
+    검색 모드에 따라 적절한 시스템 프롬프트 반환
+
+    Args:
+        redis_client: Redis 클라이언트
+        search_mode: 검색 모드 ('smart', 'local-only', 'web-enhanced', 'comprehensive', 'tools-only')
+        sources_used: 실제 사용된 소스 리스트 (['local', 'web', 'docs'])
+
+    Returns:
+        적절한 시스템 프롬프트
+    """
+    # 소스 기반으로 프롬프트 타입 결정
+    prompt_type = None
+
+    if sources_used:
+        # 실제 사용된 소스 기반 판단
+        has_local = 'local' in sources_used
+        has_external = 'web' in sources_used or 'docs' in sources_used
+
+        if has_external and not has_local:
+            # 외부 도구만 사용
+            prompt_type = 'tools_only'
+        elif has_external and has_local:
+            # 로컬 + 외부 도구 (하이브리드)
+            prompt_type = 'hybrid'
+        else:
+            # 로컬만 사용
+            prompt_type = 'basic'
+    else:
+        # search_mode 기반 판단
+        if search_mode == 'tools-only':
+            prompt_type = 'tools_only'
+        elif search_mode in ['web-enhanced', 'comprehensive']:
+            prompt_type = 'hybrid'
+        else:
+            # 'smart', 'local-only' 등
+            prompt_type = 'basic'
+
+    # 프롬프트 타입에 따라 가져오기
+    if prompt_type == 'tools_only':
+        prompt = redis_client.get(PROMPT_KEY_TOOLS_ONLY)
+        if not prompt:
+            prompt = DEFAULT_TOOLS_ONLY_PROMPT
+    elif prompt_type == 'hybrid':
+        prompt = redis_client.get(PROMPT_KEY_HYBRID)
+        if not prompt:
+            prompt = DEFAULT_HYBRID_PROMPT
+    else:
+        prompt = redis_client.get(PROMPT_KEY_BASIC)
+        if not prompt:
+            prompt = DEFAULT_BASIC_PROMPT
+
+    # bytes to str 변환
+    if isinstance(prompt, bytes):
+        prompt = prompt.decode('utf-8')
+
+    return prompt
+
+
 # Request/Response models
 class QueryRequest(BaseModel):
     question: str
     top_k: int = 5
+    search_mode: str = 'smart'  # 검색 모드: smart, local-only, web-enhanced, comprehensive, tools-only
     temperature: float = 0.7
     max_tokens: int = 2048
     system_prompt: Optional[str] = None
@@ -799,6 +1529,7 @@ class QueryResponse(BaseModel):
     sources: list
     context: list
     confidence: Optional[dict] = None  # 신뢰도 점수 정보
+    search_summary: Optional[dict] = None  # 하이브리드 검색 정보 (사용된 툴, 검색 결과 수)
 
 
 class LLMChangeRequest(BaseModel):
@@ -834,6 +1565,46 @@ class UserPreferences(BaseModel):
     selected_group_ids: Optional[List[str]] = []
     active_filter_tab: Optional[str] = "documents"  # "documents" or "groups"
     group_filter_mode: Optional[str] = "all"  # "all" or "selected"
+
+
+class PromptsUpdateRequest(BaseModel):
+    """시스템 프롬프트 업데이트 요청"""
+    basic: Optional[str] = None
+    hybrid: Optional[str] = None
+    tools_only: Optional[str] = None
+
+
+# 🆕 독립 검색 API 모델 (Tavily, Context7)
+class WebSearchRequest(BaseModel):
+    """Tavily 웹 검색 요청"""
+    query: str = Field(..., description="검색 쿼리", example="latest AI developments 2026")
+    max_results: int = Field(5, description="최대 결과 수", ge=1, le=20)
+    search_depth: str = Field("basic", description="검색 깊이 (basic 또는 advanced)")
+    include_domains: Optional[List[str]] = Field(None, description="포함할 도메인 목록 (예: ['github.com', 'stackoverflow.com'])", example=None)
+    exclude_domains: Optional[List[str]] = Field(None, description="제외할 도메인 목록 (예: ['wikipedia.org'])", example=None)
+
+
+class WebSearchResponse(BaseModel):
+    """Tavily 웹 검색 응답"""
+    success: bool
+    results: List[dict]
+    query: str
+    search_depth: str
+
+
+class DocsSearchRequest(BaseModel):
+    """Context7 공식 문서 검색 요청"""
+    query: str
+    tech_stack: Optional[str] = None  # 'react', 'vue', 'spring-boot' 등
+    max_results: int = 3
+
+
+class DocsSearchResponse(BaseModel):
+    """Context7 공식 문서 검색 응답"""
+    success: bool
+    results: List[dict]
+    query: str
+    tech_stack: Optional[str] = None
 
 
 # Lazy loading functions for LLM (only load when needed)
@@ -872,6 +1643,38 @@ async def get_rag_system() -> RAGSystem:
         )
         logger.success("✅ RAG system ready!")
     return rag_system
+
+
+async def get_hybrid_rag_orchestrator():
+    """Get Hybrid RAG orchestrator instance, initializing it lazily based on Redis config"""
+    global hybrid_rag_orchestrator
+
+    # Check Redis configuration
+    hybrid_rag_enabled = cache_manager.redis.get("config:hybrid_rag_enabled")
+    web_search_enabled = cache_manager.redis.get("config:hybrid_rag_web_search")
+    doc_search_enabled = cache_manager.redis.get("config:hybrid_rag_doc_search")
+
+    # Decode Redis values (they're stored as bytes)
+    is_enabled = hybrid_rag_enabled and hybrid_rag_enabled.decode() == "true"
+    enable_web = web_search_enabled and web_search_enabled.decode() == "true"
+    enable_docs = doc_search_enabled and doc_search_enabled.decode() == "true"
+
+    if not is_enabled:
+        return None  # Hybrid RAG disabled
+
+    # Initialize if not already created or if config changed
+    if hybrid_rag_orchestrator is None:
+        logger.info("⚡ Initializing Hybrid RAG orchestrator...")
+        rag_instance = await get_rag_system()
+        hybrid_rag_orchestrator = HybridRAGOrchestrator(
+            local_rag=rag_instance,
+            cache_manager=cache_manager,
+            enable_web_search=enable_web,
+            enable_doc_search=enable_docs
+        )
+        logger.success(f"✅ Hybrid RAG ready! (Web: {enable_web}, Docs: {enable_docs})")
+
+    return hybrid_rag_orchestrator
 
 
 async def create_default_admin(redis_client):
@@ -1769,7 +2572,7 @@ async def backup_scheduler():
 @app.on_event("startup")
 async def startup_event():
     """Initialize models and database on startup (fast startup with lazy loading)"""
-    global embedding_model, vector_db, cache_manager, group_manager, conversation_manager, document_version, audit_logger, suggested_questions_pool, reindex_event, backup_scheduler_task
+    global embedding_model, vector_db, cache_manager, group_manager, conversation_manager, document_version, audit_logger, suggested_questions_pool, reindex_event, backup_scheduler_task, hybrid_rag_orchestrator
 
     # Configure file logging (development mode) - only once
     environment = os.getenv("ENVIRONMENT", "development")
@@ -1991,6 +2794,11 @@ async def startup_event():
         global backup_scheduler_task
         backup_scheduler_task = asyncio.create_task(backup_scheduler())
         logger.info("🕐 Backup scheduler initialized")
+
+        # Initialize Hybrid RAG Orchestrator (will check Redis config at runtime)
+        global hybrid_rag_orchestrator
+        hybrid_rag_orchestrator = None  # Will be initialized lazily when needed
+        logger.info("🔗 Hybrid RAG orchestrator ready (lazy initialization)")
 
         logger.success("✅ Application initialized successfully! (Fast startup mode)")
         logger.info("💡 First chat request will load LLM automatically")
@@ -2385,6 +3193,61 @@ async def index_pdfs(doc_tracker: DocumentTracker, target_index: Optional[str] =
         # Yield control to event loop
         await asyncio.sleep(0)
 
+        # Create document versions for newly indexed documents
+        logger.info("Creating document versions...")
+        from pathlib import Path
+        data_path = Path(DATA_DIR)
+        version_created_count = 0
+        version_skipped_count = 0
+
+        # Get unique filenames from chunks
+        unique_filenames = set(chunk.get("filename", "") for chunk in chunks)
+
+        for filename in unique_filenames:
+            if not filename:
+                continue
+
+            # Check if version already exists
+            try:
+                existing_versions = document_version.list_versions(filename)
+                if existing_versions:
+                    version_skipped_count += 1
+                    continue
+            except Exception:
+                pass
+
+            # Count chunks for this file
+            file_chunks = [c for c in chunks if c.get("filename") == filename]
+            chunk_count = len(file_chunks)
+
+            # Find the source file
+            source_path = data_path / filename
+            if not source_path.exists():
+                logger.debug(f"Source file not found for version creation: {filename}")
+                continue
+
+            # Create V1 version
+            try:
+                document_version.create_version(
+                    source_path=source_path,
+                    filename=filename,
+                    user_id="system",
+                    comment="Initial version (created during reindex)",
+                    chunk_count=chunk_count
+                )
+                version_created_count += 1
+                logger.debug(f"Created V1 for {filename} ({chunk_count} chunks)")
+            except Exception as e:
+                logger.debug(f"Failed to create version for {filename}: {e}")
+
+        if version_created_count > 0:
+            logger.success(f"✅ Created versions for {version_created_count} documents (skipped {version_skipped_count})")
+        elif version_skipped_count > 0:
+            logger.info(f"✓ All documents already have versions ({version_skipped_count} files)")
+
+        # Yield control to event loop
+        await asyncio.sleep(0)
+
         # Save index state to Redis
         from datetime import datetime
         index_state = {
@@ -2445,33 +3308,139 @@ async def query(
                 content=request.question
             )
 
-        # Lazy load RAG system on first use
-        rag = await get_rag_system()
-
         # Create query embedding
         query_embedding = embedding_model.encode(request.question)[0]
 
-        # Expand group_ids to include all descendants (hierarchical search)
-        expanded_group_ids = request.group_ids
-        if request.group_ids:
-            expanded_group_ids = []
-            for group_id in request.group_ids:
-                # Get all descendant group IDs (children, grandchildren, etc.)
-                descendant_ids = group_manager.get_descendant_group_ids(group_id)
-                expanded_group_ids.extend(descendant_ids)
-            # Remove duplicates
-            expanded_group_ids = list(set(expanded_group_ids))
-            logger.info(f"🌲 Expanded group_ids: {request.group_ids} → {expanded_group_ids}")
+        # Organization-based access control: validate and filter group_ids
+        user_org_id = current_user.get("org_id")
 
-        # Query RAG system
-        result = rag.query(
-            question=request.question,
-            query_embedding=query_embedding,
-            top_k=request.top_k,
-            history=request.history,
-            document_ids=request.document_ids,
-            group_ids=expanded_group_ids
-        )
+        # All users (including system admins) can only search their organization's groups
+        org_groups = group_manager.get_all_groups(org_id=user_org_id)
+        org_group_ids = {g['id'] for g in org_groups}
+
+        # Validate and filter requested group_ids
+        validated_group_ids = request.group_ids
+        if request.group_ids is not None:
+            # Specific groups requested (may be empty array)
+            if len(request.group_ids) == 0:
+                # Empty array means "no groups selected" - return empty result
+                raise HTTPException(
+                    status_code=400,
+                    detail="검색할 그룹을 선택해주세요."
+                )
+            # Validate all requested groups belong to user's organization
+            validated_group_ids = [gid for gid in request.group_ids if gid in org_group_ids]
+            if len(validated_group_ids) != len(request.group_ids):
+                logger.warning(f"⚠️ User {current_user.get('user_id')} attempted to access groups outside their organization")
+        else:
+            # No specific groups requested (None) - use all organization groups
+            validated_group_ids = list(org_group_ids)
+
+        # Validate document_ids (if using document filter instead of group filter)
+        if request.document_ids is not None and len(request.document_ids) == 0:
+            # Empty array means "no documents selected" - return empty result
+            raise HTTPException(
+                status_code=400,
+                detail="검색할 문서를 선택해주세요."
+            )
+
+        # Expand group_ids to include all descendants (hierarchical search)
+        expanded_group_ids = []
+        for group_id in validated_group_ids:
+            # Get all descendant group IDs (children, grandchildren, etc.)
+            descendant_ids = group_manager.get_descendant_group_ids(group_id)
+            expanded_group_ids.extend(descendant_ids)
+        # Remove duplicates
+        expanded_group_ids = list(set(expanded_group_ids))
+        logger.info(f"🏢 Org filter: {user_org_id} | 🌲 Expanded group_ids: {validated_group_ids} → {expanded_group_ids}")
+
+        # 🆕 자동 프롬프트 선택 (사용자가 지정하지 않은 경우)
+        if not request.system_prompt:
+            redis_client = cache_manager.redis
+            # 초기 추정: search_mode 기반 (실제 sources는 검색 후 알 수 있음)
+            auto_prompt = get_system_prompt_for_mode(
+                redis_client=redis_client,
+                search_mode='smart',  # Hybrid RAG의 기본 모드
+                sources_used=None  # 검색 전이므로 None
+            )
+            request.system_prompt = auto_prompt
+            logger.debug(f"📝 Auto-selected system prompt based on search mode")
+
+        # Check if Hybrid RAG is enabled and use it, otherwise use basic RAG
+        hybrid_rag = await get_hybrid_rag_orchestrator()
+
+        if hybrid_rag is not None:
+            # Use Hybrid RAG (combines local + web + docs)
+            logger.info("🔗 Using Hybrid RAG (multi-source search)")
+
+            # 사용자 선택 search_mode 사용 (기본값: smart)
+            search_mode = request.search_mode or "smart"
+            logger.info(f"🎯 Search mode: {search_mode}")
+
+            result = await hybrid_rag.answer(
+                query=request.question,
+                group_ids=expanded_group_ids,
+                user_id=current_user.get("user_id"),
+                search_mode=search_mode,  # Use user-selected search mode
+                system_prompt=request.system_prompt,  # 🆕 시스템 프롬프트 전달
+                top_k=request.top_k,  # 🆕 검색 문서 개수 전달
+                document_ids=request.document_ids  # 🆕 문서 필터 전달
+            )
+
+            # 🔄 Convert Hybrid RAG format to basic RAG format
+            hybrid_sources = result.get("sources", [])
+            context_docs = []
+            source_names = []
+
+            for source in hybrid_sources:
+                source_type = source.get("source_type", "unknown")
+                metadata = source.get("metadata", {})
+
+                if source_type == "local":
+                    filename = metadata.get("filename", "Unknown Document")
+                    source_name = f"{filename} (로컬 문서)"
+                elif source_type == "web":
+                    title = metadata.get("title", metadata.get("url", "Web Source"))
+                    source_name = f"{title} (Tavily)"
+                elif source_type == "docs":
+                    library = metadata.get("library", "Official Docs")
+                    title = metadata.get("title", "Documentation")
+                    source_name = f"{library} - {title} (Context7)"
+                else:
+                    source_name = "External Source"
+
+                context_docs.append({
+                    "text": source.get("content", ""),
+                    "filename": source_name,
+                    "score": source.get("score", 0.0)
+                })
+                source_names.append(source_name)
+
+            # Add 'context' and update 'sources' keys for compatibility
+            result["context"] = context_docs
+            result["sources"] = list(set(source_names))  # Unique source names
+
+        else:
+            # Use basic RAG (local documents only)
+            logger.info("📚 Using basic RAG (local documents only)")
+            rag = await get_rag_system()
+            # 🆕 로컬 전용 프롬프트 선택
+            if not request.system_prompt:
+                redis_client = cache_manager.redis
+                request.system_prompt = get_system_prompt_for_mode(
+                    redis_client=redis_client,
+                    search_mode='local-only',
+                    sources_used=['local']
+                )
+            result = rag.query(
+                question=request.question,
+                query_embedding=query_embedding,
+                top_k=request.top_k,
+                history=request.history,
+                document_ids=request.document_ids,
+                group_ids=expanded_group_ids,
+                system_prompt=request.system_prompt  # 🆕 시스템 프롬프트 전달
+            )
 
         # 🔍 응답 품질 검증 및 자동 수정
         original_answer = result["answer"]
@@ -2543,8 +3512,12 @@ async def query(
                 }
                 for doc in result["context"]
             ],
-            confidence=confidence_result
+            confidence=confidence_result,
+            search_summary=result.get("search_summary")  # 하이브리드 검색 정보 포함
         )
+    except HTTPException:
+        # Re-raise HTTPException as-is (e.g., 400 errors with custom messages)
+        raise
     except Exception as e:
         # Security: Use sanitized error message (prevents information disclosure)
         safe_message = get_safe_error_message(e, "query endpoint")
@@ -2628,7 +3601,8 @@ async def query_stream(
                 "sources": cached_response["sources"],
                 "context": cached_response.get("context", []),  # Use cached context for source details
                 "cached": True,
-                "similarity": cached_response["similarity"]
+                "similarity": cached_response["similarity"],
+                "search_summary": cached_response.get("search_summary")  # 하이브리드 검색 정보
             }
 
             # Save cached response to conversation history
@@ -2676,34 +3650,188 @@ async def query_stream(
         # Cache MISS - generate new response
         logger.info("❌ Cache MISS - generating new response")
 
-        # Check embedding cache first
-        cached_embedding = cache_manager.get_embedding_cache(request.question)
+        # Organization-based access control: validate and filter group_ids
+        user_org_id = current_user.get("org_id")
 
-        if cached_embedding:
-            # Use cached embedding
-            query_embedding = cached_embedding
+        # All users (including system admins) can only search their organization's groups
+        org_groups = group_manager.get_all_groups(org_id=user_org_id)
+        org_group_ids = {g['id'] for g in org_groups}
+
+        # Validate and filter requested group_ids
+        validated_group_ids = request.group_ids
+        if request.group_ids is not None:
+            # Specific groups requested (may be empty array)
+            if len(request.group_ids) == 0:
+                # Empty array means "no groups selected" - return empty result
+                raise HTTPException(
+                    status_code=400,
+                    detail="검색할 그룹을 선택해주세요."
+                )
+            # Validate all requested groups belong to user's organization
+            validated_group_ids = [gid for gid in request.group_ids if gid in org_group_ids]
+            if len(validated_group_ids) != len(request.group_ids):
+                logger.warning(f"⚠️ User {current_user.get('user_id')} attempted to access groups outside their organization")
         else:
-            # Generate new embedding (run in thread pool to avoid blocking)
-            query_embedding = await asyncio.to_thread(
-                lambda: embedding_model.encode(request.question)[0]
-            )
-            # Save to embedding cache
-            cache_manager.set_embedding_cache(request.question, query_embedding)
+            # No specific groups requested (None) - use all organization groups
+            validated_group_ids = list(org_group_ids)
 
-        # Query RAG system with streaming (run in thread pool to avoid blocking)
-        result = await asyncio.to_thread(
-            rag.query,
-            question=request.question,
-            query_embedding=query_embedding,
-            top_k=request.top_k,
-            stream=True,
-            history=request.history,
-            temperature=request.temperature,
-            max_tokens=request.max_tokens,
-            system_prompt=request.system_prompt,
-            document_ids=request.document_ids,
-            group_ids=request.group_ids
-        )
+        # Validate document_ids (if using document filter instead of group filter)
+        if request.document_ids is not None and len(request.document_ids) == 0:
+            # Empty array means "no documents selected" - return empty result
+            raise HTTPException(
+                status_code=400,
+                detail="검색할 문서를 선택해주세요."
+            )
+
+        # Expand group_ids to include all descendants (hierarchical search)
+        expanded_group_ids = []
+        for group_id in validated_group_ids:
+            # Get all descendant group IDs (children, grandchildren, etc.)
+            descendant_ids = group_manager.get_descendant_group_ids(group_id)
+            expanded_group_ids.extend(descendant_ids)
+        # Remove duplicates
+        expanded_group_ids = list(set(expanded_group_ids))
+        logger.info(f"🏢 Org filter: {user_org_id} | 🌲 Expanded group_ids: {validated_group_ids} → {expanded_group_ids}")
+
+        # 🆕 자동 프롬프트 선택 (사용자가 지정하지 않은 경우)
+        if not request.system_prompt:
+            redis_client = cache_manager.redis
+            # 초기 추정: search_mode 기반 (실제 sources는 검색 후 알 수 있음)
+            auto_prompt = get_system_prompt_for_mode(
+                redis_client=redis_client,
+                search_mode='smart',  # Hybrid RAG의 기본 모드
+                sources_used=None  # 검색 전이므로 None
+            )
+            request.system_prompt = auto_prompt
+            logger.debug(f"📝 Auto-selected system prompt based on search mode")
+
+        # Check if Hybrid RAG is enabled and use it, otherwise use basic RAG
+        hybrid_rag = await get_hybrid_rag_orchestrator()
+
+        # Track query start time (before RAG execution)
+        import time
+        query_start_time = time.time()
+
+        if hybrid_rag is not None:
+            # Use Hybrid RAG (combines local + web + docs) - non-streaming
+            logger.info("🔗 Using Hybrid RAG (multi-source search) - streaming response")
+
+            # 사용자 선택 search_mode 사용 (기본값: smart)
+            search_mode = request.search_mode or "smart"
+            logger.info(f"🎯 Search mode: {search_mode}")
+
+            result = await hybrid_rag.answer(
+                query=request.question,
+                group_ids=expanded_group_ids,
+                user_id=current_user.get("user_id"),
+                search_mode=search_mode,  # Use user-selected search mode
+                system_prompt=request.system_prompt,
+                top_k=request.top_k,
+                document_ids=request.document_ids  # 🆕 문서 필터 전달
+            )
+
+            # Record first token time (when Hybrid RAG query completes)
+            first_token_time = time.time()
+
+            # Convert Hybrid RAG response to streaming format
+            # Extract answer and convert sources to match expected format
+            answer_text = result["answer"]
+            hybrid_sources = result["sources"]
+
+            # Create context format expected by streaming endpoint
+            context_docs = []
+            source_names = []  # String array for frontend compatibility
+
+            for source in hybrid_sources:
+                source_type = source.get("source_type", "unknown")
+                metadata = source.get("metadata", {})
+
+                # Determine source display name based on type
+                if source_type == "local":
+                    # Local documents: use filename
+                    filename = metadata.get("filename", "Unknown Document")
+                    source_name = f"{filename} (로컬 문서)"
+                elif source_type == "web":
+                    # Web sources: use title or URL
+                    title = metadata.get("title", metadata.get("url", "Web Source"))
+                    source_name = f"{title} (Tavily)"
+                elif source_type == "docs":
+                    # Official docs: use library name and title
+                    library = metadata.get("library", "Official Docs")
+                    title = metadata.get("title", "Documentation")
+                    source_name = f"{library} - {title} (Context7)"
+                else:
+                    source_name = "External Source"
+
+                context_docs.append({
+                    "text": source.get("content", ""),
+                    "filename": source_name,  # Use formatted name
+                    "score": source.get("score", 0.0),
+                    "source_type": source_type
+                })
+
+                source_names.append(source_name)
+
+            # Remove duplicates while preserving order
+            unique_source_names = []
+            seen = set()
+            for name in source_names:
+                if name not in seen:
+                    seen.add(name)
+                    unique_source_names.append(name)
+
+            # Create result dict matching basic RAG format
+            result = {
+                "answer": answer_text,
+                "context": context_docs,
+                "sources": unique_source_names,  # String array for frontend
+                "search_summary": result.get("search_summary", {}),
+                "generator": None  # No streaming generator for Hybrid RAG
+            }
+        else:
+            # Use basic RAG (local documents only) with streaming
+            logger.info("📚 Using basic RAG (local documents only) - streaming")
+
+            # Update prompt for local-only mode
+            if not request.system_prompt:
+                redis_client = cache_manager.redis
+                request.system_prompt = get_system_prompt_for_mode(
+                    redis_client=redis_client,
+                    search_mode='local-only',
+                    sources_used=['local']
+                )
+
+            # Check embedding cache first
+            cached_embedding = cache_manager.get_embedding_cache(request.question)
+
+            if cached_embedding:
+                # Use cached embedding
+                query_embedding = cached_embedding
+            else:
+                # Generate new embedding (run in thread pool to avoid blocking)
+                query_embedding = await asyncio.to_thread(
+                    lambda: embedding_model.encode(request.question)[0]
+                )
+                # Save to embedding cache
+                cache_manager.set_embedding_cache(request.question, query_embedding)
+
+            # Query RAG system with streaming (run in thread pool to avoid blocking)
+            result = await asyncio.to_thread(
+                rag.query,
+                question=request.question,
+                query_embedding=query_embedding,
+                top_k=request.top_k,
+                stream=True,
+                history=request.history,
+                temperature=request.temperature,
+                max_tokens=request.max_tokens,
+                system_prompt=request.system_prompt,
+                document_ids=request.document_ids,
+                group_ids=expanded_group_ids  # Use validated and expanded group_ids
+            )
+
+            # Record first token time (when RAG query completes and answer is ready)
+            first_token_time = time.time()
 
         # Prepare context and sources for the first message
         context_data = {
@@ -2716,35 +3844,53 @@ async def query_stream(
                 }
                 for doc in result["context"]
             ],
-            "cached": False
+            "cached": False,
+            "search_summary": result.get("search_summary")  # 하이브리드 검색 정보
         }
 
         # Collect response for caching and conversation history
         full_response = []
 
         async def generate_stream():
-            import time
+            nonlocal query_start_time, first_token_time
 
-            # Track token generation statistics
-            start_time = time.time()
-            first_token_time = None
+            # Use query start time as the actual start time
+            start_time = query_start_time
+            # first_token_time is already set when rag.query() completed
             token_count = 0
 
             # First, send sources and context
             yield f"data: {json.dumps({'type': 'metadata', 'data': context_data})}\n\n"
 
-            # Then stream the answer
-            for chunk in result["answer"]:
-                if chunk:
-                    # Track first token time
-                    if first_token_time is None:
-                        first_token_time = time.time()
+            # Check if answer is a generator (streaming) or string (non-streaming)
+            import inspect
+            is_generator = inspect.isgenerator(result["answer"])
 
-                    # Count tokens (approximate: split by whitespace + punctuation)
-                    token_count += len(chunk.split())
+            if not is_generator:
+                # Hybrid RAG: answer is a complete string, split into chunks for streaming
+                answer_text = result["answer"]
+                chunk_size = 8  # Characters per chunk
 
-                    full_response.append(chunk)
-                    yield f"data: {json.dumps({'type': 'chunk', 'data': chunk})}\n\n"
+                for i in range(0, len(answer_text), chunk_size):
+                    chunk = answer_text[i:i + chunk_size]
+                    if chunk:
+                        # Count tokens (approximate)
+                        token_count += len(chunk.split())
+                        full_response.append(chunk)
+                        yield f"data: {json.dumps({'type': 'chunk', 'data': chunk})}\n\n"
+
+                        # Small delay to simulate streaming
+                        import asyncio
+                        await asyncio.sleep(0.01)
+            else:
+                # answer is a generator, stream naturally
+                for chunk in result["answer"]:
+                    if chunk:
+                        # Count tokens (approximate: split by whitespace + punctuation)
+                        token_count += len(chunk.split())
+
+                        full_response.append(chunk)
+                        yield f"data: {json.dumps({'type': 'chunk', 'data': chunk})}\n\n"
 
             # Save to cache after completion
             complete_response = ''.join(full_response)
@@ -2856,6 +4002,9 @@ async def query_stream(
                 "Connection": "keep-alive",
             }
         )
+    except HTTPException:
+        # Re-raise HTTPException as-is (e.g., 400 errors with custom messages)
+        raise
     except Exception as e:
         # Security: Use sanitized error message (prevents information disclosure)
         safe_message = get_safe_error_message(e, "streaming query endpoint")
@@ -3353,8 +4502,8 @@ async def reindex(
 
     try:
         # 관리자 권한 확인
-        redis_client = request.app.state.cache_manager.redis
-        require_admin(request, redis_client)
+        if current_user.get("role") != "admin":
+            raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다")
 
         # If already reindexing, return current status
         if is_reindexing:
@@ -3673,16 +4822,34 @@ async def reset_validation_stats(
 
 @app.get("/api/documents", tags=["Documents"])
 async def list_documents(
+    filter_scope: str = None,
     current_user: dict = Depends(get_current_active_user)
 ):
     """
     List all indexed documents with metadata (로그인 필요)
     Supports: PDF, HWP, HWPX, DOC, DOCX, XLS, XLSX, PPT, PPTX, TXT
+
+    Args:
+        filter_scope: "user" - always filter by organization (for search filters)
+                     None - admin sees all, users see organization only (for admin page)
     """
     try:
         data_path = Path(DATA_DIR)
         if not data_path.exists():
             return {"documents": []}
+
+        # Get user's organization and groups
+        user_org_id = current_user.get("org_id")
+        is_admin = current_user.get("role") == "admin"
+
+        # Determine scope: if filter_scope="user", always use organization scope
+        # Otherwise, admin sees all, regular users see organization only
+        if filter_scope == "user" or not is_admin:
+            org_groups = group_manager.get_all_groups(org_id=user_org_id)
+            org_group_ids = {g['id'] for g in org_groups}
+        else:
+            org_groups = group_manager.get_all_groups()
+            org_group_ids = {g['id'] for g in org_groups}
 
         # Get all supported document files
         import itertools
@@ -3716,6 +4883,17 @@ async def list_documents(
         # Build document list with pre-fetched chunk counts
         documents = []
         for pdf_file in all_files:
+            # Filter by organization: check if document's group belongs to user's org
+            doc_group_id = cache_manager.redis.get(f'doc:group:{pdf_file.name}')
+            if doc_group_id:
+                doc_group_id = doc_group_id.decode('utf-8')
+                # Skip documents not in user's organization groups
+                if doc_group_id not in org_group_ids:
+                    continue
+            # If document has no group, skip it (documents without groups are not accessible)
+            else:
+                continue
+
             # Get file stats
             stat = pdf_file.stat()
 
@@ -3757,7 +4935,8 @@ async def list_documents(
                 "created_at": datetime.fromtimestamp(stat.st_mtime).isoformat(),  # For JavaScript formatDate
                 "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),  # Keep for backward compatibility
                 "chunk_count": chunk_count,
-                "indexed": chunk_count > 0
+                "indexed": chunk_count > 0,
+                "group_id": doc_group_id  # Add group_id for reference
             })
 
         # Sort by modified date (newest first)
@@ -3854,8 +5033,8 @@ async def upload_document(
     """
     try:
         # 관리자 권한 확인
-        redis_client = request.app.state.cache_manager.redis
-        require_admin(request, redis_client)
+        if current_user.get("role") != "admin":
+            raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다")
 
         # Use authenticated user
         username = current_user.get("username", "system")
@@ -3961,22 +5140,34 @@ async def upload_document(
 
         # v2.3.0: Check for duplicate content
         # If updating existing file with same content, skip version creation
+        logger.debug(f"Duplicate check: is_update={is_update}, document_version={document_version is not None}")
         if is_update and document_version:
             latest_version = document_version.get_latest_version(safe_filename)
+            logger.debug(f"Latest version for {safe_filename}: {latest_version}")
             if latest_version:
                 latest_meta = document_version.get_version(safe_filename, latest_version)
-                if latest_meta and latest_meta.get('file_hash') == file_hash_hex:
-                    # Same content - no need to create new version
-                    # Keep the file in data/ directory (do NOT delete)
-                    logger.info(f"File content unchanged - skipping version creation for {safe_filename}")
-                    return {
-                        "message": f"File '{safe_filename}' is identical to current version - no update needed",
-                        "filename": safe_filename,
-                        "current_version": latest_version,
-                        "chunk_count": latest_meta.get('chunk_count', 0),
-                        "indexed": True,
-                        "is_duplicate": True
-                    }
+                logger.debug(f"Latest metadata: {latest_meta}")
+                if latest_meta:
+                    stored_hash = latest_meta.get('file_hash')
+                    logger.info(f"Hash comparison: stored={stored_hash}, new={file_hash_hex}, match={stored_hash == file_hash_hex}")
+                    if stored_hash == file_hash_hex:
+                        # Same content - no need to create new version
+                        # Keep the file in data/ directory (do NOT delete)
+                        logger.warning(f"⚠️ 중복 파일 감지: '{safe_filename}'는 이미 업로드된 파일과 동일합니다")
+                        return {
+                            "message": f"이 파일은 이미 업로드된 '{safe_filename}'와 동일합니다. 중복 업로드가 필요하지 않습니다.",
+                            "filename": safe_filename,
+                            "current_version": latest_version,
+                            "chunk_count": latest_meta.get('chunk_count', 0),
+                            "indexed": True,
+                            "is_duplicate": True
+                        }
+                    else:
+                        logger.info(f"File content changed - will create new version (old hash: {stored_hash[:8]}..., new hash: {file_hash_hex[:8]}...)")
+                else:
+                    logger.warning(f"No metadata found for version {latest_version}")
+            else:
+                logger.info(f"No previous version found for {safe_filename} - this is the first version")
 
         # Delete old hash key BEFORE duplicate check (prevents orphaned hashes)
         # This must happen before duplicate check to work correctly
@@ -4030,6 +5221,38 @@ async def upload_document(
             texts = [chunk["text"] for chunk in chunks]
             embeddings = embedding_model.encode(texts, batch_size=32, show_progress_bar=False)
 
+            # 🆕 Delete existing chunks before adding new ones (prevent duplicate chunks with old group_ids)
+            if is_update:
+                try:
+                    deleted_count = vector_db.delete_by_filename(safe_filename)
+                    logger.info(f"🗑️ Deleted {deleted_count} old chunks for {safe_filename} before reindexing")
+                except Exception as e:
+                    logger.warning(f"Failed to delete old chunks: {e}")
+                    # Continue with upload even if deletion fails
+
+            # 🆕 Assign document to group BEFORE adding chunks (so chunks get correct group_id)
+            try:
+                default_group_id = group_manager.get_default_group_id()
+
+                # Assign user's organization to default group if not already assigned
+                user_org_id = current_user.get('organization_id')
+                if user_org_id:
+                    default_group_key = f'group:{default_group_id}'
+                    default_group_data = cache_manager.redis.hgetall(default_group_key)
+
+                    # Only assign organization if default group has no organization
+                    if not default_group_data.get(b'organization_id'):
+                        cache_manager.redis.hset(default_group_key, 'organization_id', user_org_id)
+                        cache_manager.redis.sadd(f'org:groups:{user_org_id}', default_group_id)
+                        logger.info(f"✅ Assigned default group to organization: {user_org_id}")
+
+                # Update doc:group mapping BEFORE add_documents
+                group_manager.assign_document(safe_filename, default_group_id)
+                logger.info(f"📎 Assigned {safe_filename} to default group (미분류) before indexing")
+            except Exception as e:
+                logger.warning(f"Failed to assign document to default group: {e}")
+                # Continue with upload even if group assignment fails
+
             # Add to vector database
             vector_db.add_documents(chunks, embeddings)
 
@@ -4047,7 +5270,7 @@ async def upload_document(
                     version_meta = document_version.create_version(
                         source_path=file_path,
                         filename=safe_filename,
-                        user_id=current_user,
+                        user_id=username,
                         comment="Uploaded via API" if not is_update else "Updated via API",
                         chunk_count=len(chunks)
                     )
@@ -4068,14 +5291,7 @@ async def upload_document(
             # Clear document count cache (new document added)
             vector_db.clear_document_count_cache()
 
-            # Automatically assign new document to default group (미분류)
-            try:
-                default_group_id = group_manager.get_default_group_id()
-                group_manager.assign_document(safe_filename, default_group_id)
-                logger.info(f"Assigned {safe_filename} to default group (미분류)")
-            except Exception as e:
-                logger.warning(f"Failed to assign document to default group: {e}")
-                # Don't fail the upload if group assignment fails
+            # Note: Group assignment moved earlier (before add_documents) to ensure correct group_id
 
             # Get file stats
             stat = file_path.stat()
@@ -5155,6 +6371,156 @@ async def get_suggested_questions(
 
 
 # ============================================================================
+# 🆕 독립 검색 API 엔드포인트 (Tavily, Context7)
+# ============================================================================
+
+@app.post("/api/search/web", response_model=WebSearchResponse, tags=["Search"])
+async def search_web(
+    request: WebSearchRequest,
+    current_user: dict = Depends(get_current_active_user),
+    app_request: Request = None
+):
+    """
+    Tavily 웹 검색 독립 API
+
+    - 인증 필요 (로그인한 사용자만)
+    - Tavily API 키는 서버에서 관리
+    - 검색 결과를 그대로 반환 (LLM 답변 생성 안 함)
+    """
+    try:
+        # Hybrid RAG 인스턴스 가져오기 (lazy 초기화)
+        rag = await get_hybrid_rag_orchestrator()
+
+        # Tavily 초기화 확인
+        if not rag.tavily_client:
+            raise HTTPException(
+                status_code=503,
+                detail="웹 검색 기능이 비활성화되어 있습니다. Tavily API 키를 설정해주세요."
+            )
+
+        logger.info(f"🌐 웹 검색 요청: '{request.query}' (depth={request.search_depth})")
+
+        # Tavily 검색 수행
+        search_params = {
+            "query": request.query,
+            "max_results": request.max_results,
+            "search_depth": request.search_depth,
+            "include_answer": False,
+            "include_raw_content": True
+        }
+
+        # 도메인 필터 추가 (유효한 도메인만 포함)
+        if request.include_domains:
+            # 유효한 도메인만 필터링 (점이 있고 최소 2글자 이상)
+            valid_domains = [d for d in request.include_domains if '.' in d and len(d) > 2]
+            if valid_domains:
+                search_params["include_domains"] = valid_domains
+        if request.exclude_domains:
+            # 유효한 도메인만 필터링
+            valid_domains = [d for d in request.exclude_domains if '.' in d and len(d) > 2]
+            if valid_domains:
+                search_params["exclude_domains"] = valid_domains
+
+        search_results = rag.tavily_client.search(**search_params)
+
+        # 결과 포맷팅
+        formatted_results = []
+        for result in search_results.get('results', []):
+            formatted_results.append({
+                'title': result.get('title', ''),
+                'url': result.get('url', ''),
+                'content': result.get('content', ''),
+                'published_date': result.get('published_date', ''),
+                'score': result.get('score', 0.0)
+            })
+
+        logger.success(f"✅ 웹 검색 완료: {len(formatted_results)}개 결과")
+
+        return WebSearchResponse(
+            success=True,
+            results=formatted_results,
+            query=request.query,
+            search_depth=request.search_depth
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ 웹 검색 실패: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"웹 검색 중 오류가 발생했습니다: {str(e)}"
+        )
+
+
+@app.post("/api/search/docs", response_model=DocsSearchResponse, tags=["Search"])
+async def search_docs(
+    request: DocsSearchRequest,
+    current_user: dict = Depends(get_current_active_user),
+    app_request: Request = None
+):
+    """
+    Context7 공식 문서 검색 독립 API
+
+    - 인증 필요 (로그인한 사용자만)
+    - Context7 API 키는 서버에서 관리
+    - React, Vue, Spring Boot 등 공식 문서 검색
+    """
+    try:
+        # Hybrid RAG 인스턴스 가져오기 (lazy 초기화)
+        rag = await get_hybrid_rag_orchestrator()
+
+        # Context7 초기화 확인
+        if not rag.context7_client:
+            raise HTTPException(
+                status_code=503,
+                detail="공식 문서 검색 기능이 비활성화되어 있습니다. Context7을 설정해주세요."
+            )
+
+        logger.info(f"📚 공식 문서 검색 요청: '{request.query}' (tech_stack={request.tech_stack})")
+
+        # tech_stack이 명시되지 않은 경우 쿼리 분석으로 감지
+        tech_stack = request.tech_stack
+        if not tech_stack and rag.query_analyzer:
+            analysis = rag.query_analyzer.analyze(request.query)
+            tech_stack = analysis.get('tech_stack')
+            logger.info(f"🔍 자동 감지된 기술 스택: {tech_stack}")
+
+        # Context7 검색 수행
+        analysis = {'tech_stack': tech_stack} if tech_stack else {}
+        docs_results = await rag._search_docs(request.query, analysis)
+
+        # 결과 포맷팅
+        formatted_results = []
+        for result in docs_results[:request.max_results]:
+            formatted_results.append({
+                'title': result.get('metadata', {}).get('title', ''),
+                'url': result.get('metadata', {}).get('url', ''),
+                'content': result.get('content', ''),
+                'library': result.get('metadata', {}).get('library', tech_stack),
+                'relevance_score': result.get('score', 0.0)
+            })
+
+        logger.success(f"✅ 공식 문서 검색 완료: {len(formatted_results)}개 결과")
+
+        return DocsSearchResponse(
+            success=True,
+            results=formatted_results,
+            query=request.query,
+            tech_stack=tech_stack
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ 공식 문서 검색 실패: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"공식 문서 검색 중 오류가 발생했습니다: {str(e)}"
+        )
+
+
+# ============================================================================
 # Group Management API Endpoints
 # ============================================================================
 
@@ -5171,6 +6537,7 @@ class GroupUpdateRequest(BaseModel):
     description: Optional[str] = None
     color: Optional[str] = None
     icon: Optional[str] = None
+    parent_id: Optional[str] = None  # 상위 그룹 변경 지원
 
 
 class GroupMoveRequest(BaseModel):
@@ -5187,17 +6554,32 @@ class BatchDocumentAssignRequest(BaseModel):
 
 @app.get("/api/groups", tags=["Groups"])
 async def list_groups(
+    filter_scope: str = None,
     current_user: dict = Depends(get_current_active_user)
 ):
     """
     Get all groups with hierarchy
 
+    Args:
+        filter_scope: "user" - always filter by organization (for search filters)
+                     None - admin sees all, users see organization only (for admin page)
+
     Returns:
         List of all groups with their metadata and tree structure
     """
     try:
-        groups = group_manager.get_all_groups()
-        tree = group_manager.get_group_tree()
+        # Get user's organization
+        user_org_id = current_user.get("org_id")
+        is_admin = current_user.get("role") == "admin"
+
+        # Determine scope: if filter_scope="user", always use organization scope
+        # Otherwise, admin sees all, regular users see organization only
+        if filter_scope == "user" or not is_admin:
+            groups = group_manager.get_all_groups(org_id=user_org_id)
+            tree = group_manager.get_group_tree(org_id=user_org_id)
+        else:
+            groups = group_manager.get_all_groups()
+            tree = group_manager.get_group_tree()
 
         return {
             "groups": groups,
@@ -5217,6 +6599,9 @@ async def create_group(
     """
     Create a new group
 
+    Group is automatically assigned to the default organization.
+    Admin can manually assign the group to additional organization(s) after creation.
+
     Args:
         request: Group creation parameters
 
@@ -5226,18 +6611,33 @@ async def create_group(
     try:
         group_id = group_manager.create_group(
             name=request.name,
+            org_id=None,  # Will be assigned to default org below
             description=request.description,
             color=request.color,
             icon=request.icon,
             parent_id=request.parent_id,
-            created_by="system"
+            created_by=current_user.get("user_id", "system")
         )
 
         if not group_id:
             raise HTTPException(status_code=400, detail="Failed to create group")
 
+        # Automatically assign to default organization (home for all groups)
+        from .organization_manager import OrganizationManager
+        org_manager = OrganizationManager(group_manager.client)
+        default_org_id = org_manager.get_default_organization_id()
+
+        try:
+            group_manager.add_group_to_organization(
+                group_id=group_id,
+                org_id=default_org_id,
+                updated_by=current_user.get("username", "system")
+            )
+            logger.info(f"Created group: {group_id} ({request.name}) - assigned to default organization")
+        except Exception as e:
+            logger.warning(f"Failed to assign group {group_id} to default organization: {e}")
+
         group = group_manager.get_group(group_id)
-        logger.info(f"Created group: {group_id} ({request.name})")
 
         return {
             "success": True,
@@ -5245,7 +6645,7 @@ async def create_group(
             "group": group
         }
     except ValueError as e:
-        # Validation errors (e.g., invalid parent_id)
+        # Validation errors (e.g., invalid parent_id, parent org mismatch)
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Failed to create group: {e}")
@@ -5280,6 +6680,11 @@ async def update_group(
             updates["color"] = request.color
         if request.icon is not None:
             updates["icon"] = request.icon
+        # Handle parent_id: accept both None and empty string as "no parent"
+        if request.parent_id is not None:
+            updates["parent_id"] = request.parent_id if request.parent_id else None
+        elif hasattr(request, 'parent_id'):  # Explicitly check if field is present even if None
+            updates["parent_id"] = None
 
         if not updates:
             raise HTTPException(status_code=400, detail="No fields to update")
@@ -6605,6 +8010,315 @@ Spring Boot는...
         raise HTTPException(status_code=500, detail="Failed to retrieve system prompt")
 
 
+# Hybrid RAG Configuration Models
+class HybridRAGConfigRequest(BaseModel):
+    enabled: bool = Field(..., description="Hybrid RAG 활성화 여부")
+    web_search: bool = Field(..., description="웹 검색 활성화 여부")
+    doc_search: bool = Field(..., description="공식 문서 검색 활성화 여부")
+    search_mode: str = Field(
+        default="smart",
+        description="검색 모드 - smart: 질문 분석 기반 자동 선택, comprehensive: 체크된 모든 도구 사용"
+    )
+
+
+@app.get("/api/admin/hybrid-rag/config", tags=["Admin", "Settings"])
+async def get_hybrid_rag_config(request: Request):
+    """Hybrid RAG 설정 조회 (관리자 전용)
+    
+    Returns:
+        {
+            'success': True,
+            'config': {
+                'enabled': bool,
+                'web_search': bool,
+                'doc_search': bool
+            }
+        }
+    """
+    try:
+        # 관리자 권한 확인
+        from .auth.utils import require_admin
+        
+        redis_client = request.app.state.cache_manager.redis
+        require_admin(request, redis_client)
+        
+        # Redis에서 현재 설정 조회
+        enabled = redis_client.get("config:hybrid_rag_enabled")
+        web_search = redis_client.get("config:hybrid_rag_web_search")
+        doc_search = redis_client.get("config:hybrid_rag_doc_search")
+        search_mode = redis_client.get("config:hybrid_rag_search_mode")
+
+        # bytes to str 변환 및 기본값 설정
+        config = {
+            'enabled': enabled.decode() == "true" if enabled else False,
+            'web_search': web_search.decode() == "true" if web_search else False,
+            'doc_search': doc_search.decode() == "true" if doc_search else False,
+            'search_mode': search_mode.decode() if search_mode else "smart"
+        }
+        
+        return {
+            'success': True,
+            'config': config
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get Hybrid RAG config: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve Hybrid RAG configuration")
+
+
+@app.get("/api/hybrid-rag/status", tags=["Settings"])
+async def get_hybrid_rag_status(request: Request):
+    """Hybrid RAG 활성화 상태 조회 (인증된 사용자)
+
+    일반 사용자가 하이브리드 RAG 기능이 활성화되어 있는지 확인할 수 있는 API
+    검색 모드 UI를 제어하는데 사용됩니다.
+
+    Returns:
+        {
+            'success': True,
+            'enabled': bool  # Hybrid RAG 활성화 여부
+        }
+    """
+    try:
+        redis_client = request.app.state.cache_manager.redis
+
+        # Redis에서 현재 설정 조회
+        enabled = redis_client.get("config:hybrid_rag_enabled")
+
+        # bytes to bool 변환 및 기본값 설정
+        is_enabled = enabled.decode() == "true" if enabled else False
+
+        return {
+            'success': True,
+            'enabled': is_enabled
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get Hybrid RAG status: {e}")
+        # 에러 시에도 안전하게 false 반환
+        return {
+            'success': True,
+            'enabled': False
+        }
+
+
+@app.put("/api/admin/hybrid-rag/config", tags=["Admin", "Settings"])
+async def update_hybrid_rag_config(
+    config_request: HybridRAGConfigRequest,
+    request: Request
+):
+    """Hybrid RAG 설정 업데이트 (관리자 전용)
+    
+    Args:
+        config_request: Hybrid RAG 설정
+        
+    Returns:
+        {
+            'success': True,
+            'message': str,
+            'config': dict
+        }
+    """
+    try:
+        # 관리자 권한 확인
+        from .auth.utils import require_admin
+        
+        redis_client = request.app.state.cache_manager.redis
+        require_admin(request, redis_client)
+        
+        # Redis에 설정 저장
+        redis_client.set("config:hybrid_rag_enabled", "true" if config_request.enabled else "false")
+        redis_client.set("config:hybrid_rag_web_search", "true" if config_request.web_search else "false")
+        redis_client.set("config:hybrid_rag_doc_search", "true" if config_request.doc_search else "false")
+        redis_client.set("config:hybrid_rag_search_mode", config_request.search_mode)
+
+        # Hybrid RAG orchestrator 재초기화를 위해 None으로 설정
+        global hybrid_rag_orchestrator
+        hybrid_rag_orchestrator = None
+
+        logger.info(f"✅ Hybrid RAG config updated: enabled={config_request.enabled}, web={config_request.web_search}, docs={config_request.doc_search}, mode={config_request.search_mode}")
+
+        return {
+            'success': True,
+            'message': 'Hybrid RAG 설정이 업데이트되었습니다',
+            'config': {
+                'enabled': config_request.enabled,
+                'web_search': config_request.web_search,
+                'doc_search': config_request.doc_search,
+                'search_mode': config_request.search_mode
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to update Hybrid RAG config: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update Hybrid RAG configuration")
+
+
+@app.get("/api/hybrid-rag/status", tags=["Settings"])
+async def get_hybrid_rag_status(
+    current_user: dict = Depends(get_current_active_user),
+    request: Request = None
+):
+    """Hybrid RAG 활성화 상태 조회 (일반 사용자용)
+
+    Returns:
+        {
+            'success': True,
+            'enabled': bool  # Hybrid RAG 활성화 여부
+        }
+    """
+    try:
+        redis_client = request.app.state.cache_manager.redis
+
+        # Redis에서 Hybrid RAG 활성화 상태 조회
+        enabled = redis_client.get("config:hybrid_rag_enabled")
+
+        # bytes to str 변환 및 기본값 설정
+        is_enabled = enabled.decode() == "true" if enabled else False
+
+        return {
+            'success': True,
+            'enabled': is_enabled
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get Hybrid RAG status: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve Hybrid RAG status")
+
+
+@app.get("/api/admin/prompts", tags=["Admin", "Settings"])
+async def get_all_prompts(request: Request):
+    """모든 시스템 프롬프트 조회 (관리자 전용)
+
+    Returns:
+        {
+            'success': True,
+            'prompts': {
+                'basic': str,  # 일반 검색용 프롬프트 (로컬 문서만)
+                'hybrid': str,  # 하이브리드 검색용 프롬프트 (로컬 + 외부 도구)
+                'tools_only': str  # 외부 도구 전용 프롬프트 (웹 + 공식문서만)
+            }
+        }
+    """
+    try:
+        # 관리자 권한 확인
+        from .auth.utils import require_admin
+
+        redis_client = request.app.state.cache_manager.redis
+        require_admin(request, redis_client)
+
+        # 각 프롬프트 가져오기
+        basic_prompt = redis_client.get(PROMPT_KEY_BASIC)
+        hybrid_prompt = redis_client.get(PROMPT_KEY_HYBRID)
+        tools_only_prompt = redis_client.get(PROMPT_KEY_TOOLS_ONLY)
+
+        # bytes to str 변환
+        if isinstance(basic_prompt, bytes):
+            basic_prompt = basic_prompt.decode('utf-8')
+        if isinstance(hybrid_prompt, bytes):
+            hybrid_prompt = hybrid_prompt.decode('utf-8')
+        if isinstance(tools_only_prompt, bytes):
+            tools_only_prompt = tools_only_prompt.decode('utf-8')
+
+        # 기본값 적용
+        if not basic_prompt:
+            basic_prompt = DEFAULT_BASIC_PROMPT
+        if not hybrid_prompt:
+            hybrid_prompt = DEFAULT_HYBRID_PROMPT
+        if not tools_only_prompt:
+            tools_only_prompt = DEFAULT_TOOLS_ONLY_PROMPT
+
+        return {
+            'success': True,
+            'prompts': {
+                'basic': basic_prompt,
+                'hybrid': hybrid_prompt,
+                'tools_only': tools_only_prompt
+            }
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get prompts: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve prompts")
+
+
+@app.put("/api/admin/prompts", tags=["Admin", "Settings"])
+async def update_prompts(data: PromptsUpdateRequest, request: Request):
+    """시스템 프롬프트 업데이트 (관리자 전용)
+
+    Request body:
+        {
+            "basic": "일반 검색용 프롬프트 (optional)",
+            "hybrid": "하이브리드 검색용 프롬프트 (optional)",
+            "tools_only": "외부 도구 전용 프롬프트 (optional)"
+        }
+
+    Returns:
+        {
+            'success': True,
+            'message': '프롬프트 업데이트 완료: basic, hybrid, tools_only'
+        }
+    """
+    try:
+        # 관리자 권한 확인
+        from .auth.utils import require_admin, extract_token_from_request, verify_token
+
+        redis_client = request.app.state.cache_manager.redis
+        require_admin(request, redis_client)
+
+        updated = []
+
+        if data.basic is not None:
+            # 유효성 검증
+            if len(data.basic) > 10000:
+                raise HTTPException(status_code=400, detail="일반 프롬프트가 너무 깁니다 (최대 10,000자)")
+
+            redis_client.set(PROMPT_KEY_BASIC, data.basic)
+            redis_client.set(PROMPT_KEY_LEGACY, data.basic)  # 레거시 호환
+            updated.append('basic')
+
+        if data.hybrid is not None:
+            # 유효성 검증
+            if len(data.hybrid) > 10000:
+                raise HTTPException(status_code=400, detail="하이브리드 프롬프트가 너무 깁니다 (최대 10,000자)")
+
+            redis_client.set(PROMPT_KEY_HYBRID, data.hybrid)
+            updated.append('hybrid')
+
+        if data.tools_only is not None:
+            # 유효성 검증
+            if len(data.tools_only) > 10000:
+                raise HTTPException(status_code=400, detail="외부 도구 전용 프롬프트가 너무 깁니다 (최대 10,000자)")
+
+            redis_client.set(PROMPT_KEY_TOOLS_ONLY, data.tools_only)
+            updated.append('tools_only')
+
+        if not updated:
+            raise HTTPException(status_code=400, detail="업데이트할 프롬프트를 제공해주세요")
+
+        # 로깅
+        token = extract_token_from_request(request)
+        user_data = verify_token(token)
+        logger.info(f"Prompts updated by user {user_data['user_id']}: {', '.join(updated)}")
+
+        return {
+            'success': True,
+            'message': f'프롬프트 업데이트 완료: {", ".join(updated)}'
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to update prompts: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update prompts")
+
+
 # ============================================================================
 # Audit Log APIs (v2.4.0)
 # ============================================================================
@@ -7103,6 +8817,173 @@ async def update_model_config(request: Request):
     except Exception as e:
         logger.error(f"Failed to update model config: {e}")
         raise HTTPException(status_code=500, detail="Failed to update model configuration")
+
+
+# ============================================================
+# Metrics & Performance Monitoring APIs (Admin Only)
+# ============================================================
+
+@app.get("/api/admin/metrics/summary", tags=["Admin", "Metrics"])
+async def get_metrics_summary(
+    current_user: dict = Depends(get_current_active_user),
+    request: Request = None
+):
+    """
+    성능 메트릭 종합 요약 조회 (관리자 전용)
+
+    Returns:
+        {
+            'global': 전체 통계,
+            'today': 오늘 통계,
+            'recent_24h': 최근 24시간 통계,
+            'trend': 트렌드 분석,
+            'daily': 일별 통계 (최근 7일),
+            'hourly': 시간별 통계 (최근 24시간)
+        }
+    """
+    try:
+        # 관리자 권한 확인
+        from .auth.utils import require_admin
+        redis_client = request.app.state.cache_manager.redis
+        require_admin(request, redis_client)
+
+        # 메트릭 수집기 초기화
+        metrics = MetricsCollector(redis_client)
+
+        # 종합 요약 조회
+        summary = metrics.get_summary()
+
+        return {
+            'success': True,
+            'data': summary
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get metrics summary: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve metrics summary")
+
+
+@app.get("/api/admin/metrics/recent", tags=["Admin", "Metrics"])
+async def get_recent_searches(
+    limit: int = 100,
+    current_user: dict = Depends(get_current_active_user),
+    request: Request = None
+):
+    """
+    최근 검색 기록 조회 (관리자 전용)
+
+    Args:
+        limit: 조회할 개수 (기본 100, 최대 1000)
+
+    Returns:
+        최근 검색 메트릭 리스트
+    """
+    try:
+        # 관리자 권한 확인
+        from .auth.utils import require_admin
+        redis_client = request.app.state.cache_manager.redis
+        require_admin(request, redis_client)
+
+        # Limit 검증
+        limit = min(limit, 1000)
+
+        # 메트릭 수집기 초기화
+        metrics = MetricsCollector(redis_client)
+
+        # 최근 검색 조회
+        recent_searches = metrics.get_recent_searches(limit=limit)
+
+        return {
+            'success': True,
+            'data': recent_searches,
+            'count': len(recent_searches)
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get recent searches: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve recent searches")
+
+
+@app.get("/api/admin/metrics/source-performance", tags=["Admin", "Metrics"])
+async def get_source_performance(
+    current_user: dict = Depends(get_current_active_user),
+    request: Request = None
+):
+    """
+    소스별 성능 비교 (관리자 전용)
+
+    Returns:
+        {
+            'local': {'count': int, 'avg_time': float, 'avg_results': float},
+            'web': {'count': int, 'avg_time': float, 'avg_results': float},
+            'docs': {'count': int, 'avg_time': float, 'avg_results': float}
+        }
+    """
+    try:
+        # 관리자 권한 확인
+        from .auth.utils import require_admin
+        redis_client = request.app.state.cache_manager.redis
+        require_admin(request, redis_client)
+
+        # 메트릭 수집기 초기화
+        metrics = MetricsCollector(redis_client)
+
+        # 소스별 성능 조회
+        source_perf = metrics.get_source_performance()
+
+        return {
+            'success': True,
+            'data': source_perf
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get source performance: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve source performance")
+
+
+@app.delete("/api/admin/metrics/cleanup", tags=["Admin", "Metrics"])
+async def cleanup_old_metrics(
+    days: int = 30,
+    current_user: dict = Depends(get_current_active_user),
+    request: Request = None
+):
+    """
+    오래된 메트릭 데이터 삭제 (관리자 전용)
+
+    Args:
+        days: 보관 기간 (일) - 기본 30일
+
+    Returns:
+        성공 메시지
+    """
+    try:
+        # 관리자 권한 확인
+        from .auth.utils import require_admin
+        redis_client = request.app.state.cache_manager.redis
+        require_admin(request, redis_client)
+
+        # 메트릭 수집기 초기화
+        metrics = MetricsCollector(redis_client)
+
+        # 오래된 데이터 삭제
+        metrics.clear_old_data(days=days)
+
+        return {
+            'success': True,
+            'message': f'{days}일 이전 메트릭 데이터가 삭제되었습니다'
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to cleanup old metrics: {e}")
+        raise HTTPException(status_code=500, detail="Failed to cleanup old metrics")
 
 
 if __name__ == "__main__":

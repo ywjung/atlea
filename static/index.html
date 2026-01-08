@@ -4,6 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="environment" content="production">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
@@ -23,7 +24,7 @@
             }
         })();
     </script>
-    <link rel="stylesheet" href="/static/style.css?v=1767114105">
+    <link rel="stylesheet" href="/static/style.css?v=1767392000">
     <link rel="stylesheet" href="/static/error-styles.css?v=34">
     <link rel="stylesheet" href="/static/streaming-styles.css?v=34">
     <link rel="stylesheet" href="/static/autocomplete-styles.css?v=34">
@@ -222,6 +223,19 @@
             opacity: 0.7;
         }
 
+        .user-org {
+            font-size: 12px;
+            opacity: 1;
+            color: #ffffff;
+            font-weight: 600;
+            background: rgba(255, 255, 255, 0.2);
+            padding: 2px 8px;
+            border-radius: 10px;
+            margin-top: 2px;
+            display: inline-block;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+
         .dropdown-icon {
             width: 16px;
             height: 16px;
@@ -274,6 +288,13 @@
         .dropdown-header-role {
             font-size: 12px;
             color: #6b7280;
+        }
+
+        .dropdown-header-org {
+            font-size: 11px;
+            color: #667eea;
+            font-weight: 500;
+            margin-top: 2px;
         }
 
         .dropdown-item {
@@ -836,16 +857,13 @@
                         <div class="user-details">
                             <span class="user-name" id="userName">사용자</span>
                             <span class="user-role" id="userRole">일반</span>
+                            <span class="user-org" id="userOrg" style="display: none;">조직 없음</span>
                         </div>
                         <svg class="dropdown-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
                             <path d="M6 9l6 6 6-6" stroke-width="2" stroke-linecap="round"/>
                         </svg>
                     </div>
                     <div class="user-dropdown" id="userDropdown">
-                        <div class="dropdown-header">
-                            <div class="dropdown-header-name" id="dropdownName">사용자</div>
-                            <div class="dropdown-header-role" id="dropdownRole">일반</div>
-                        </div>
                         <div class="dropdown-item" onclick="goToProfile(event)">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
                                 <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" stroke-width="2" stroke-linecap="round"/>
@@ -853,6 +871,7 @@
                             </svg>
                             프로필 관리
                         </div>
+                        <!-- 조직 변경 기능 비활성화: 관리자만 조직 할당 가능 -->
                         <div class="dropdown-item" id="adminMenuItem" style="display: none;" onclick="goToAdminPage(event)">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
                                 <path d="M12 15a3 3 0 100-6 3 3 0 000 6z" stroke-width="2"/>
@@ -953,7 +972,17 @@
         <!-- Document Filter Section -->
         <div class="document-filter" id="documentFilter">
             <div class="filter-header">
-                <span class="filter-title">🔍 검색 범위</span>
+                <div class="filter-header-content">
+                    <div class="filter-title">
+                        <span class="filter-icon">🔍</span>
+                        <span>검색 범위</span>
+                    </div>
+                    <div class="filter-org-info" id="filterOrgInfo">
+                        <span class="org-icon">🏢</span>
+                        <span class="org-label">조직:</span>
+                        <span class="org-name" id="filterOrgName">로딩 중...</span>
+                    </div>
+                </div>
                 <button id="toggleFilterBtn" class="toggle-filter-btn" title="문서 목록 펼치기/접기">
                     <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
                         <path d="M8 4l-4 4h8l-4-4z"/>
@@ -963,41 +992,114 @@
             <div class="filter-content" id="filterContent">
                 <!-- Filter Tabs -->
                 <div class="filter-tabs">
-                    <button class="filter-tab active" data-tab="documents">문서별</button>
-                    <button class="filter-tab" data-tab="groups">그룹별</button>
+                    <button class="filter-tab active" data-tab="documents">
+                        <span class="tab-icon">📄</span>
+                        <span>문서별</span>
+                    </button>
+                    <button class="filter-tab" data-tab="groups">
+                        <span class="tab-icon">📁</span>
+                        <span>그룹별</span>
+                    </button>
                 </div>
 
                 <!-- Document Filter Panel -->
                 <div class="filter-panel" id="documentFilterPanel">
                     <div class="filter-options">
-                        <label class="filter-option" title="모든 문서에서 검색합니다">
+                        <label class="filter-option" title="내 조직에 할당된 모든 문서에서 검색합니다">
                             <input type="radio" name="filterMode" value="all" checked>
-                            <span>전체 문서</span>
+                            <span>조직 내 전체 문서 <span id="totalDocCount" style="font-size: 11px; color: #6b7280;"></span></span>
                         </label>
                         <label class="filter-option" title="체크한 문서에서만 검색합니다">
                             <input type="radio" name="filterMode" value="selected">
-                            <span>선택한 문서만</span>
+                            <span>선택한 문서만 <span id="selectedDocCount" style="font-size: 11px; color: #6b7280;"></span></span>
                         </label>
                     </div>
                     <div class="document-list" id="filterDocumentList">
-                        <div class="loading-documents">문서 목록을 불러오는 중...</div>
+                        <div class="loading-documents">
+                            <div class="skeleton-item">
+                                <div class="skeleton-checkbox"></div>
+                                <div class="skeleton-content">
+                                    <div class="skeleton-title"></div>
+                                    <div class="skeleton-meta"></div>
+                                </div>
+                            </div>
+                            <div class="skeleton-item">
+                                <div class="skeleton-checkbox"></div>
+                                <div class="skeleton-content">
+                                    <div class="skeleton-title"></div>
+                                    <div class="skeleton-meta"></div>
+                                </div>
+                            </div>
+                            <div class="skeleton-item">
+                                <div class="skeleton-checkbox"></div>
+                                <div class="skeleton-content">
+                                    <div class="skeleton-title"></div>
+                                    <div class="skeleton-meta"></div>
+                                </div>
+                            </div>
+                            <div class="skeleton-item">
+                                <div class="skeleton-checkbox"></div>
+                                <div class="skeleton-content">
+                                    <div class="skeleton-title"></div>
+                                    <div class="skeleton-meta"></div>
+                                </div>
+                            </div>
+                            <div class="skeleton-item">
+                                <div class="skeleton-checkbox"></div>
+                                <div class="skeleton-content">
+                                    <div class="skeleton-title"></div>
+                                    <div class="skeleton-meta"></div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
                 <!-- Group Filter Panel -->
                 <div class="filter-panel" id="groupFilterPanel" style="display: none;">
                     <div class="filter-options">
-                        <label class="filter-option" title="모든 그룹에서 검색합니다">
+                        <label class="filter-option" title="내 조직에 할당된 모든 그룹에서 검색합니다">
                             <input type="radio" name="groupFilterMode" value="all" checked>
-                            <span>전체 그룹</span>
+                            <span>조직 내 전체 그룹 <span id="totalGroupCount" style="font-size: 11px; color: #6b7280;"></span></span>
                         </label>
                         <label class="filter-option" title="선택한 그룹에서만 검색합니다">
                             <input type="radio" name="groupFilterMode" value="selected">
-                            <span>선택한 그룹만</span>
+                            <span>선택한 그룹만 <span id="selectedGroupCount" style="font-size: 11px; color: #6b7280;"></span></span>
                         </label>
                     </div>
                     <div class="group-filter-list" id="groupFilterList">
-                        <div class="loading-groups">그룹 목록을 불러오는 중...</div>
+                        <div class="loading-groups">
+                            <div class="skeleton-group-item">
+                                <div class="skeleton-checkbox"></div>
+                                <div class="skeleton-content">
+                                    <div class="skeleton-title"></div>
+                                </div>
+                            </div>
+                            <div class="skeleton-group-item skeleton-indent-1">
+                                <div class="skeleton-checkbox"></div>
+                                <div class="skeleton-content">
+                                    <div class="skeleton-title" style="width: 85%;"></div>
+                                </div>
+                            </div>
+                            <div class="skeleton-group-item skeleton-indent-1">
+                                <div class="skeleton-checkbox"></div>
+                                <div class="skeleton-content">
+                                    <div class="skeleton-title" style="width: 75%;"></div>
+                                </div>
+                            </div>
+                            <div class="skeleton-group-item">
+                                <div class="skeleton-checkbox"></div>
+                                <div class="skeleton-content">
+                                    <div class="skeleton-title"></div>
+                                </div>
+                            </div>
+                            <div class="skeleton-group-item skeleton-indent-1">
+                                <div class="skeleton-checkbox"></div>
+                                <div class="skeleton-content">
+                                    <div class="skeleton-title" style="width: 80%;"></div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1131,6 +1233,20 @@
                     <input type="range" id="topKSlider" min="1" max="10" value="5" step="1">
                     <p class="setting-hint">질문당 검색할 관련 문서 청크 수</p>
                 </div>
+
+                <div class="setting-item">
+                    <label for="searchModeSelect">
+                        <span class="setting-label">검색 모드</span>
+                    </label>
+                    <select id="searchModeSelect" style="width: 100%; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; background: white; cursor: pointer;">
+                        <option value="smart">🎯 스마트 (기본) - 자동 선택</option>
+                        <option value="local-only">📚 로컬 문서만</option>
+                        <option value="web-enhanced">🌐 로컬 + 웹 검색</option>
+                        <option value="comprehensive">🔍 모든 소스 (로컬 + 웹 + 공식문서)</option>
+                        <option value="tools-only">🔧 외부 도구만 (웹 + 공식문서)</option>
+                    </select>
+                    <p class="setting-hint">검색 소스를 선택합니다 (하이브리드 RAG 활성화 시)</p>
+                </div>
             </div>
 
             <!-- Generation Settings -->
@@ -1220,6 +1336,20 @@
                         <li><strong>비밀번호 변경:</strong> 프로필 메뉴에서 언제든지 비밀번호 변경 가능</li>
                         <li><strong>로그아웃:</strong> 우측 상단 프로필 메뉴에서 안전하게 로그아웃</li>
                         <li><strong>보안 로깅:</strong> 모든 로그인/로그아웃 이벤트가 기록되어 보안 강화</li>
+                    </ul>
+                </section>
+
+                <!-- Organization & Permissions -->
+                <section class="help-section">
+                    <h3>🏢 조직 및 권한</h3>
+                    <p>조직 기반 문서 접근 권한 관리로 안전하고 효율적인 문서 검색을 제공합니다.</p>
+                    <ul>
+                        <li><strong>조직 소속:</strong> 모든 사용자는 하나의 조직에 속하며, 우측 상단에 조직명이 표시됩니다</li>
+                        <li><strong>문서 격리:</strong> 자신의 조직에 속한 문서만 검색할 수 있어 데이터 보안이 강화됩니다</li>
+                        <li><strong>그룹 격리:</strong> 조직별로 분리된 그룹 구조로 문서를 효율적으로 관리합니다</li>
+                        <li><strong>자동 필터링:</strong> 검색 시 자동으로 조직 범위로 제한되어 별도 설정이 불필요합니다</li>
+                        <li><strong>조직 전환:</strong> 관리자가 조직을 변경하면 접근 가능한 문서가 달라집니다</li>
+                        <li><strong>멀티 테넌트:</strong> 여러 부서나 팀이 하나의 시스템을 안전하게 공유할 수 있습니다</li>
                     </ul>
                 </section>
 
@@ -1333,34 +1463,32 @@
                     </ul>
                 </section>
 
-                <!-- Document Management -->
-                <section class="help-section">
-                    <h3>📁 문서 관리</h3>
-                    <p>헤더의 "문서 관리" 버튼으로 다양한 형식의 문서를 업로드하고 관리할 수 있습니다.</p>
-                    <ul>
-                        <li><strong>모달 열기:</strong> 헤더의 "문서 관리" 버튼 클릭 또는 Ctrl/Cmd + D</li>
-                        <li><strong>문서 업로드:</strong> 지원되는 문서 파일을 드래그 앤 드롭 또는 클릭하여 파일 선택</li>
-                        <li><strong>다양한 형식:</strong> PDF, HWP, HWPX, Word(DOC/DOCX), Excel(XLS/XLSX), PowerPoint(PPT/PPTX), TXT 모두 지원 (총 10가지)</li>
-                        <li><strong>업로드 진행:</strong> 파일 업로드 및 처리 진행 상황 표시</li>
-                        <li><strong>문서 목록:</strong> 업로드된 모든 문서 확인</li>
-                        <li><strong>문서 삭제:</strong> 각 문서의 삭제 버튼으로 문서 제거</li>
-                        <li><strong>목록 새로고침:</strong> 새로고침 버튼으로 문서 목록 갱신</li>
-                        <li><strong>최대 파일 크기:</strong> 50MB까지 업로드 가능</li>
-                    </ul>
-                </section>
-
                 <!-- Document Filter -->
                 <section class="help-section">
-                    <h3>🔍 문서 필터링</h3>
-                    <p>특정 문서만 선택하여 검색 범위를 좁힐 수 있습니다.</p>
+                    <h3>🔍 문서 및 그룹 필터링</h3>
+                    <p>특정 문서나 그룹만 선택하여 검색 범위를 좁힐 수 있습니다.</p>
+
+                    <h4 style="margin-top: 16px; color: var(--primary-600);">📄 문서 필터</h4>
                     <ul>
                         <li><strong>필터 열기:</strong> "문서 필터 ▼" 버튼 또는 Ctrl/Cmd + B</li>
                         <li><strong>문서 선택:</strong> 체크박스를 사용하여 검색할 문서 선택</li>
                         <li><strong>전체 선택:</strong> "전체 선택" 버튼으로 모든 문서 한 번에 선택</li>
                         <li><strong>전체 해제:</strong> "전체 해제" 버튼으로 모든 선택 해제</li>
-                        <li><strong>적용:</strong> 선택한 문서만 검색 대상이 됩니다</li>
-                        <li><strong>정확도 향상:</strong> 필요한 문서만 선택하여 검색 정확도 향상</li>
+                        <li><strong>조직 범위:</strong> 자신의 조직에 속한 문서만 표시됩니다</li>
                     </ul>
+
+                    <h4 style="margin-top: 16px; color: var(--primary-600);">📁 그룹 필터</h4>
+                    <ul>
+                        <li><strong>그룹별 검색:</strong> 문서 대신 그룹 단위로 검색 범위 지정 가능</li>
+                        <li><strong>계층 구조:</strong> 상위 그룹 선택 시 하위 그룹의 모든 문서 포함</li>
+                        <li><strong>조직 격리:</strong> 자신의 조직에 속한 그룹만 표시됩니다</li>
+                        <li><strong>필터 모드:</strong> "조직 내 전체 그룹" 또는 "선택한 그룹만" 선택 가능</li>
+                        <li><strong>정확도 향상:</strong> 주제별로 그룹화된 문서로 검색 정확도 향상</li>
+                    </ul>
+
+                    <div style="margin-top: 12px; padding: 10px; background: #e7f3ff; border-left: 4px solid #2196f3; border-radius: 4px;">
+                        <p style="margin: 0; color: #0d47a1; font-size: 14px;"><strong>💡 팁:</strong> 검색 범위를 좁힐수록 더 정확하고 관련성 높은 답변을 받을 수 있습니다. 그룹 필터를 활용하면 주제별로 효율적인 검색이 가능합니다.</p>
+                    </div>
                 </section>
 
                 <!-- Answer Display -->
@@ -1390,28 +1518,71 @@
                     </ul>
                 </section>
 
-                <!-- Cache Stats -->
+                <!-- Hybrid RAG -->
                 <section class="help-section">
-                    <h3>💾 캐시 통계</h3>
-                    <p>자주 묻는 질문은 캐시에 저장되어 빠르게 답변합니다.</p>
+                    <h3>🔍 하이브리드 검색 (Hybrid RAG)</h3>
+                    <p>로컬 문서뿐만 아니라 웹 검색과 공식 문서를 활용한 포괄적인 검색 기능입니다.</p>
+
+                    <h4 style="margin-top: 16px; color: var(--primary-600);">📊 검색 모드</h4>
                     <ul>
-                        <li><strong>캐시 히트:</strong> 이전에 답변한 유사 질문은 즉시 응답</li>
-                        <li><strong>통계 확인:</strong> 하단의 캐시 통계에서 적중률 확인 가능</li>
-                        <li><strong>성능 향상:</strong> 캐시 사용으로 응답 속도가 크게 향상됩니다</li>
+                        <li><strong>🎯 스마트 (기본):</strong> 질문을 분석하여 자동으로 최적의 검색 소스 선택
+                            <ul>
+                                <li>일반 질문 → 로컬 문서 검색</li>
+                                <li>최신 정보 필요 → 웹 검색 추가</li>
+                                <li>기술 관련 질문 → 공식 문서 검색 추가</li>
+                            </ul>
+                        </li>
+                        <li><strong>📚 로컬 문서만:</strong> 업로드된 문서에서만 검색 (기존 방식)</li>
+                        <li><strong>🌐 로컬 + 웹 검색:</strong> 로컬 문서와 실시간 웹 검색 결과를 함께 활용</li>
+                        <li><strong>🔍 모든 소스:</strong> 로컬 + 웹 + 공식 문서를 모두 활용한 종합 검색</li>
+                        <li><strong>🔧 외부 도구만:</strong> 웹 검색과 공식 문서만 사용 (로컬 문서 제외)</li>
                     </ul>
+
+                    <h4 style="margin-top: 16px; color: var(--primary-600);">✨ 장점</h4>
+                    <ul>
+                        <li><strong>최신 정보:</strong> 웹 검색으로 실시간 뉴스, 기술 동향 파악</li>
+                        <li><strong>공식 문서:</strong> React, Vue, Spring Boot 등 프레임워크 공식 문서 검색</li>
+                        <li><strong>포괄적 답변:</strong> 로컬 문서의 제약을 넘어 더 넓은 정보 활용</li>
+                        <li><strong>자동 출처 구분:</strong> [로컬 문서], [웹 검색], [공식 문서] 태그로 출처 명시</li>
+                    </ul>
+
+                    <div style="margin-top: 12px; padding: 10px; background: #fff3e0; border-left: 4px solid #ff9800; border-radius: 4px;">
+                        <p style="margin: 0; color: #e65100; font-size: 14px;"><strong>⚠️ 참고:</strong> 하이브리드 RAG 기능은 관리자가 활성화한 경우에만 사용 가능합니다. 비활성화 상태에서는 "로컬 문서만" 모드로 고정됩니다.</p>
+                    </div>
                 </section>
 
                 <!-- Settings -->
                 <section class="help-section">
                     <h3>⚙️ 설정</h3>
                     <p>우측 상단 설정 버튼으로 다양한 옵션을 조정할 수 있습니다.</p>
+
+                    <h4 style="margin-top: 16px; color: var(--primary-600);">🔍 검색 설정</h4>
                     <ul>
-                        <li><strong>검색 개수:</strong> 답변 생성 시 참조할 문서 개수 (1-10)</li>
-                        <li><strong>온도:</strong> 답변의 창의성 조절 (0.0-1.0)</li>
-                        <li><strong>최대 토큰:</strong> 답변 최대 길이 설정</li>
-                        <li><strong>테마 설정:</strong> 다크/라이트 모드 전환 (Ctrl/Cmd + Shift + D)</li>
-                        <li><strong>자동 저장:</strong> 설정은 브라우저에 자동으로 저장됩니다</li>
+                        <li><strong>검색 개수 (Top K):</strong> 답변 생성 시 참조할 문서 개수 (1-10)</li>
+                        <li><strong>검색 모드:</strong> 하이브리드 RAG 검색 모드 선택 (위 섹션 참조)</li>
+                        <li><strong>캐시 임계값:</strong> 유사 질문 캐시 활용 기준 (0.0-1.0)</li>
+                        <li><strong>캐시 유효시간:</strong> 캐시 보관 시간 (초 단위)</li>
                     </ul>
+
+                    <h4 style="margin-top: 16px; color: var(--primary-600);">🤖 생성 설정</h4>
+                    <ul>
+                        <li><strong>온도 (Temperature):</strong> 답변의 창의성 조절 (0.0-1.0)
+                            <ul>
+                                <li>낮은 값: 더 일관되고 정확한 답변</li>
+                                <li>높은 값: 더 창의적이고 다양한 답변</li>
+                            </ul>
+                        </li>
+                        <li><strong>최대 토큰 (Max Tokens):</strong> 답변 최대 길이 설정</li>
+                    </ul>
+
+                    <h4 style="margin-top: 16px; color: var(--primary-600);">🎨 화면 설정</h4>
+                    <ul>
+                        <li><strong>테마 설정:</strong> 다크/라이트 모드 전환 (Ctrl/Cmd + Shift + D)</li>
+                    </ul>
+
+                    <div style="margin-top: 12px; padding: 10px; background: #e8f5e9; border-left: 4px solid #4caf50; border-radius: 4px;">
+                        <p style="margin: 0; color: #2e7d32; font-size: 14px;"><strong>💾 자동 저장:</strong> 모든 설정값은 변경 즉시 자동으로 브라우저에 저장됩니다. 별도로 "설정 저장" 버튼을 누를 필요가 없습니다.</p>
+                    </div>
                 </section>
 
                 <!-- Keyboard Shortcuts -->
@@ -1435,7 +1606,6 @@
 
                     <h4 style="margin-top: 16px; color: var(--primary-600);">📚 문서 & 화면</h4>
                     <ul>
-                        <li><kbd>Ctrl/Cmd + D</kbd> - 문서 관리 열기</li>
                         <li><kbd>Ctrl/Cmd + B</kbd> - 문서 필터 사이드바 토글</li>
                         <li><kbd>Ctrl/Cmd + Shift + D</kbd> - 다크/라이트 모드 전환</li>
                     </ul>
@@ -1496,14 +1666,14 @@
 
     <!-- Source Details Modal -->
     <div id="sourceModal" class="modal">
-        <div class="modal-content">
+        <div class="modal-content" style="max-width: 900px; height: 80vh; display: flex; flex-direction: column;">
             <div class="modal-header">
                 <h2>📄 출처 상세 정보</h2>
                 <button class="modal-close" id="closeSourceModal">&times;</button>
             </div>
 
-            <div class="source-details">
-                <div class="source-detail-header">
+            <div class="source-details" style="overflow: hidden; display: flex; flex-direction: column; flex: 1;">
+                <div class="source-detail-header" style="flex-shrink: 0; margin-bottom: 20px;">
                     <h3 id="sourceFilename"></h3>
                     <div class="source-score">
                         <span class="score-label">관련도:</span>
@@ -1511,9 +1681,9 @@
                     </div>
                 </div>
 
-                <div class="source-text-section">
-                    <h4>📝 참조된 내용</h4>
-                    <div class="source-text-content" id="sourceText"></div>
+                <div class="source-text-section" style="display: flex; flex-direction: column; flex: 1; overflow: hidden;">
+                    <h4 style="flex-shrink: 0; margin-bottom: 12px;">📝 참조된 내용</h4>
+                    <div class="source-text-content" id="sourceText" style="flex: 1; overflow-y: auto; overflow-x: hidden;"></div>
                 </div>
             </div>
         </div>
@@ -1623,6 +1793,36 @@
         </div>
     </div>
 
+    <!-- Change Organization Modal -->
+    <div id="changeOrgModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>🏢 조직 변경</h2>
+                <button class="modal-close" onclick="closeChangeOrgModal()">&times;</button>
+            </div>
+
+            <div class="modal-body">
+                <p style="margin-bottom: 20px; color: #666;">이동할 조직을 선택하세요:</p>
+
+                <div class="current-org-info" id="currentOrgInfo" style="padding: 12px; background: #f8f9fa; border-radius: 6px; margin-bottom: 20px;">
+                    <strong>현재 조직:</strong> <span id="currentOrgDisplay"></span>
+                </div>
+
+                <select id="orgSelect" style="width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; margin-bottom: 20px;">
+                    <option value="">조직을 선택하세요</option>
+                </select>
+
+                <div id="changeOrgError" style="display: none; padding: 12px; background: #fee; border-radius: 6px; color: #c33; margin-bottom: 15px;"></div>
+                <div id="changeOrgSuccess" style="display: none; padding: 12px; background: #efe; border-radius: 6px; color: #363; margin-bottom: 15px;"></div>
+            </div>
+
+            <div class="modal-footer" style="display: flex; gap: 10px; justify-content: flex-end;">
+                <button onclick="closeChangeOrgModal()" class="btn btn-secondary">취소</button>
+                <button onclick="confirmChangeOrg()" class="btn btn-primary">조직 변경</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Performance Utilities -->
     <script src="/static/utils.js"></script>
     <script src="/static/optimizations.js"></script>
@@ -1662,9 +1862,13 @@
                 document.getElementById('userName').textContent = username;
                 document.getElementById('userRole').textContent = roleText;
 
-                // 드롭다운 헤더에도 업데이트
-                document.getElementById('dropdownName').textContent = username;
-                document.getElementById('dropdownRole').textContent = roleText;
+                // 조직 정보 표시
+                if (user.org_id && user.org_id !== 'default') {
+                    loadOrganizationInfo(user.org_id);
+                } else if (user.org_id === 'default') {
+                    // 기본 조직은 표시하지 않음
+                    document.getElementById('userOrg').style.display = 'none';
+                }
 
                 // 관리자인 경우 관리 메뉴 항목 표시
                 if (user.role === 'admin') {
@@ -1672,6 +1876,25 @@
                 }
             }
         })();
+
+        // 조직 정보 로드 및 표시
+        async function loadOrganizationInfo(orgId) {
+            try {
+                const data = await Auth.apiCall(`/api/organizations/${orgId}`);
+                if (data.success && data.organization) {
+                    const org = data.organization;
+                    const orgText = `🏢 ${org.name}`;
+
+                    // 사용자 메뉴에 조직 정보 표시
+                    document.getElementById('userOrg').textContent = orgText;
+                    document.getElementById('userOrg').style.display = 'block';
+                }
+            } catch (error) {
+                console.error('조직 정보 로드 실패:', error);
+                // 조직 정보 로드 실패 시 표시하지 않음
+                document.getElementById('userOrg').style.display = 'none';
+            }
+        }
 
         // 사용자 드롭다운 토글
         function toggleUserDropdown() {
@@ -1815,6 +2038,127 @@
                 await Auth.logout();
             }
         }
+
+        // 조직 변경 모달 열기
+        async function openChangeOrgModal(event) {
+            if (event) event.stopPropagation();
+
+            const modal = document.getElementById('changeOrgModal');
+            const orgSelect = document.getElementById('orgSelect');
+            const currentOrgDisplay = document.getElementById('currentOrgDisplay');
+            const errorDiv = document.getElementById('changeOrgError');
+            const successDiv = document.getElementById('changeOrgSuccess');
+
+            // Reset
+            errorDiv.style.display = 'none';
+            successDiv.style.display = 'none';
+            orgSelect.innerHTML = '<option value="">조직을 선택하세요</option>';
+
+            try {
+                // Get current user info
+                const user = Auth.getUser();
+                if (!user) {
+                    showChangeOrgError('로그인이 필요합니다');
+                    return;
+                }
+
+                // Display current organization
+                if (user.org_id && user.org_id !== 'default') {
+                    const orgData = await Auth.apiCall(`/api/organizations/${user.org_id}`);
+                    currentOrgDisplay.textContent = orgData.organization.name;
+                } else {
+                    currentOrgDisplay.textContent = '기본 조직';
+                }
+
+                // Load available organizations
+                const data = await Auth.apiCall('/api/organizations');
+                const organizations = data.organizations || [];
+
+                organizations.forEach(org => {
+                    // Skip current organization
+                    if (org.id !== user.org_id) {
+                        const option = document.createElement('option');
+                        option.value = org.id;
+                        option.textContent = org.name;
+                        orgSelect.appendChild(option);
+                    }
+                });
+
+                modal.style.display = 'flex';
+            } catch (error) {
+                console.error('조직 목록 로드 실패:', error);
+                showChangeOrgError('조직 목록을 불러올 수 없습니다');
+            }
+        }
+
+        // 조직 변경 모달 닫기
+        function closeChangeOrgModal() {
+            const modal = document.getElementById('changeOrgModal');
+            modal.style.display = 'none';
+        }
+
+        // 조직 변경 확인
+        async function confirmChangeOrg() {
+            const orgSelect = document.getElementById('orgSelect');
+            const selectedOrgId = orgSelect.value;
+
+            if (!selectedOrgId) {
+                showChangeOrgError('조직을 선택하세요');
+                return;
+            }
+
+            const user = Auth.getUser();
+            if (!user) {
+                showChangeOrgError('로그인이 필요합니다');
+                return;
+            }
+
+            try {
+                const data = await Auth.apiCall(`/api/organizations/${selectedOrgId}/members`, {
+                    method: 'POST',
+                    body: JSON.stringify({ user_id: user.user_id })
+                });
+
+                if (data.success) {
+                    showChangeOrgSuccess(data.message + ' 페이지를 새로고침합니다...');
+
+                    // Wait a moment then reload
+                    setTimeout(() => {
+                        window.allowNavigation = true;
+                        window.location.reload();
+                    }, 1500);
+                }
+            } catch (error) {
+                console.error('조직 변경 실패:', error);
+                showChangeOrgError(error.message || '조직 변경에 실패했습니다');
+            }
+        }
+
+        // Show error message in change org modal
+        function showChangeOrgError(message) {
+            const errorDiv = document.getElementById('changeOrgError');
+            const successDiv = document.getElementById('changeOrgSuccess');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+            successDiv.style.display = 'none';
+        }
+
+        // Show success message in change org modal
+        function showChangeOrgSuccess(message) {
+            const successDiv = document.getElementById('changeOrgSuccess');
+            const errorDiv = document.getElementById('changeOrgError');
+            successDiv.textContent = message;
+            successDiv.style.display = 'block';
+            errorDiv.style.display = 'none';
+        }
+
+        // Close modal on outside click
+        window.addEventListener('click', function(event) {
+            const modal = document.getElementById('changeOrgModal');
+            if (event.target === modal) {
+                closeChangeOrgModal();
+            }
+        });
     </script>
 
     <!-- Logger System -->
@@ -1828,7 +2172,8 @@
 
     <!-- Cache Buster Verification -->
     <script>
-        console.log('%c🔄 PAGE LOADED: 2025-12-28-12-45-DOCUMENT-COUNT', 'background: #667eea; color: white; padding: 5px 10px; font-size: 14px; font-weight: bold;');
+        // Page load verification (commented out for cleaner console)
+        // console.log('%c🔄 PAGE LOADED: 2025-12-28-12-45-DOCUMENT-COUNT', 'background: #667eea; color: white; padding: 5px 10px; font-size: 14px; font-weight: bold;');
 
         // Debug progress bar on page load
         window.addEventListener('DOMContentLoaded', () => {

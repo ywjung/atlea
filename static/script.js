@@ -78,6 +78,24 @@ marked.setOptions({
     gfm: true
 });
 
+// Get searching message based on Hybrid RAG status
+function getSearchingMessage(searchMode) {
+    // Hybrid RAG가 비활성화되어 있으면 항상 일반 검색 메시지
+    if (!isHybridRagEnabled) {
+        return '검색 및 답변 생성 중...';
+    }
+
+    // Hybrid RAG가 활성화된 경우 search_mode 기반 메시지 결정
+    // local-only: 로컬 문서만 사용
+    // smart, web-enhanced, comprehensive: 하이브리드 검색 가능
+    if (searchMode === 'local-only') {
+        return '검색 및 답변 생성 중...';
+    } else {
+        // smart, web-enhanced, comprehensive
+        return '하이브리드 검색 및 답변 생성 중...';
+    }
+}
+
 // Generate unique session ID
 function generateSessionId() {
     return `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -302,6 +320,7 @@ let currentAbortController = null;  // For stopping generation
 let lastUserQuestion = '';  // For regenerate function
 let lastFilterState = null;  // Track last filter state to detect changes
 let modalStack = [];  // Track which modals are open in order (for ESC key handling)
+let isHybridRagEnabled = false;  // Hybrid RAG 활성화 상태
 
 // Modal stack management helpers
 function pushModal(modalElement, modalName) {
@@ -339,12 +358,20 @@ async function init() {
     // Load settings from localStorage
     loadSettings();
 
-    // Parallel async operations
-    await Promise.all([
+    // Parallel async operations (use allSettled to prevent one failure from blocking all)
+    const initResults = await Promise.allSettled([
         checkStatus(),
         loadSuggestedQuestions(),
         loadSystemPromptFromServer()  // Load admin-configured system prompt
     ]);
+
+    // Log any failures but continue initialization
+    initResults.forEach((result, index) => {
+        const taskNames = ['checkStatus', 'loadSuggestedQuestions', 'loadSystemPromptFromServer'];
+        if (result.status === 'rejected') {
+            logger.error(`❌ ${taskNames[index]} failed:`, result.reason);
+        }
+    });
 
     // Initialize AutoComplete after loading suggested questions
     await initializeAutoComplete();
@@ -352,6 +379,11 @@ async function init() {
     // Initialize activity monitoring for auto-logout
     if (Auth && typeof Auth.initActivityMonitor === 'function') {
         Auth.initActivityMonitor();
+    }
+
+    // Initialize session validation (periodic check for session invalidation)
+    if (Auth && typeof Auth.startSessionValidation === 'function') {
+        Auth.startSessionValidation();
     }
 
     // Check authentication and update UI accordingly
@@ -449,7 +481,7 @@ function setupEventListeners() {
 
             if (confirmed) {
                 try {
-                    console.log('🛑 Requesting reindex cancellation...');
+                    devLog('🛑 Requesting reindex cancellation...');
 
                     // Disable cancel button to prevent multiple clicks
                     cancelReindexBtn.disabled = true;
@@ -460,10 +492,10 @@ function setupEventListeners() {
                     });
 
                     const result = await response.json();
-                    console.log('Cancel response:', result);
+                    devLog('Cancel response:', result);
 
                     if (response.ok) {
-                        console.log('✅ Cancellation request sent successfully');
+                        devLog('✅ Cancellation request sent successfully');
                     } else {
                         console.error('❌ Failed to cancel reindex:', result.detail);
                         alert('재색인 취소에 실패했습니다: ' + result.detail);
@@ -623,7 +655,7 @@ function setupEventListeners() {
     chatContainer.addEventListener('click', (e) => {
         if (e.target.classList.contains('source-tag')) {
             const filename = e.target.textContent;
-            console.log('[Event Delegation] Source tag clicked:', filename);
+            devLog('[Event Delegation] Source tag clicked:', filename);
             showSourceDetails(filename);
         }
     });
@@ -791,8 +823,7 @@ function updateSendButton() {
 // Check system status
 async function checkStatus() {
     try {
-        const response = await fetch('/api/status');
-        const data = await response.json();
+        const data = await Auth.apiCall('/api/status');
 
         // Update model information from server (관리자 페이지에서 변경 시 즉시 반영)
         if (data.llm_model) {
@@ -1294,45 +1325,33 @@ async function initConversationHistory() {
 
         if (token) {
             // User is authenticated - try to load existing conversations
-            const headers = {
-                'Authorization': `Bearer ${token}`
-            };
+            const data = await Auth.apiCall('/api/conversations');
+            const conversations = data.sessions || [];
 
-            const response = await fetch('/api/conversations', { headers });
-            if (response.ok) {
-                const data = await response.json();
-                const conversations = data.sessions || [];
+            // Load the most recent conversation
+            if (conversations.length > 0) {
+                const mostRecent = conversations[0];
+                const messageCount = parseInt(mostRecent.message_count || '0');
 
-                // Load the most recent conversation
-                if (conversations.length > 0) {
-                    const mostRecent = conversations[0];
-                    const messageCount = parseInt(mostRecent.message_count || '0');
-
-                    if (messageCount === 0) {
-                        // Reuse the empty conversation - show welcome screen
-                        currentSessionId = mostRecent.id;
-                        await showWelcomeScreen();
-                        devLog('Reusing empty conversation:', currentSessionId);
-                    } else {
-                        // Most recent has messages - load it to display
-                        devLog('Loading most recent conversation:', mostRecent.id);
-                        await loadConversation(mostRecent.id);
-                    }
-                } else {
-                    // No conversations exist, create new one
-                    devLog('No conversations found, creating new one');
-                    await createNewConversation();
+                if (messageCount === 0) {
+                    // Reuse the empty conversation - show welcome screen
+                    currentSessionId = mostRecent.id;
                     await showWelcomeScreen();
+                    devLog('Reusing empty conversation:', currentSessionId);
+                } else {
+                    // Most recent has messages - load it to display
+                    devLog('Loading most recent conversation:', mostRecent.id);
+                    await loadConversation(mostRecent.id);
                 }
-
-                // Load conversation list for sidebar (authenticated users only)
-                await loadConversations();
             } else {
-                // Token expired or invalid - create new conversation
-                console.log('Authentication failed, creating new conversation');
+                // No conversations exist, create new one
+                devLog('No conversations found, creating new one');
                 await createNewConversation();
                 await showWelcomeScreen();
             }
+
+            // Load conversation list for sidebar (authenticated users only)
+            await loadConversations();
         } else {
             // User is not authenticated - skip conversation loading, create new one
             devLog('Not authenticated, creating new conversation');
@@ -1450,6 +1469,15 @@ async function sendMessage(regenerate = false) {
     // Show typing indicator (StreamingVisualizer)
     streamingVisualizer.showTypingIndicator(chatContainer);
 
+    // 🆕 Update indicator text - search_mode 기반 초기 메시지 (메타데이터 수신 시 정확한 메시지로 업데이트)
+    setTimeout(() => {
+        const indicatorText = document.querySelector('.simple-text');
+        if (indicatorText) {
+            const searchMode = currentSettings.searchMode || 'smart';
+            indicatorText.textContent = getSearchingMessage(searchMode);
+        }
+    }, 0);
+
     // Scroll to bottom to show typing indicator
     scrollToBottom();
 
@@ -1468,11 +1496,21 @@ async function sendMessage(regenerate = false) {
         // Get filter data based on active tab
         const { documentIds, groupIds } = getActiveFilterData();
 
+        // Validate filter selection
+        if (documentIds !== null && documentIds.length === 0) {
+            alert('❌ 검색할 문서를 선택해주세요.\n\n"조직 내 전체 문서" 또는 특정 문서를 선택하세요.');
+            return;
+        }
+        if (groupIds !== null && groupIds.length === 0) {
+            alert('❌ 검색할 그룹을 선택해주세요.\n\n"조직 내 전체 그룹" 또는 특정 그룹을 선택하세요.');
+            return;
+        }
+
         // Check if filter state has changed (document scope changed)
         const currentFilterState = JSON.stringify({ documentIds, groupIds });
         if (lastFilterState !== null && lastFilterState !== currentFilterState) {
             // Filter changed - reset conversation context
-            console.log('🔄 검색 범위 변경 감지 - 대화 컨텍스트 초기화');
+            devLog('🔄 검색 범위 변경 감지 - 대화 컨텍스트 초기화');
             conversationHistory = [];
 
             // Create new session when filter changes
@@ -1506,6 +1544,7 @@ async function sendMessage(regenerate = false) {
                         body: JSON.stringify({
                             question: question,
                             top_k: currentSettings.top_k,
+                            search_mode: currentSettings.searchMode || 'smart',  // 검색 모드 설정
                             temperature: currentSettings.temperature,
                             max_tokens: currentSettings.max_tokens,
                             system_prompt: currentSettings.system_prompt,
@@ -1520,6 +1559,20 @@ async function sendMessage(regenerate = false) {
                     });
 
                     if (!res.ok) {
+                        // Try to extract error message from response
+                        if (res.status === 400) {
+                            try {
+                                const errorData = await res.json();
+                                if (errorData.detail) {
+                                    throw new Error(errorData.detail);
+                                }
+                            } catch (e) {
+                                // If JSON parsing fails, use default error
+                                if (e.message && !e.message.includes('JSON')) {
+                                    throw e;
+                                }
+                            }
+                        }
                         throw new Error(`HTTP error! status: ${res.status}`);
                     }
 
@@ -1575,14 +1628,36 @@ async function sendMessage(regenerate = false) {
                             // Store context data for source details
                             currentContextData = data.data.context || [];
 
+                            // Store search summary for hybrid RAG
+                            const searchSummary = data.data.search_summary;
+
                             devLog('🔍 [METADATA] Received metadata:', {
                                 sources: sources,
                                 sourcesLength: sources ? sources.length : 0,
                                 sourcesType: typeof sources,
                                 sourcesIsArray: Array.isArray(sources),
                                 contextLength: currentContextData.length,
-                                cached: data.data.cached
+                                cached: data.data.cached,
+                                searchSummary: searchSummary
                             });
+
+                            // 🆕 실제 사용된 소스 기반 메시지 업데이트
+                            if (searchSummary && searchSummary.sources_used) {
+                                const sourcesUsed = searchSummary.sources_used || [];
+                                const isHybrid = sourcesUsed.includes('web') || sourcesUsed.includes('docs');
+
+                                const indicatorText = document.querySelector('.simple-text');
+                                if (indicatorText) {
+                                    indicatorText.textContent = isHybrid
+                                        ? '하이브리드 검색 및 답변 생성 중...'
+                                        : '검색 및 답변 생성 중...';
+                                }
+                            }
+
+                            // Display search info if hybrid RAG was used
+                            if (searchSummary) {
+                                displaySearchInfo(messageDiv, searchSummary);
+                            }
                         } else if (data.type === 'chunk') {
                             // Hide progress indicator on first chunk
                             if (isFirstChunk) {
@@ -1601,7 +1676,9 @@ async function sendMessage(regenerate = false) {
 
                                 // Highlight code blocks first
                                 contentDiv.querySelectorAll('pre code').forEach((block) => {
-                                    hljs.highlightElement(block);
+                                    if (!block.dataset.highlighted) {
+                                        hljs.highlightElement(block);
+                                    }
                                 });
 
                                 // Render special content (math, diagrams, music, charts)
@@ -1745,6 +1822,80 @@ async function sendMessage(regenerate = false) {
     }
 }
 
+/**
+ * Display hybrid RAG search information
+ * @param {HTMLElement} messageDiv - Message container
+ * @param {Object} searchSummary - Search summary from hybrid RAG
+ */
+function displaySearchInfo(messageDiv, searchSummary) {
+    if (!searchSummary || !searchSummary.sources_used || searchSummary.sources_used.length === 0) {
+        return;
+    }
+
+    // Create search info container
+    const searchInfoDiv = document.createElement('div');
+    searchInfoDiv.className = 'search-info';
+    searchInfoDiv.style.cssText = `
+        margin: 8px 0 12px 0;
+        padding: 8px 12px;
+        background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+        border-left: 3px solid #0ea5e9;
+        border-radius: 6px;
+        font-size: 13px;
+        color: #0c4a6e;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+    `;
+
+    // Search mode icon and text
+    const iconSpan = document.createElement('span');
+    iconSpan.textContent = '🔍';
+    iconSpan.style.fontSize = '16px';
+
+    const modeText = document.createElement('span');
+    modeText.style.fontWeight = '600';
+    modeText.textContent = '하이브리드 검색 사용';
+
+    searchInfoDiv.appendChild(iconSpan);
+    searchInfoDiv.appendChild(modeText);
+
+    // Add separator
+    const separator = document.createElement('span');
+    separator.textContent = '|';
+    separator.style.cssText = 'color: #94a3b8; font-weight: 300;';
+    searchInfoDiv.appendChild(separator);
+
+    // Source counts
+    const sourcesInfo = [];
+
+    if (searchSummary.local_count > 0) {
+        sourcesInfo.push(`📚 로컬 ${searchSummary.local_count}개`);
+    }
+
+    if (searchSummary.web_count > 0) {
+        sourcesInfo.push(`🌐 웹 ${searchSummary.web_count}개`);
+    }
+
+    if (searchSummary.docs_count > 0) {
+        sourcesInfo.push(`📖 공식문서 ${searchSummary.docs_count}개`);
+    }
+
+    const sourcesText = document.createElement('span');
+    sourcesText.textContent = sourcesInfo.join(' · ');
+    sourcesText.style.cssText = 'color: #0369a1; font-size: 12px;';
+    searchInfoDiv.appendChild(sourcesText);
+
+    // Insert before message content
+    const contentDiv = messageDiv.querySelector('.message-content');
+    if (contentDiv) {
+        messageDiv.insertBefore(searchInfoDiv, contentDiv);
+    } else {
+        messageDiv.appendChild(searchInfoDiv);
+    }
+}
+
 // Add message to chat
 function addMessage(text, type, sources = null) {
     // Remove welcome message if exists
@@ -1765,7 +1916,9 @@ function addMessage(text, type, sources = null) {
 
         // Highlight code blocks
         contentDiv.querySelectorAll('pre code').forEach((block) => {
-            hljs.highlightElement(block);
+            if (!block.dataset.highlighted) {
+                hljs.highlightElement(block);
+            }
         });
 
         // Render special content (math, diagrams, music, charts)
@@ -1795,11 +1948,6 @@ function addMessage(text, type, sources = null) {
 
             contentDiv.appendChild(sourcesWrapper);
         }
-
-        // Highlight code blocks
-        contentDiv.querySelectorAll('pre code').forEach((block) => {
-            hljs.highlightElement(block);
-        });
     } else {
         contentDiv.textContent = text;
     }
@@ -1961,7 +2109,7 @@ async function reindexDocuments() {
     lastProgress = 0;
 
     // Debug: Log initial state
-    console.log('Progress bar reset. Width:', progressBar.style.width, 'Background:', progressBar.style.background, 'Element:', progressBar);
+    devLog('Progress bar reset. Width:', progressBar.style.width, 'Background:', progressBar.style.background, 'Element:', progressBar);
 
     let progressInterval;
     let consecutiveErrors = 0;
@@ -2005,7 +2153,7 @@ async function reindexDocuments() {
                     lastProgress = progress;
 
                     // Debug: Log progress update
-                    console.log(`Progress updated: ${progress}%, width: ${progressBar.style.width}, element:`, progressBar);
+                    devLog(`Progress updated: ${progress}%, width: ${progressBar.style.width}, element:`, progressBar);
 
                     // Update step text
                     progressStep.textContent = progressData.step || '진행 중...';
@@ -2085,7 +2233,7 @@ async function reindexDocuments() {
         }
 
         const data = await response.json();
-        console.log(`Reindex started: ${data.message}`);
+        devLog(`Reindex started: ${data.message}`);
 
         // Wait for progress polling to detect completion
         // Progress interval will continue until completion or error is detected
@@ -2158,7 +2306,7 @@ function monitorReindexProgress(modal, progressBar, progressPercent, progressSte
                 lastProgress = progress;
 
                 // Debug: Log progress update
-                console.log(`[Monitor] Progress updated: ${progress}%, width: ${progressBar.style.width}, element:`, progressBar);
+                devLog(`[Monitor] Progress updated: ${progress}%, width: ${progressBar.style.width}, element:`, progressBar);
 
                 // Update step text
                 progressStep.textContent = progressData.step || '진행 중...';
@@ -2471,7 +2619,7 @@ async function submitFeedback(button, feedbackType) {
             button.style.filter = '';
         }, 300);
 
-        console.log(`✅ Feedback submitted: ${feedbackType}`);
+        devLog(`✅ Feedback submitted: ${feedbackType}`);
 
     } catch (error) {
         console.error('Feedback submission failed:', error);
@@ -2984,6 +3132,7 @@ const closeSettingsBtn = document.getElementById('closeSettingsBtn');
 // Settings controls
 const topKSlider = document.getElementById('topKSlider');
 const topKValue = document.getElementById('topKValue');
+const searchModeSelect = document.getElementById('searchModeSelect');
 const temperatureSlider = document.getElementById('temperatureSlider');
 const temperatureValue = document.getElementById('temperatureValue');
 const maxTokensSlider = document.getElementById('maxTokensSlider');
@@ -3004,6 +3153,7 @@ const defaultSettings = {
     max_tokens: 2048,
     cache_threshold: 0.95,
     cache_ttl: 60,
+    searchMode: 'smart',  // 검색 모드 (smart, local-only, web-enhanced, comprehensive, tools-only)
     llm_model: 'mlx-community/Qwen3-30B-A3B-4bit',
     embedding_model: 'nlpai-lab/KURE-v1',
     system_prompt: `당신은 문서 기반 질의응답 전문 AI 어시스턴트입니다. 업로드된 다양한 형식의 문서들(PDF, HWP, DOCX, TXT 등)을 정확히 분석하여 사용자의 질문에 유용한 답변을 제공합니다.
@@ -3060,34 +3210,77 @@ async function loadSystemPromptFromServer() {
             return;
         }
 
-        // Fetch with authentication
-        const headers = {
-            'Authorization': `Bearer ${token}`
-        };
+        // Use Auth.apiCall for automatic retry logic
+        const data = await Auth.apiCall('/api/system-prompt');
 
-        const response = await fetch('/api/system-prompt', { headers });
+        if (data.system_prompt) {
+            // Update current settings with server's system prompt
+            currentSettings.system_prompt = data.system_prompt;
 
-        if (response.ok) {
-            const data = await response.json();
-            if (data.system_prompt) {
-                // Update current settings with server's system prompt
-                currentSettings.system_prompt = data.system_prompt;
-
-                // Also update the UI if the element exists
-                if (systemPrompt) {
-                    systemPrompt.value = data.system_prompt;
-                }
-
-                logger.info('✅ System prompt loaded from server');
-                devLog('System prompt loaded:', data.system_prompt.substring(0, 100) + '...');
+            // Also update the UI if the element exists
+            if (systemPrompt) {
+                systemPrompt.value = data.system_prompt;
             }
-        } else {
-            // If endpoint fails (e.g., 401), use default
-            devLog('Using default system prompt (auth failed or not available)');
+
+            logger.info('✅ System prompt loaded from server');
+            devLog('System prompt loaded:', data.system_prompt.substring(0, 100) + '...');
         }
     } catch (error) {
         // Silent fail - use default system prompt from localStorage/defaultSettings
         devLog('Failed to load system prompt from server, using default:', error.message);
+    }
+}
+
+/**
+ * 하이브리드 RAG 활성화 상태 확인 및 검색 모드 UI 제어
+ */
+async function checkHybridRAGStatus() {
+    try {
+        const response = await fetch('/api/hybrid-rag/status');
+        const data = await response.json();
+
+        if (searchModeSelect) {
+            if (!data.enabled) {
+                // 하이브리드 RAG 비활성화 상태
+                // 검색 모드를 'local-only'로 강제 설정
+                searchModeSelect.value = 'local-only';
+                currentSettings.searchMode = 'local-only';
+
+                // 드롭다운 비활성화 및 스타일 변경
+                searchModeSelect.disabled = true;
+                searchModeSelect.style.cursor = 'not-allowed';
+                searchModeSelect.style.opacity = '0.6';
+
+                // 다른 옵션들 비활성화
+                Array.from(searchModeSelect.options).forEach(option => {
+                    if (option.value !== 'local-only') {
+                        option.disabled = true;
+                    }
+                });
+
+                console.log('⚠️ 하이브리드 RAG 비활성화 - 검색 모드를 로컬 문서만으로 고정');
+            } else {
+                // 하이브리드 RAG 활성화 상태 - 정상 동작
+                searchModeSelect.disabled = false;
+                searchModeSelect.style.cursor = 'pointer';
+                searchModeSelect.style.opacity = '1';
+
+                // 모든 옵션 활성화
+                Array.from(searchModeSelect.options).forEach(option => {
+                    option.disabled = false;
+                });
+
+                console.log('✅ 하이브리드 RAG 활성화 - 모든 검색 모드 사용 가능');
+            }
+        }
+    } catch (error) {
+        console.error('하이브리드 RAG 상태 확인 실패:', error);
+        // 에러 시 안전하게 local-only로 고정
+        if (searchModeSelect) {
+            searchModeSelect.value = 'local-only';
+            currentSettings.searchMode = 'local-only';
+            searchModeSelect.disabled = true;
+        }
     }
 }
 
@@ -3096,6 +3289,13 @@ function applySettings() {
         topKSlider.value = currentSettings.top_k;
         topKValue.textContent = currentSettings.top_k;
     }
+
+    if (searchModeSelect) {
+        searchModeSelect.value = currentSettings.searchMode || 'smart';
+    }
+
+    // 하이브리드 RAG 상태 확인 및 검색 모드 UI 제어
+    checkHybridRAGStatus();
 
     if (temperatureSlider && temperatureValue) {
         temperatureSlider.value = currentSettings.temperature;
@@ -3166,6 +3366,9 @@ async function openSettingsPanel() {
     // Load latest system prompt from server (admin-configured)
     await loadSystemPromptFromServer();
 
+    // 하이브리드 RAG 상태 확인 및 검색 모드 UI 제어
+    await checkHybridRAGStatus();
+
     await loadAvailableModels();  // Load available models when opening settings
     loadCacheStats();
     loadCacheEnabled();
@@ -3192,32 +3395,102 @@ if (settingsOverlay) {
 
 // Update slider values in real-time (only if elements exist)
 if (topKSlider && topKValue) {
+    // 실시간 화면 업데이트
     topKSlider.addEventListener('input', (e) => {
         topKValue.textContent = e.target.value;
+    });
+
+    // 값 변경 완료 시 자동 저장
+    topKSlider.addEventListener('change', (e) => {
+        currentSettings.top_k = parseInt(e.target.value);
+        localStorage.setItem('chatSettings', JSON.stringify(currentSettings));
+        console.log('✅ Top K 저장됨:', e.target.value);
+    });
+}
+
+// 검색 모드 변경 시 자동 저장
+if (searchModeSelect) {
+    searchModeSelect.addEventListener('change', async (e) => {
+        // 하이브리드 RAG 상태 재확인
+        try {
+            const response = await fetch('/api/hybrid-rag/status');
+            const data = await response.json();
+
+            // 하이브리드 RAG가 비활성화 상태이고, local-only가 아닌 값으로 변경하려는 경우
+            if (!data.enabled && e.target.value !== 'local-only') {
+                alert('⚠️ 하이브리드 RAG 기능이 비활성화되어 있습니다.\n로컬 문서만 사용 가능합니다.');
+                e.target.value = 'local-only';
+                currentSettings.searchMode = 'local-only';
+                localStorage.setItem('chatSettings', JSON.stringify(currentSettings));
+                return;
+            }
+        } catch (error) {
+            console.error('하이브리드 RAG 상태 확인 실패:', error);
+        }
+
+        // 현재 설정 업데이트
+        currentSettings.searchMode = e.target.value;
+
+        // localStorage에 즉시 저장
+        localStorage.setItem('chatSettings', JSON.stringify(currentSettings));
+
+        console.log('✅ 검색 모드 저장됨:', e.target.value);
     });
 }
 
 if (temperatureSlider && temperatureValue) {
+    // 실시간 화면 업데이트
     temperatureSlider.addEventListener('input', (e) => {
         temperatureValue.textContent = parseFloat(e.target.value).toFixed(1);
+    });
+
+    // 값 변경 완료 시 자동 저장
+    temperatureSlider.addEventListener('change', (e) => {
+        currentSettings.temperature = parseFloat(e.target.value);
+        localStorage.setItem('chatSettings', JSON.stringify(currentSettings));
+        console.log('✅ Temperature 저장됨:', e.target.value);
     });
 }
 
 if (maxTokensSlider && maxTokensValue) {
+    // 실시간 화면 업데이트
     maxTokensSlider.addEventListener('input', (e) => {
         maxTokensValue.textContent = e.target.value;
+    });
+
+    // 값 변경 완료 시 자동 저장
+    maxTokensSlider.addEventListener('change', (e) => {
+        currentSettings.max_tokens = parseInt(e.target.value);
+        localStorage.setItem('chatSettings', JSON.stringify(currentSettings));
+        console.log('✅ Max Tokens 저장됨:', e.target.value);
     });
 }
 
 if (cacheThresholdSlider && cacheThresholdValue) {
+    // 실시간 화면 업데이트
     cacheThresholdSlider.addEventListener('input', (e) => {
         cacheThresholdValue.textContent = parseFloat(e.target.value).toFixed(2);
+    });
+
+    // 값 변경 완료 시 자동 저장
+    cacheThresholdSlider.addEventListener('change', (e) => {
+        currentSettings.cache_threshold = parseFloat(e.target.value);
+        localStorage.setItem('chatSettings', JSON.stringify(currentSettings));
+        console.log('✅ Cache Threshold 저장됨:', e.target.value);
     });
 }
 
 if (cacheTTLSlider && cacheTTLValue) {
+    // 실시간 화면 업데이트
     cacheTTLSlider.addEventListener('input', (e) => {
         cacheTTLValue.textContent = e.target.value;
+    });
+
+    // 값 변경 완료 시 자동 저장
+    cacheTTLSlider.addEventListener('change', (e) => {
+        currentSettings.cache_ttl = parseInt(e.target.value);
+        localStorage.setItem('chatSettings', JSON.stringify(currentSettings));
+        console.log('✅ Cache TTL 저장됨:', e.target.value);
     });
 }
 
@@ -3228,6 +3501,7 @@ if (saveSettingsBtn) {
         // 시스템 프롬프트도 관리자 페이지에서만 변경 가능 (서버에서 항상 로드)
         currentSettings = {
             top_k: topKSlider ? parseInt(topKSlider.value) : defaultSettings.top_k,
+            searchMode: searchModeSelect ? searchModeSelect.value : defaultSettings.searchMode,
             temperature: temperatureSlider ? parseFloat(temperatureSlider.value) : defaultSettings.temperature,
             max_tokens: maxTokensSlider ? parseInt(maxTokensSlider.value) : defaultSettings.max_tokens,
             cache_threshold: cacheThresholdSlider ? parseFloat(cacheThresholdSlider.value) : defaultSettings.cache_threshold,
@@ -3499,18 +3773,18 @@ if (cacheEnabledToggle) {
 
 // ===== Source Details Modal =====
 async function showSourceDetails(filename) {
-    console.log('[showSourceDetails] Called for filename:', filename);
-    console.log('[showSourceDetails] currentContextData length:', currentContextData.length);
+    devLog('[showSourceDetails] Called for filename:', filename);
+    devLog('[showSourceDetails] currentContextData length:', currentContextData.length);
 
     // Find all context items for this filename in cache
     let sourceContexts = currentContextData.filter(ctx => ctx.filename === filename);
 
-    console.log('[showSourceDetails] Found in cache:', sourceContexts.length, 'items');
+    devLog('[showSourceDetails] Found in cache:', sourceContexts.length, 'items');
 
     // If not found in cache, fetch from server
     if (sourceContexts.length === 0) {
-        console.log('[showSourceDetails] Not in cache, fetching from server...');
-        console.log('[showSourceDetails] API URL:', `/api/documents/${encodeURIComponent(filename)}/chunks`);
+        devLog('[showSourceDetails] Not in cache, fetching from server...');
+        devLog('[showSourceDetails] API URL:', `/api/documents/${encodeURIComponent(filename)}/chunks`);
 
         // Show loading indicator
         sourceFilename.textContent = filename;
@@ -3521,7 +3795,7 @@ async function showSourceDetails(filename) {
 
         try {
             const response = await fetch(`/api/documents/${encodeURIComponent(filename)}/chunks`);
-            console.log('[showSourceDetails] Response status:', response.status, response.statusText);
+            devLog('[showSourceDetails] Response status:', response.status, response.statusText);
 
             if (!response.ok) {
                 const errorText = await response.text();
@@ -3530,14 +3804,14 @@ async function showSourceDetails(filename) {
             }
 
             const data = await response.json();
-            console.log('[showSourceDetails] Received data:', {
+            devLog('[showSourceDetails] Received data:', {
                 filename: data.filename,
                 total_count: data.total_count,
                 chunks_count: data.chunks?.length
             });
 
             if (!data.chunks || data.chunks.length === 0) {
-                console.warn('[showSourceDetails] No chunks in response');
+                devLog('[showSourceDetails] No chunks in response');
                 sourceModal.classList.remove('active');
                 alert(`출처 정보를 찾을 수 없습니다.\n파일명: ${filename}`);
                 return;
@@ -3550,7 +3824,7 @@ async function showSourceDetails(filename) {
                 score: 1.0  // Default score for loaded chunks
             }));
 
-            console.log('[showSourceDetails] Successfully loaded', sourceContexts.length, 'chunks from server');
+            devLog('[showSourceDetails] Successfully loaded', sourceContexts.length, 'chunks from server');
         } catch (error) {
             console.error('[showSourceDetails] Error:', error);
             console.error('[showSourceDetails] Error stack:', error.stack);
@@ -3714,7 +3988,9 @@ function restoreChatUI() {
 
             // Apply syntax highlighting
             contentDiv.querySelectorAll('pre code').forEach((block) => {
-                hljs.highlightElement(block);
+                if (!block.dataset.highlighted) {
+                    hljs.highlightElement(block);
+                }
             });
 
             // Render special content (math, diagrams, music, charts)
@@ -4365,16 +4641,11 @@ window.selectedDocumentIds = new Set();
 // Toggle filter panel expansion/collapse
 function toggleFilterPanel() {
     const filterContent = document.getElementById('filterContent');
-    const toggleBtn = document.querySelector('.toggle-filter-btn');
-    const toggleIcon = toggleBtn.querySelector('svg');
 
-    if (filterContent.classList.contains('collapsed')) {
-        filterContent.classList.remove('collapsed');
-        toggleIcon.style.transform = 'rotate(180deg)';
-    } else {
-        filterContent.classList.add('collapsed');
-        toggleIcon.style.transform = 'rotate(0deg)';
-    }
+    if (!filterContent) return;
+
+    // Toggle collapsed state - CSS handles arrow rotation automatically
+    filterContent.classList.toggle('collapsed');
 }
 
 // Load available documents for filter from server
@@ -4397,23 +4668,12 @@ async function loadFilterDocuments() {
         // Show loading state
         documentList.innerHTML = '<div class="loading-documents">문서 목록을 불러오는 중...</div>';
 
-        const headers = {
-            'Authorization': `Bearer ${token}`
-        };
-
-        const response = await fetch('/api/documents', {
-            headers: headers,
+        // Use Auth.apiCall for automatic retry logic
+        // Note: Retry logic will handle transient failures better than timeout
+        const data = await Auth.apiCall('/api/documents?filter_scope=user', {
             signal: AbortSignal.timeout(10000) // 10 second timeout
         });
 
-        if (!response.ok) {
-            if (response.status === 401) {
-                throw new Error('인증이 필요합니다');
-            }
-            throw new Error(`서버 오류: ${response.status}`);
-        }
-
-        const data = await response.json();
         availableDocuments = data.documents || [];
         renderFilterDocumentList();
     } catch (error) {
@@ -4439,6 +4699,7 @@ function renderFilterDocumentList() {
 
     if (availableDocuments.length === 0) {
         documentList.innerHTML = '<div class="loading-documents">📭 등록된 문서가 없습니다.</div>';
+        updateFilterTabCounts();
         return;
     }
 
@@ -4457,6 +4718,9 @@ function renderFilterDocumentList() {
             </label>
         </div>
     `).join('');
+
+    // Update counts after rendering
+    updateFilterTabCounts();
 }
 
 // Handle document checkbox selection
@@ -4469,8 +4733,13 @@ function handleDocumentSelection(checkbox) {
 
     // Auto-switch to "selected documents" mode if any document is selected
     const selectedMode = document.querySelector('input[name="filterMode"][value="selected"]');
+    const allMode = document.querySelector('input[name="filterMode"][value="all"]');
+
     if (window.selectedDocumentIds.size > 0 && selectedMode) {
         selectedMode.checked = true;
+    } else if (window.selectedDocumentIds.size === 0 && allMode) {
+        // Auto-switch to "all documents" mode if no document is selected
+        allMode.checked = true;
     }
 
     // Update tab counts
@@ -4518,8 +4787,13 @@ function getActiveFilterData() {
     if (activeTab === 'documents') {
         // Document filter is active
         const filterMode = document.querySelector('input[name="filterMode"]:checked')?.value;
-        if (filterMode === 'selected' && window.selectedDocumentIds && window.selectedDocumentIds.size > 0) {
-            documentIds = Array.from(window.selectedDocumentIds);
+        if (filterMode === 'selected') {
+            if (window.selectedDocumentIds && window.selectedDocumentIds.size > 0) {
+                documentIds = Array.from(window.selectedDocumentIds);
+            } else {
+                // If "selected" mode but no documents selected, use empty array to prevent any search
+                documentIds = [];
+            }
         }
     } else if (activeTab === 'groups') {
         // Group filter is active
@@ -4528,6 +4802,9 @@ function getActiveFilterData() {
             const selectedGroups = groupFilter.getSelectedGroups();
             if (selectedGroups && selectedGroups.length > 0) {
                 groupIds = selectedGroups;
+            } else {
+                // If "selected" mode but no groups selected, use empty array to prevent any search
+                groupIds = [];
             }
         }
     }
@@ -4557,7 +4834,8 @@ function initDocumentFilter() {
         });
     });
 
-    // Load documents from server for filter
+    // Load organization info and documents from server for filter
+    loadFilterOrgInfo();
     loadFilterDocuments();
 }
 
@@ -4889,6 +5167,86 @@ function updateFilterTabCounts() {
         const baseText = '그룹별';
         groupTab.textContent = groupCount > 0 ? `${baseText} (${groupCount})` : baseText;
     }
+
+    // Update document counts in filter options
+    const totalDocCount = document.getElementById('totalDocCount');
+    const selectedDocCount = document.getElementById('selectedDocCount');
+    if (totalDocCount && availableDocuments) {
+        totalDocCount.textContent = `(${availableDocuments.length}개)`;
+    }
+    if (selectedDocCount && window.selectedDocumentIds) {
+        const count = window.selectedDocumentIds.size;
+        selectedDocCount.textContent = count > 0 ? `(${count}개)` : '';
+    }
+
+    // Update group counts in filter options
+    const totalGroupCount = document.getElementById('totalGroupCount');
+    const selectedGroupCount = document.getElementById('selectedGroupCount');
+    if (totalGroupCount && groupManager && groupManager.groups) {
+        totalGroupCount.textContent = `(${groupManager.groups.length}개)`;
+    }
+    if (selectedGroupCount && groupFilter) {
+        const count = groupFilter.getSelectedGroups().length;
+        selectedGroupCount.textContent = count > 0 ? `(${count}개)` : '';
+    }
+}
+
+/**
+ * Load and display user organization info in filter header
+ */
+async function loadFilterOrgInfo() {
+    const filterOrgName = document.getElementById('filterOrgName');
+
+    if (!filterOrgName) {
+        return;
+    }
+
+    try {
+        const token = localStorage.getItem('access_token');
+        if (!token) {
+            filterOrgName.textContent = '로그인 필요';
+            return;
+        }
+
+        // Get current user info using Auth.apiCall for retry logic
+        const userData = await Auth.apiCall('/api/auth/me');
+        const user = userData.user;
+
+        // Get organization info
+        if (user.org_id) {
+            try {
+                const orgData = await Auth.apiCall(`/api/organizations/${user.org_id}`);
+                // API returns {success: true, organization: {name: "..."}}
+                const orgName = orgData.organization?.name || user.org_id;
+                filterOrgName.textContent = orgName;
+            } catch (orgError) {
+                // If org fetch fails, fall back to org_id
+                filterOrgName.textContent = user.org_id;
+            }
+        } else {
+            filterOrgName.textContent = '조직 없음';
+        }
+    } catch (error) {
+        console.error('Failed to load organization info:', error);
+        filterOrgName.textContent = '로드 실패';
+    }
+}
+
+/**
+ * Load Hybrid RAG status
+ */
+async function loadHybridRagStatus() {
+    try {
+        const data = await Auth.apiCall('/api/hybrid-rag/status');
+        if (data.success) {
+            isHybridRagEnabled = data.enabled;
+            logger.info(`✅ Hybrid RAG status loaded: ${isHybridRagEnabled ? 'enabled' : 'disabled'}`);
+        }
+    } catch (error) {
+        console.error('Failed to load Hybrid RAG status:', error);
+        // Default to false on error
+        isHybridRagEnabled = false;
+    }
 }
 
 /**
@@ -4902,7 +5260,8 @@ async function loadGroupsIntoFilter() {
             return;
         }
 
-        await groupManager.loadGroups();
+        // Load groups with user filter scope to enforce organization filtering
+        await groupManager.loadGroups('user');
         const groupFilterList = document.getElementById('groupFilterList');
 
         if (groupFilterList && groupFilter) {
@@ -4926,6 +5285,9 @@ async function loadGroupsIntoFilter() {
                 updateFilterTabCounts();
                 // Filter will be applied when user sends a query
             };
+
+            // Update counts after loading groups
+            updateFilterTabCounts();
         }
     } catch (error) {
         console.error('Failed to load groups into filter:', error);
@@ -5797,7 +6159,7 @@ async function loadSecurityLogs() {
 async function loadUserPreferences() {
     // Check if user is authenticated
     if (!Auth || !Auth.isAuthenticated()) {
-        console.log('⏭️ 로그인하지 않음 - 설정 로드 건너뛰기');
+        devLog('⏭️ 로그인하지 않음 - 설정 로드 건너뛰기');
         return null;
     }
 
@@ -5808,7 +6170,7 @@ async function loadUserPreferences() {
 
         if (result && result.data) {
             const preferences = result.data;
-            console.log('📋 사용자 설정 로드:', preferences);
+            devLog('📋 사용자 설정 로드:', preferences);
 
             // Apply preferences to UI
             applyUserPreferences(preferences);
@@ -5816,7 +6178,9 @@ async function loadUserPreferences() {
             return preferences;
         }
     } catch (error) {
-        console.error('사용자 설정 로드 실패:', error);
+        // Silently ignore preference loading errors (non-critical)
+        // This can happen during page navigation or token expiration
+        devLog('⚠️ 사용자 설정 로드 실패 (무시됨):', error.message);
     }
     return null;
 }
@@ -5870,7 +6234,7 @@ function applyUserPreferences(preferences) {
                 }
 
                 updateFilterTabCounts();
-                console.log('✅ 선택된 문서 복원:', preferences.selected_document_ids.length);
+                devLog('✅ 선택된 문서 복원:', preferences.selected_document_ids.length);
             }
         }, 500);
     }
@@ -5881,7 +6245,7 @@ function applyUserPreferences(preferences) {
         setTimeout(() => {
             if (groupFilter && typeof groupFilter.selectGroups === 'function') {
                 groupFilter.selectGroups(preferences.selected_group_ids);
-                console.log('✅ 선택된 그룹 복원:', preferences.selected_group_ids.length);
+                devLog('✅ 선택된 그룹 복원:', preferences.selected_group_ids.length);
             }
         }, 1000);
     }
@@ -5920,7 +6284,7 @@ async function saveUserPreferences() {
         });
 
         if (result && result.success) {
-            console.log('✅ 사용자 설정 저장 완료');
+            devLog('✅ 사용자 설정 저장 완료');
             return true;
         }
     } catch (error) {
@@ -5962,7 +6326,7 @@ function setupPreferencesAutoSave() {
                     checkbox.checked = false;
                 });
 
-                console.log('✅ 전체 그룹 선택 - 개별 그룹 선택 해제');
+                devLog('✅ 전체 그룹 선택 - 개별 그룹 선택 해제');
             }
 
             saveUserPreferences();
@@ -5980,7 +6344,7 @@ function setupPreferencesAutoSave() {
         });
     }
 
-    console.log('✅ 설정 자동 저장 설정 완료');
+    devLog('✅ 설정 자동 저장 설정 완료');
 }
 
 if (document.readyState === 'loading') {
@@ -5991,13 +6355,24 @@ if (document.readyState === 'loading') {
         await init();
 
         // Phase 2: Parallel initialization of independent modules
-        await Promise.all([
+        const results = await Promise.allSettled([
             initDocumentFilter(),
             initGroupManagement(),
             initConversationHistory(),
             initAdminDashboard(),
-            initVersionManagement()
+            initVersionManagement(),
+            loadHybridRagStatus()
         ]);
+
+        // Log initialization results
+        const moduleNames = ['DocumentFilter', 'GroupManagement', 'ConversationHistory', 'AdminDashboard', 'VersionManagement', 'HybridRagStatus'];
+        results.forEach((result, index) => {
+            if (result.status === 'rejected') {
+                logger.error(`❌ ${moduleNames[index]} initialization failed:`, result.reason);
+            } else {
+                logger.info(`✅ ${moduleNames[index]} initialized successfully`);
+            }
+        });
 
         const initTime = performance.now() - startTime;
         logger.info(`✅ Initialization complete in ${initTime.toFixed(2)}ms`);
@@ -6018,13 +6393,24 @@ if (document.readyState === 'loading') {
         await init();
 
         // Phase 2: Parallel initialization of independent modules
-        await Promise.all([
+        const results = await Promise.allSettled([
             initDocumentFilter(),
             initGroupManagement(),
             initConversationHistory(),
             initAdminDashboard(),
-            initVersionManagement()
+            initVersionManagement(),
+            loadHybridRagStatus()
         ]);
+
+        // Log initialization results
+        const moduleNames = ['DocumentFilter', 'GroupManagement', 'ConversationHistory', 'AdminDashboard', 'VersionManagement', 'HybridRagStatus'];
+        results.forEach((result, index) => {
+            if (result.status === 'rejected') {
+                logger.error(`❌ ${moduleNames[index]} initialization failed:`, result.reason);
+            } else {
+                logger.info(`✅ ${moduleNames[index]} initialized successfully`);
+            }
+        });
 
         const initTime = performance.now() - startTime;
         logger.info(`✅ Initialization complete in ${initTime.toFixed(2)}ms`);
