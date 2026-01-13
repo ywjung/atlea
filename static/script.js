@@ -29,6 +29,32 @@ function isAsciiArt(code, language) {
     return false;
 }
 
+// Normalize language class names for highlight.js
+function normalizeLanguageClass(block) {
+    const classList = Array.from(block.classList);
+
+    // Map of incorrect -> correct language codes
+    const languageMap = {
+        'language-jav': 'language-java',
+        'language-ja': 'language-java',
+        'language-py': 'language-python',
+        'language-js': 'language-javascript',
+        'language-ts': 'language-typescript',
+        'language-yml': 'language-yaml',
+        'language-sh': 'language-bash',
+        'language-props': 'language-properties',
+        'language-prop': 'language-properties'
+    };
+
+    // Replace incorrect language classes
+    classList.forEach(className => {
+        if (languageMap[className]) {
+            block.classList.remove(className);
+            block.classList.add(languageMap[className]);
+        }
+    });
+}
+
 // Custom renderer for marked.js
 const renderer = new marked.Renderer();
 const originalCodeRenderer = renderer.code.bind(renderer);
@@ -269,6 +295,20 @@ const DEBUG_MODE = false; // Set to true for development, false for production
 const devLog = (...args) => DEBUG_MODE && console.log(...args);
 const devWarn = (...args) => DEBUG_MODE && console.warn(...args);
 // Keep console.error for production errors
+
+// Simple notification functions for export operations
+function showInfo(message) {
+    console.log('ℹ️', message);
+}
+
+function showError(message) {
+    console.error('❌', message);
+    alert(message);
+}
+
+function showSuccess(message) {
+    console.log('✅', message);
+}
 
 // DOM elements
 const chatContainer = document.getElementById('chatContainer');
@@ -1677,6 +1717,7 @@ async function sendMessage(regenerate = false) {
                                 // Highlight code blocks first
                                 contentDiv.querySelectorAll('pre code').forEach((block) => {
                                     if (!block.dataset.highlighted) {
+                                        normalizeLanguageClass(block);
                                         hljs.highlightElement(block);
                                     }
                                 });
@@ -1917,6 +1958,7 @@ function addMessage(text, type, sources = null) {
         // Highlight code blocks
         contentDiv.querySelectorAll('pre code').forEach((block) => {
             if (!block.dataset.highlighted) {
+                normalizeLanguageClass(block);
                 hljs.highlightElement(block);
             }
         });
@@ -2452,9 +2494,108 @@ function addActionButtons(contentDiv, text) {
     `;
     regenerateBtn.onclick = () => sendMessage(true);
 
+    // Download button with dropdown menu
+    const downloadContainer = document.createElement('div');
+    downloadContainer.className = 'download-container';
+    downloadContainer.style.position = 'relative';
+
+    const downloadBtn = document.createElement('button');
+    downloadBtn.className = 'action-btn download-btn';
+    downloadBtn.setAttribute('title', '답변 다운로드');
+    downloadBtn.setAttribute('aria-label', '답변 다운로드');
+    downloadBtn.innerHTML = `
+        <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor">
+            <path d="M8 2V10M8 10L5 7M8 10L11 7" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M3 13H13" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+    `;
+
+    // Download dropdown menu
+    const downloadMenu = document.createElement('div');
+    downloadMenu.className = 'download-menu';
+    downloadMenu.innerHTML = `
+        <div class="download-option" data-format="json">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M3 3h10v10H3V3zm1 1v8h8V4H4zm1 1h6v1H5V5zm0 2h6v1H5V7zm0 2h4v1H5V9z"/>
+            </svg>
+            <span>JSON</span>
+        </div>
+        <div class="download-option" data-format="markdown">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M2 2h12v12H2V2zm1 1v10h10V3H3zm1 1h8v1H4V4zm0 2h8v1H4V6zm0 2h5v1H4V8z"/>
+            </svg>
+            <span>Markdown (.md)</span>
+        </div>
+        <div class="download-option" data-format="html">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M2 3h12v10H2V3zm1 1v8h10V4H3zm1 1h8v1H4V5zm0 2h8v1H4V7zm0 2h5v1H4V9z"/>
+            </svg>
+            <span>HTML (.html)</span>
+        </div>
+        <div class="download-option" data-format="txt">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M2 2h12v12H2V2zm1 1v10h10V3H3zm1 1h8v1H4V4zm0 2h8v1H4V6zm0 2h6v1H4V8z"/>
+            </svg>
+            <span>텍스트 (.txt)</span>
+        </div>
+        <div class="download-option" data-format="pdf">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M3 2h7l3 3v9H3V2zm1 1v10h8V6h-3V3H4zm5 0v2h2l-2-2z"/>
+                <text x="5" y="12" font-size="6" fill="white" font-weight="bold">PDF</text>
+            </svg>
+            <span>PDF</span>
+        </div>
+        <div class="download-option" data-format="docx">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M3 2h7l3 3v9H3V2zm1 1v10h8V6h-3V3H4zm5 0v2h2l-2-2z"/>
+            </svg>
+            <span>Word 문서 (.docx)</span>
+        </div>
+        <div class="download-option" data-format="hwpx">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M3 2h7l3 3v9H3V2zm1 1v10h8V6h-3V3H4zm5 0v2h2l-2-2z"/>
+                <text x="5" y="11" font-size="5" fill="white" font-weight="bold">한</text>
+            </svg>
+            <span>한글 문서 (.hwpx)</span>
+        </div>
+    `;
+    downloadMenu.style.display = 'none';
+
+    // Toggle menu on button click
+    downloadBtn.onclick = (e) => {
+        e.stopPropagation();
+        const isVisible = downloadMenu.style.display === 'block';
+
+        // Close all other download menus
+        document.querySelectorAll('.download-menu').forEach(menu => {
+            menu.style.display = 'none';
+        });
+
+        downloadMenu.style.display = isVisible ? 'none' : 'block';
+    };
+
+    // Handle download option clicks
+    downloadMenu.querySelectorAll('.download-option').forEach(option => {
+        option.onclick = (e) => {
+            e.stopPropagation();
+            const format = option.getAttribute('data-format');
+            downloadAnswer(text, format, downloadBtn);
+            downloadMenu.style.display = 'none';
+        };
+    });
+
+    // Close menu when clicking outside
+    document.addEventListener('click', () => {
+        downloadMenu.style.display = 'none';
+    });
+
+    downloadContainer.appendChild(downloadBtn);
+    downloadContainer.appendChild(downloadMenu);
+
     actionsDiv.appendChild(feedbackDiv);
     actionsDiv.appendChild(copyBtn);
     actionsDiv.appendChild(regenerateBtn);
+    actionsDiv.appendChild(downloadContainer);
     contentDiv.appendChild(actionsDiv);
 }
 
@@ -2512,9 +2653,108 @@ function addActionButtonsToWrapper(wrapperDiv, text) {
     `;
     regenerateBtn.onclick = () => sendMessage(true);
 
+    // Download button with dropdown menu
+    const downloadContainer = document.createElement('div');
+    downloadContainer.className = 'download-container';
+    downloadContainer.style.position = 'relative';
+
+    const downloadBtn = document.createElement('button');
+    downloadBtn.className = 'action-btn download-btn';
+    downloadBtn.setAttribute('title', '답변 다운로드');
+    downloadBtn.setAttribute('aria-label', '답변 다운로드');
+    downloadBtn.innerHTML = `
+        <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor">
+            <path d="M8 2V10M8 10L5 7M8 10L11 7" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M3 13H13" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+    `;
+
+    // Download dropdown menu
+    const downloadMenu = document.createElement('div');
+    downloadMenu.className = 'download-menu';
+    downloadMenu.innerHTML = `
+        <div class="download-option" data-format="json">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M3 3h10v10H3V3zm1 1v8h8V4H4zm1 1h6v1H5V5zm0 2h6v1H5V7zm0 2h4v1H5V9z"/>
+            </svg>
+            <span>JSON</span>
+        </div>
+        <div class="download-option" data-format="markdown">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M2 2h12v12H2V2zm1 1v10h10V3H3zm1 1h8v1H4V4zm0 2h8v1H4V6zm0 2h5v1H4V8z"/>
+            </svg>
+            <span>Markdown (.md)</span>
+        </div>
+        <div class="download-option" data-format="html">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M2 3h12v10H2V3zm1 1v8h10V4H3zm1 1h8v1H4V5zm0 2h8v1H4V7zm0 2h5v1H4V9z"/>
+            </svg>
+            <span>HTML (.html)</span>
+        </div>
+        <div class="download-option" data-format="txt">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M2 2h12v12H2V2zm1 1v10h10V3H3zm1 1h8v1H4V4zm0 2h8v1H4V6zm0 2h6v1H4V8z"/>
+            </svg>
+            <span>텍스트 (.txt)</span>
+        </div>
+        <div class="download-option" data-format="pdf">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M3 2h7l3 3v9H3V2zm1 1v10h8V6h-3V3H4zm5 0v2h2l-2-2z"/>
+                <text x="5" y="12" font-size="6" fill="white" font-weight="bold">PDF</text>
+            </svg>
+            <span>PDF</span>
+        </div>
+        <div class="download-option" data-format="docx">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M3 2h7l3 3v9H3V2zm1 1v10h8V6h-3V3H4zm5 0v2h2l-2-2z"/>
+            </svg>
+            <span>Word 문서 (.docx)</span>
+        </div>
+        <div class="download-option" data-format="hwpx">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M3 2h7l3 3v9H3V2zm1 1v10h8V6h-3V3H4zm5 0v2h2l-2-2z"/>
+                <text x="5" y="11" font-size="5" fill="white" font-weight="bold">한</text>
+            </svg>
+            <span>한글 문서 (.hwpx)</span>
+        </div>
+    `;
+    downloadMenu.style.display = 'none';
+
+    // Toggle menu on button click
+    downloadBtn.onclick = (e) => {
+        e.stopPropagation();
+        const isVisible = downloadMenu.style.display === 'block';
+
+        // Close all other download menus
+        document.querySelectorAll('.download-menu').forEach(menu => {
+            menu.style.display = 'none';
+        });
+
+        downloadMenu.style.display = isVisible ? 'none' : 'block';
+    };
+
+    // Handle download option clicks
+    downloadMenu.querySelectorAll('.download-option').forEach(option => {
+        option.onclick = (e) => {
+            e.stopPropagation();
+            const format = option.getAttribute('data-format');
+            downloadAnswer(text, format, downloadBtn);
+            downloadMenu.style.display = 'none';
+        };
+    });
+
+    // Close menu when clicking outside
+    document.addEventListener('click', () => {
+        downloadMenu.style.display = 'none';
+    });
+
+    downloadContainer.appendChild(downloadBtn);
+    downloadContainer.appendChild(downloadMenu);
+
     actionsDiv.appendChild(feedbackDiv);
     actionsDiv.appendChild(copyBtn);
     actionsDiv.appendChild(regenerateBtn);
+    actionsDiv.appendChild(downloadContainer);
     wrapperDiv.appendChild(actionsDiv);
 }
 
@@ -2565,6 +2805,834 @@ async function copyToClipboard(text, button) {
             button.style.color = '';
         }, 2000);
     }
+}
+
+// Download answer in various formats
+async function downloadAnswer(text, format, button) {
+    try {
+        let content, filename, mimeType;
+        const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
+
+        switch (format) {
+            case 'json':
+                content = JSON.stringify({
+                    answer: text,
+                    timestamp: new Date().toISOString(),
+                    format: 'markdown'
+                }, null, 2);
+                filename = `answer-${timestamp}.json`;
+                mimeType = 'application/json';
+                break;
+
+            case 'markdown':
+                content = text;
+                filename = `answer-${timestamp}.md`;
+                mimeType = 'text/markdown';
+                break;
+
+            case 'html':
+                // Convert markdown to HTML
+                const htmlContent = marked.parse(text);
+                content = `<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 답변 - ${timestamp}</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans KR', sans-serif;
+            line-height: 1.6;
+            max-width: 800px;
+            margin: 40px auto;
+            padding: 20px;
+            color: #333;
+        }
+        pre {
+            background: #f5f5f5;
+            padding: 16px;
+            border-radius: 8px;
+            overflow-x: auto;
+        }
+        code {
+            background: #f0f0f0;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Consolas', 'Monaco', monospace;
+        }
+        pre code {
+            background: none;
+            padding: 0;
+        }
+        blockquote {
+            border-left: 4px solid #667eea;
+            padding-left: 16px;
+            margin-left: 0;
+            color: #666;
+        }
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 16px 0;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 12px;
+            text-align: left;
+        }
+        th {
+            background: #667eea;
+            color: white;
+        }
+        img {
+            max-width: 100%;
+            height: auto;
+        }
+        .timestamp {
+            color: #999;
+            font-size: 0.9em;
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid #eee;
+        }
+    </style>
+</head>
+<body>
+    ${htmlContent}
+    <div class="timestamp">생성일시: ${new Date().toLocaleString('ko-KR')}</div>
+</body>
+</html>`;
+                filename = `answer-${timestamp}.html`;
+                mimeType = 'text/html';
+                break;
+
+            case 'txt':
+                // Remove markdown formatting for plain text
+                content = text
+                    .replace(/#{1,6}\s/g, '') // Remove headers
+                    .replace(/\*\*(.+?)\*\*/g, '$1') // Remove bold
+                    .replace(/\*(.+?)\*/g, '$1') // Remove italic
+                    .replace(/\[(.+?)\]\(.+?\)/g, '$1') // Remove links
+                    .replace(/`(.+?)`/g, '$1') // Remove inline code
+                    .replace(/```[\s\S]*?```/g, '[코드 블록]'); // Replace code blocks
+                filename = `answer-${timestamp}.txt`;
+                mimeType = 'text/plain';
+                break;
+
+            case 'pdf':
+                // Generate PDF using html2pdf.js
+                filename = `answer-${timestamp}.pdf`;
+                await generateAnswerPdf(text, filename, button);
+                return; // Early return for async pdf generation
+
+            case 'docx':
+                // Generate Word document using docx library
+                filename = `answer-${timestamp}.docx`;
+                await generateDocx(text, filename, button);
+                return; // Early return for async docx generation
+
+            case 'hwpx':
+                // Generate HWPX document via server API
+                filename = `answer-${timestamp}.hwpx`;
+                await generateHwpx(text, filename, button);
+                return; // Early return for async hwpx generation
+
+            default:
+                console.error('Unknown format:', format);
+                return;
+        }
+
+        // Create blob and download
+        const blob = new Blob([content], { type: `${mimeType};charset=utf-8` });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        // Visual feedback
+        if (button) {
+            const originalHTML = button.innerHTML;
+            button.innerHTML = `
+                <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor">
+                    <path d="M3 8L6 11L13 4" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+            `;
+            button.style.color = '#10b981';
+
+            setTimeout(() => {
+                button.innerHTML = originalHTML;
+                button.style.color = '';
+            }, 2000);
+        }
+    } catch (error) {
+        console.error('Download failed:', error);
+
+        // Show error feedback
+        if (button) {
+            const originalHTML = button.innerHTML;
+            button.innerHTML = `
+                <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor">
+                    <path d="M4 4L12 12M12 4L4 12" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+            `;
+            button.style.color = '#ef4444';
+
+            setTimeout(() => {
+                button.innerHTML = originalHTML;
+                button.style.color = '';
+            }, 2000);
+        }
+    }
+}
+
+// Generate PDF from markdown text using html2pdf.js
+async function generateAnswerPdf(text, filename, button) {
+    try {
+        // Convert markdown to HTML
+        const htmlContent = marked.parse(text);
+
+        // Create complete HTML document
+        const fullHTML = `<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>AI 답변 - ${new Date().toLocaleDateString('ko-KR')}</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans KR', 'Malgun Gothic', sans-serif;
+            line-height: 1.8;
+            color: #1a1a1a;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+        h1, h2, h3, h4, h5, h6 {
+            color: #2c3e50;
+            margin-top: 24px;
+            margin-bottom: 16px;
+            font-weight: 600;
+        }
+        p {
+            margin: 12px 0;
+        }
+        pre {
+            background: #f6f8fa;
+            border: 1px solid #e1e4e8;
+            border-radius: 6px;
+            padding: 16px;
+            overflow-x: auto;
+            font-size: 14px;
+        }
+        code {
+            background: #f6f8fa;
+            border: 1px solid #e1e4e8;
+            border-radius: 3px;
+            padding: 2px 6px;
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+        pre code {
+            background: none;
+            border: none;
+            padding: 0;
+        }
+        blockquote {
+            border-left: 4px solid #667eea;
+            margin: 16px 0;
+            padding: 12px 20px;
+            background: #f8f9fa;
+            color: #555;
+        }
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 16px 0;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 12px;
+            text-align: left;
+        }
+        th {
+            background: #667eea;
+            color: white;
+            font-weight: 600;
+        }
+        .timestamp {
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 2px solid #e1e4e8;
+            color: #6c757d;
+            font-size: 0.9em;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    ${htmlContent}
+    <div class="timestamp">
+        생성일시: ${new Date().toLocaleString('ko-KR')}
+    </div>
+</body>
+</html>`;
+
+        // Parse HTML to extract styles and content (same as exportAsPDF)
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(fullHTML, 'text/html');
+
+        // Extract styles from head
+        const styles = doc.querySelector('style');
+        const styleText = styles ? styles.textContent : '';
+
+        // Get body content
+        const bodyContent = doc.body.innerHTML;
+
+        // Create temporary container with styles applied
+        const container = document.createElement('div');
+        container.style.position = 'absolute';
+        container.style.left = '-9999px';
+
+        // Add styles
+        const styleElement = document.createElement('style');
+        styleElement.textContent = styleText;
+        container.appendChild(styleElement);
+
+        // Add content
+        const contentDiv = document.createElement('div');
+        contentDiv.innerHTML = bodyContent;
+        container.appendChild(contentDiv);
+
+        document.body.appendChild(container);
+
+        // PDF generation options
+        const opt = {
+            margin: 10,
+            filename: filename,
+            image: { type: 'jpeg', quality: 0.98 },
+            html2canvas: { scale: 2, useCORS: true },
+            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+        };
+
+        // Generate PDF from content div with styles
+        await html2pdf().set(opt).from(contentDiv).save();
+
+        // Clean up
+        document.body.removeChild(container);
+
+        // Visual feedback
+        if (button) {
+            const originalHTML = button.innerHTML;
+            button.innerHTML = `
+                <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor">
+                    <path d="M3 8L6 11L13 4" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+            `;
+            button.style.color = '#10b981';
+
+            setTimeout(() => {
+                button.innerHTML = originalHTML;
+                button.style.color = '';
+            }, 2000);
+        }
+    } catch (error) {
+        console.error('PDF generation failed:', error);
+
+        // Show error feedback
+        if (button) {
+            const originalHTML = button.innerHTML;
+            button.innerHTML = `
+                <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor">
+                    <path d="M4 4L12 12M12 4L4 12" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+            `;
+            button.style.color = '#ef4444';
+
+            setTimeout(() => {
+                button.innerHTML = originalHTML;
+                button.style.color = '';
+            }, 2000);
+        }
+    }
+}
+
+// Generate Word document (.docx) from markdown text
+async function generateDocx(text, filename, button) {
+    try {
+        const { Document, Paragraph, TextRun, HeadingLevel, AlignmentType, TabStopType, TabStopPosition, convertInchesToTwip } = docx;
+
+        // Parse markdown into structured content
+        const lines = text.split('\n');
+        const documentChildren = [];
+
+        let currentList = null;
+        let inCodeBlock = false;
+        let codeBlockContent = [];
+        let codeBlockLanguage = '';
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+
+            // Handle code blocks
+            if (line.startsWith('```')) {
+                if (!inCodeBlock) {
+                    inCodeBlock = true;
+                    codeBlockLanguage = line.slice(3).trim();
+                    codeBlockContent = [];
+                } else {
+                    inCodeBlock = false;
+                    // Add code block as gray background paragraph
+                    if (codeBlockContent.length > 0) {
+                        documentChildren.push(
+                            new Paragraph({
+                                text: codeBlockContent.join('\n'),
+                                shading: {
+                                    fill: 'F5F5F5',
+                                },
+                                spacing: {
+                                    before: 200,
+                                    after: 200,
+                                },
+                                style: 'code',
+                            })
+                        );
+                    }
+                    codeBlockContent = [];
+                }
+                continue;
+            }
+
+            if (inCodeBlock) {
+                codeBlockContent.push(line);
+                continue;
+            }
+
+            // Handle headings
+            if (line.startsWith('#')) {
+                const level = line.match(/^#+/)[0].length;
+                const headingText = line.replace(/^#+\s*/, '');
+
+                const headingLevels = {
+                    1: HeadingLevel.HEADING_1,
+                    2: HeadingLevel.HEADING_2,
+                    3: HeadingLevel.HEADING_3,
+                    4: HeadingLevel.HEADING_4,
+                    5: HeadingLevel.HEADING_5,
+                    6: HeadingLevel.HEADING_6,
+                };
+
+                documentChildren.push(
+                    new Paragraph({
+                        text: headingText,
+                        heading: headingLevels[level] || HeadingLevel.HEADING_1,
+                        spacing: {
+                            before: 240,
+                            after: 120,
+                        },
+                    })
+                );
+                currentList = null;
+                continue;
+            }
+
+            // Handle unordered lists
+            if (line.match(/^\s*[-*+]\s+/)) {
+                const text = line.replace(/^\s*[-*+]\s+/, '');
+                const textRuns = parseInlineFormatting(text);
+
+                documentChildren.push(
+                    new Paragraph({
+                        children: textRuns,
+                        bullet: {
+                            level: 0,
+                        },
+                        spacing: {
+                            before: 100,
+                            after: 100,
+                        },
+                    })
+                );
+                continue;
+            }
+
+            // Handle ordered lists
+            if (line.match(/^\s*\d+\.\s+/)) {
+                const text = line.replace(/^\s*\d+\.\s+/, '');
+                const textRuns = parseInlineFormatting(text);
+
+                documentChildren.push(
+                    new Paragraph({
+                        children: textRuns,
+                        numbering: {
+                            reference: 'my-numbering',
+                            level: 0,
+                        },
+                        spacing: {
+                            before: 100,
+                            after: 100,
+                        },
+                    })
+                );
+                continue;
+            }
+
+            // Handle blockquotes
+            if (line.startsWith('>')) {
+                const text = line.replace(/^>\s*/, '');
+                const textRuns = parseInlineFormatting(text);
+
+                documentChildren.push(
+                    new Paragraph({
+                        children: textRuns,
+                        indent: {
+                            left: convertInchesToTwip(0.5),
+                        },
+                        border: {
+                            left: {
+                                color: '667EEA',
+                                space: 1,
+                                size: 24,
+                                style: 'single',
+                            },
+                        },
+                        spacing: {
+                            before: 100,
+                            after: 100,
+                        },
+                    })
+                );
+                continue;
+            }
+
+            // Handle empty lines
+            if (line.trim() === '') {
+                documentChildren.push(
+                    new Paragraph({
+                        text: '',
+                        spacing: {
+                            before: 100,
+                            after: 100,
+                        },
+                    })
+                );
+                currentList = null;
+                continue;
+            }
+
+            // Regular paragraphs with inline formatting
+            const textRuns = parseInlineFormatting(line);
+            documentChildren.push(
+                new Paragraph({
+                    children: textRuns,
+                    spacing: {
+                        before: 100,
+                        after: 100,
+                    },
+                })
+            );
+            currentList = null;
+        }
+
+        // Add timestamp at the end
+        documentChildren.push(
+            new Paragraph({
+                text: '',
+                spacing: { before: 400 },
+            })
+        );
+        documentChildren.push(
+            new Paragraph({
+                children: [
+                    new TextRun({
+                        text: `생성일시: ${new Date().toLocaleString('ko-KR')}`,
+                        size: 18,
+                        color: '999999',
+                    }),
+                ],
+                border: {
+                    top: {
+                        color: 'EEEEEE',
+                        space: 1,
+                        size: 6,
+                        style: 'single',
+                    },
+                },
+                spacing: {
+                    before: 200,
+                },
+            })
+        );
+
+        // Create document
+        const doc = new Document({
+            sections: [{
+                properties: {},
+                children: documentChildren,
+            }],
+            numbering: {
+                config: [{
+                    reference: 'my-numbering',
+                    levels: [{
+                        level: 0,
+                        format: 'decimal',
+                        text: '%1.',
+                        alignment: AlignmentType.LEFT,
+                    }],
+                }],
+            },
+            styles: {
+                paragraphStyles: [{
+                    id: 'code',
+                    name: 'Code',
+                    basedOn: 'Normal',
+                    next: 'Normal',
+                    run: {
+                        font: 'Consolas',
+                        size: 20,
+                    },
+                    paragraph: {
+                        spacing: {
+                            line: 276,
+                            before: 200,
+                            after: 200,
+                        },
+                    },
+                }],
+            },
+        });
+
+        // Generate blob and download
+        const blob = await docx.Packer.toBlob(doc);
+
+        // Create proper Blob with MIME type
+        const docxBlob = new Blob([blob], {
+            type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        });
+
+        // Use FileSaver.js if available, otherwise use createElement method
+        if (typeof saveAs === 'function') {
+            saveAs(docxBlob, filename);
+        } else {
+            const url = URL.createObjectURL(docxBlob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            a.style.display = 'none';
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(() => {
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            }, 100);
+        }
+
+        // Visual feedback
+        if (button) {
+            const originalHTML = button.innerHTML;
+            button.innerHTML = `
+                <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor">
+                    <path d="M3 8L6 11L13 4" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+            `;
+            button.style.color = '#10b981';
+
+            setTimeout(() => {
+                button.innerHTML = originalHTML;
+                button.style.color = '';
+            }, 2000);
+        }
+    } catch (error) {
+        console.error('Word document generation failed:', error);
+
+        // Show error feedback
+        if (button) {
+            const originalHTML = button.innerHTML;
+            button.innerHTML = `
+                <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor">
+                    <path d="M4 4L12 12M12 4L4 12" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+            `;
+            button.style.color = '#ef4444';
+
+            setTimeout(() => {
+                button.innerHTML = originalHTML;
+                button.style.color = '';
+            }, 2000);
+        }
+    }
+}
+
+// Generate HWPX document via server API
+async function generateHwpx(text, filename, button) {
+    try {
+        // Convert markdown to HTML
+        const htmlContent = marked.parse(text);
+
+        // Call server API to convert HTML to HWPX
+        const token = localStorage.getItem('access_token');
+        const headers = {
+            'Content-Type': 'application/json'
+        };
+        if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+        }
+
+        const response = await fetch('/api/convert/hwpx', {
+            method: 'POST',
+            headers: headers,
+            body: JSON.stringify({
+                content: htmlContent,
+                content_type: 'html',
+                filename: filename
+            })
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.detail || 'HWPX 변환 실패');
+        }
+
+        // Download the HWPX file
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        // Visual feedback
+        if (button) {
+            const originalHTML = button.innerHTML;
+            button.innerHTML = `
+                <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor">
+                    <path d="M3 8L6 11L13 4" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+            `;
+            button.style.color = '#10b981';
+
+            setTimeout(() => {
+                button.innerHTML = originalHTML;
+                button.style.color = '';
+            }, 2000);
+        }
+    } catch (error) {
+        console.error('HWPX 생성 실패:', error);
+
+        // Show error feedback
+        if (button) {
+            const originalHTML = button.innerHTML;
+            button.innerHTML = `
+                <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor">
+                    <circle cx="8" cy="8" r="7" stroke-width="2"/>
+                    <line x1="8" y1="4" x2="8" y2="8" stroke-width="2" stroke-linecap="round"/>
+                    <circle cx="8" cy="11" r="0.5" fill="currentColor"/>
+                </svg>
+            `;
+            button.style.color = '#ef4444';
+
+            setTimeout(() => {
+                button.innerHTML = originalHTML;
+                button.style.color = '';
+            }, 2000);
+        }
+
+        // Show toast notification
+        const toast = document.createElement('div');
+        toast.style.cssText = `
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: #ef4444;
+            color: white;
+            padding: 12px 24px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            z-index: 10000;
+            font-size: 14px;
+        `;
+        toast.textContent = `HWPX 생성 실패: ${error.message}`;
+        document.body.appendChild(toast);
+
+        setTimeout(() => {
+            toast.remove();
+        }, 3000);
+    }
+}
+
+// Helper function to parse inline markdown formatting (bold, italic, code)
+function parseInlineFormatting(text) {
+    const textRuns = [];
+    let currentPos = 0;
+
+    // Regex patterns for inline formatting
+    const patterns = [
+        { regex: /\*\*(.+?)\*\*/g, bold: true },           // **bold**
+        { regex: /\*(.+?)\*/g, italic: true },             // *italic*
+        { regex: /__(.+?)__/g, bold: true },               // __bold__
+        { regex: /_(.+?)_/g, italic: true },               // _italic_
+        { regex: /`(.+?)`/g, code: true },                 // `code`
+    ];
+
+    // Find all matches
+    const matches = [];
+    patterns.forEach(pattern => {
+        let match;
+        const regex = new RegExp(pattern.regex);
+        while ((match = regex.exec(text)) !== null) {
+            matches.push({
+                start: match.index,
+                end: regex.lastIndex,
+                text: match[1],
+                bold: pattern.bold,
+                italic: pattern.italic,
+                code: pattern.code,
+            });
+        }
+    });
+
+    // Sort matches by position
+    matches.sort((a, b) => a.start - b.start);
+
+    // Build text runs
+    if (matches.length === 0) {
+        return [new docx.TextRun({ text })];
+    }
+
+    matches.forEach(match => {
+        // Add text before match
+        if (match.start > currentPos) {
+            textRuns.push(new docx.TextRun({
+                text: text.substring(currentPos, match.start),
+            }));
+        }
+
+        // Add formatted text
+        const runOptions = { text: match.text };
+        if (match.bold) runOptions.bold = true;
+        if (match.italic) runOptions.italics = true;
+        if (match.code) {
+            runOptions.font = 'Consolas';
+            runOptions.shading = { fill: 'F0F0F0' };
+        }
+        textRuns.push(new docx.TextRun(runOptions));
+
+        currentPos = match.end;
+    });
+
+    // Add remaining text
+    if (currentPos < text.length) {
+        textRuns.push(new docx.TextRun({
+            text: text.substring(currentPos),
+        }));
+    }
+
+    return textRuns.length > 0 ? textRuns : [new docx.TextRun({ text })];
 }
 
 // Submit feedback (👍/👎)
@@ -3989,6 +5057,7 @@ function restoreChatUI() {
             // Apply syntax highlighting
             contentDiv.querySelectorAll('pre code').forEach((block) => {
                 if (!block.dataset.highlighted) {
+                    normalizeLanguageClass(block);
                     hljs.highlightElement(block);
                 }
             });
@@ -4063,51 +5132,74 @@ function exportHistory() {
 }
 
 // Export as specific format
-function exportAsFormat(format) {
+async function exportAsFormat(format) {
     const date = new Date().toISOString().slice(0, 10);
     let content, mimeType, extension;
 
-    switch (format) {
-        case 'json':
-            content = JSON.stringify(conversationHistory, null, 2);
-            mimeType = 'application/json';
-            extension = 'json';
-            break;
+    try {
+        switch (format) {
+            case 'json':
+                content = JSON.stringify(conversationHistory, null, 2);
+                mimeType = 'application/json';
+                extension = 'json';
+                break;
 
-        case 'txt':
-            content = conversationHistoryToText();
-            mimeType = 'text/plain';
-            extension = 'txt';
-            break;
+            case 'txt':
+                content = conversationHistoryToText();
+                mimeType = 'text/plain';
+                extension = 'txt';
+                break;
 
-        case 'markdown':
-            content = conversationHistoryToMarkdown();
-            mimeType = 'text/markdown';
-            extension = 'md';
-            break;
+            case 'markdown':
+                content = conversationHistoryToMarkdown();
+                mimeType = 'text/markdown';
+                extension = 'md';
+                break;
 
-        default:
-            console.error('Unknown format:', format);
-            return;
+            case 'html':
+                content = conversationHistoryToHTML();
+                mimeType = 'text/html';
+                extension = 'html';
+                break;
+
+            case 'pdf':
+                await exportAsPDF(date);
+                return; // PDF export handles modal closing internally
+
+            case 'docx':
+                await exportAsDocx(date);
+                return; // DOCX export handles modal closing internally
+
+            case 'hwpx':
+                await exportAsHwpx(date);
+                return; // HWPX export handles modal closing internally
+
+            default:
+                console.error('Unknown format:', format);
+                return;
+        }
+
+        // Create and download file (for simple formats)
+        const blob = new Blob([content], { type: mimeType + ';charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `chat-history-${date}.${extension}`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+
+        // Close modal
+        const modal = document.getElementById('exportModal');
+        modal.classList.remove('active');
+        popModal(modal);
+
+        logger.info(`✅ 대화 내용을 ${format.toUpperCase()} 형식으로 내보냈습니다.`);
+    } catch (error) {
+        console.error('Export error:', error);
+        showError(`내보내기 실패: ${error.message}`);
     }
-
-    // Create and download file
-    const blob = new Blob([content], { type: mimeType + ';charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `chat-history-${date}.${extension}`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-
-    // Close modal
-    const modal = document.getElementById('exportModal');
-    modal.classList.remove('active');
-    popModal(modal);
-
-    logger.info(`✅ 대화 내용을 ${format.toUpperCase()} 형식으로 내보냈습니다.`);
 }
 
 // Convert conversation history to plain text
@@ -4163,6 +5255,274 @@ function conversationHistoryToMarkdown() {
     });
 
     return lines.join('\n');
+}
+
+// Convert conversation history to HTML
+function conversationHistoryToHTML() {
+    const html = [];
+    html.push('<!DOCTYPE html>');
+    html.push('<html lang="ko">');
+    html.push('<head>');
+    html.push('    <meta charset="UTF-8">');
+    html.push('    <meta name="viewport" content="width=device-width, initial-scale=1.0">');
+    html.push('    <title>대화 내역</title>');
+    html.push('    <style>');
+    html.push('        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 900px; margin: 40px auto; padding: 20px; background: #f5f5f5; }');
+    html.push('        .header { background: white; padding: 30px; border-radius: 12px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }');
+    html.push('        .header h1 { margin: 0 0 15px 0; color: #333; }');
+    html.push('        .header p { margin: 5px 0; color: #666; font-size: 14px; }');
+    html.push('        .message { background: white; padding: 20px; border-radius: 12px; margin-bottom: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }');
+    html.push('        .message.user { border-left: 4px solid #667eea; }');
+    html.push('        .message.assistant { border-left: 4px solid #22c55e; }');
+    html.push('        .message-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid #eee; }');
+    html.push('        .role { font-weight: bold; font-size: 16px; }');
+    html.push('        .role.user { color: #667eea; }');
+    html.push('        .role.assistant { color: #22c55e; }');
+    html.push('        .timestamp { color: #999; font-size: 13px; }');
+    html.push('        .content { line-height: 1.6; color: #333; white-space: pre-wrap; word-wrap: break-word; }');
+    html.push('        pre { background: #f8f9fa; padding: 15px; border-radius: 8px; overflow-x: auto; }');
+    html.push('        code { font-family: "Consolas", "Monaco", monospace; font-size: 13px; }');
+    html.push('    </style>');
+    html.push('</head>');
+    html.push('<body>');
+    html.push('    <div class="header">');
+    html.push('        <h1>📋 대화 내역</h1>');
+    html.push(`        <p><strong>내보낸 날짜:</strong> ${new Date().toLocaleString('ko-KR')}</p>`);
+    html.push(`        <p><strong>총 메시지 수:</strong> ${conversationHistory.length}개</p>`);
+    html.push('    </div>');
+
+    conversationHistory.forEach((msg, index) => {
+        const roleClass = msg.role === 'user' ? 'user' : 'assistant';
+        const roleName = msg.role === 'user' ? '👤 사용자' : '🤖 AI';
+        const timestamp = msg.timestamp ? new Date(msg.timestamp).toLocaleString('ko-KR') : '';
+        const escapedContent = msg.content
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+
+        html.push(`    <div class="message ${roleClass}">`);
+        html.push('        <div class="message-header">');
+        html.push(`            <div class="role ${roleClass}">${roleName}</div>`);
+        if (timestamp) {
+            html.push(`            <div class="timestamp">⏰ ${timestamp}</div>`);
+        }
+        html.push('        </div>');
+        html.push(`        <div class="content">${escapedContent}</div>`);
+        html.push('    </div>');
+    });
+
+    html.push('</body>');
+    html.push('</html>');
+
+    return html.join('\n');
+}
+
+// Export as PDF using html2pdf.js
+async function exportAsPDF(date) {
+    try {
+        showInfo('PDF 생성 중...');
+
+        // Parse HTML to extract styles and content
+        const fullHTML = conversationHistoryToHTML();
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(fullHTML, 'text/html');
+
+        // Extract styles from head
+        const styles = doc.querySelector('style');
+        const styleText = styles ? styles.textContent : '';
+
+        // Get body content
+        const bodyContent = doc.body.innerHTML;
+
+        // Create temporary container with styles applied
+        const container = document.createElement('div');
+        container.style.position = 'absolute';
+        container.style.left = '-9999px';
+
+        // Add styles
+        const styleElement = document.createElement('style');
+        styleElement.textContent = styleText;
+        container.appendChild(styleElement);
+
+        // Add content
+        const contentDiv = document.createElement('div');
+        contentDiv.innerHTML = bodyContent;
+        container.appendChild(contentDiv);
+
+        document.body.appendChild(container);
+
+        // Configure html2pdf options
+        const opt = {
+            margin: 10,
+            filename: `chat-history-${date}.pdf`,
+            image: { type: 'jpeg', quality: 0.98 },
+            html2canvas: { scale: 2, useCORS: true },
+            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+        };
+
+        // Generate PDF from content div with styles
+        await html2pdf().set(opt).from(contentDiv).save();
+
+        // Clean up
+        document.body.removeChild(container);
+
+        // Close modal
+        const modal = document.getElementById('exportModal');
+        modal.classList.remove('active');
+        popModal(modal);
+
+        showSuccess('PDF 내보내기 완료');
+        logger.info('✅ 대화 내용을 PDF 형식으로 내보냈습니다.');
+    } catch (error) {
+        console.error('PDF export error:', error);
+        showError(`PDF 내보내기 실패: ${error.message}`);
+    }
+}
+
+// Export as DOCX using docx library
+async function exportAsDocx(date) {
+    try {
+        showInfo('Word 문서 생성 중...');
+
+        const { Document, Packer, Paragraph, TextRun, HeadingLevel } = docx;
+
+        // Create document sections
+        const sections = [];
+
+        // Header
+        sections.push(
+            new Paragraph({
+                text: '📋 대화 내역',
+                heading: HeadingLevel.HEADING_1,
+            }),
+            new Paragraph({
+                children: [
+                    new TextRun({
+                        text: `내보낸 날짜: ${new Date().toLocaleString('ko-KR')}`,
+                    }),
+                ],
+            }),
+            new Paragraph({
+                children: [
+                    new TextRun({
+                        text: `총 메시지 수: ${conversationHistory.length}개`,
+                    }),
+                ],
+            }),
+            new Paragraph({ text: '' }) // Empty line
+        );
+
+        // Add messages
+        conversationHistory.forEach((msg, index) => {
+            const roleName = msg.role === 'user' ? '👤 사용자' : '🤖 AI';
+            const timestamp = msg.timestamp ? new Date(msg.timestamp).toLocaleString('ko-KR') : '';
+
+            sections.push(
+                new Paragraph({
+                    text: `${index + 1}. ${roleName}`,
+                    heading: HeadingLevel.HEADING_2,
+                }),
+            );
+
+            if (timestamp) {
+                sections.push(
+                    new Paragraph({
+                        children: [
+                            new TextRun({
+                                text: `⏰ ${timestamp}`,
+                                italics: true,
+                            }),
+                        ],
+                    })
+                );
+            }
+
+            sections.push(
+                new Paragraph({
+                    children: [
+                        new TextRun({
+                            text: msg.content,
+                        }),
+                    ],
+                }),
+                new Paragraph({ text: '' }) // Empty line
+            );
+        });
+
+        // Create document
+        const doc = new Document({
+            sections: [{
+                properties: {},
+                children: sections,
+            }],
+        });
+
+        // Generate and save
+        const blob = await Packer.toBlob(doc);
+        saveAs(blob, `chat-history-${date}.docx`);
+
+        // Close modal
+        const modal = document.getElementById('exportModal');
+        modal.classList.remove('active');
+        popModal(modal);
+
+        showSuccess('Word 문서 내보내기 완료');
+        logger.info('✅ 대화 내용을 DOCX 형식으로 내보냈습니다.');
+    } catch (error) {
+        console.error('DOCX export error:', error);
+        showError(`Word 문서 내보내기 실패: ${error.message}`);
+    }
+}
+
+// Export as HWPX using backend conversion API
+async function exportAsHwpx(date) {
+    try {
+        showInfo('한글 문서 변환 중...');
+
+        // Create HTML content
+        const htmlContent = conversationHistoryToHTML();
+
+        // Call backend conversion API
+        const token = localStorage.getItem('access_token');
+        if (!token) {
+            throw new Error('로그인이 필요합니다.');
+        }
+
+        const response = await fetch('/api/convert/hwpx', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                content: htmlContent,
+                content_type: 'html',
+                filename: `chat-history-${date}`
+            })
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ detail: '변환 실패' }));
+            throw new Error(errorData.detail || '한글 문서 변환 실패');
+        }
+
+        // Download the HWPX file
+        const blob = await response.blob();
+        saveAs(blob, `chat-history-${date}.hwpx`);
+
+        // Close modal
+        const modal = document.getElementById('exportModal');
+        modal.classList.remove('active');
+        popModal(modal);
+
+        showSuccess('한글 문서 내보내기 완료');
+        logger.info('✅ 대화 내용을 HWPX 형식으로 내보냈습니다.');
+    } catch (error) {
+        console.error('HWPX export error:', error);
+        showError(`한글 문서 내보내기 실패: ${error.message}`);
+    }
 }
 
 // Import conversation history from JSON file
@@ -4716,6 +6076,20 @@ function renderFilterDocumentList() {
                     <span>📅 ${formatDate(doc.created_at)}</span>
                 </div>
             </label>
+            <div class="document-actions">
+                <button class="doc-action-btn" onclick="downloadDocument('${doc.name}', event)" title="원본 파일 다운로드">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                        <path d="M8 12l-4-4h2.5V4h3v4H12l-4 4z"/>
+                        <path d="M14 13v1H2v-1h12z"/>
+                    </svg>
+                </button>
+                <button class="doc-action-btn" onclick="downloadDocumentAsPDF('${doc.name}', event)" title="PDF로 다운로드">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                        <path d="M2 2h12v12H2V2zm1 1v10h10V3H3z"/>
+                        <path d="M4 5h8v1H4V5zm0 2h8v1H4V7zm0 2h5v1H4V9z"/>
+                    </svg>
+                </button>
+            </div>
         </div>
     `).join('');
 
@@ -6345,6 +7719,120 @@ function setupPreferencesAutoSave() {
     }
 
     devLog('✅ 설정 자동 저장 설정 완료');
+}
+
+// ============================================================================
+// Document Download Functions
+// ============================================================================
+
+/**
+ * Download original document file
+ */
+async function downloadDocument(filename, event) {
+    if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+
+    try {
+        const token = localStorage.getItem('access_token');
+        if (!token) {
+            showError('로그인이 필요합니다.');
+            return;
+        }
+
+        const response = await fetch(`/api/documents/${encodeURIComponent(filename)}/download`, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ detail: '다운로드 실패' }));
+            throw new Error(errorData.detail || '다운로드 실패');
+        }
+
+        // Create blob and download
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+
+        showSuccess(`${filename} 다운로드 완료`);
+    } catch (error) {
+        console.error('Download error:', error);
+        showError(error.message || '파일 다운로드 중 오류가 발생했습니다.');
+    }
+}
+
+/**
+ * Download document as PDF (convert if needed)
+ */
+async function downloadDocumentAsPDF(filename, event) {
+    if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+
+    try {
+        const token = localStorage.getItem('access_token');
+        if (!token) {
+            showError('로그인이 필요합니다.');
+            return;
+        }
+
+        // Show loading indicator
+        const originalFilename = filename;
+        const pdfFilename = filename.replace(/\.[^.]+$/, '.pdf');
+
+        showInfo(`${originalFilename} PDF 변환 중...`);
+
+        const response = await fetch(`/api/documents/${encodeURIComponent(filename)}/download-pdf`, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ detail: 'PDF 다운로드 실패' }));
+
+            // If PDF conversion not available, suggest original download
+            if (response.status === 400) {
+                const shouldDownloadOriginal = confirm(
+                    `${errorData.detail || 'PDF 변환이 지원되지 않습니다.'}\n\n원본 파일을 다운로드하시겠습니까?`
+                );
+                if (shouldDownloadOriginal) {
+                    await downloadDocument(filename, event);
+                }
+                return;
+            }
+
+            throw new Error(errorData.detail || 'PDF 다운로드 실패');
+        }
+
+        // Create blob and download
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = pdfFilename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+
+        showSuccess(`${pdfFilename} 다운로드 완료`);
+    } catch (error) {
+        console.error('PDF download error:', error);
+        showError(error.message || 'PDF 다운로드 중 오류가 발생했습니다.');
+    }
 }
 
 if (document.readyState === 'loading') {
