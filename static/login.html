@@ -6,35 +6,10 @@
     <title>로그인 - AI 챗봇</title>
     <link rel="stylesheet" href="/static/auth.css">
     <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-    <!-- Google reCAPTCHA v3 -->
-    <script>
-        // reCAPTCHA Site Key를 서버에서 가져옴
-        window.RECAPTCHA_SITE_KEY = null;
 
-        // Site Key 로드 함수
-        async function loadRecaptchaSiteKey() {
-            try {
-                // 관리자 API로부터 site key 가져오기 (인증 불필요)
-                const response = await fetch('/api/admin/captcha');
-                if (response.ok) {
-                    const data = await response.json();
-                    if (data.site_key && data.site_key !== '설정되지 않음') {
-                        window.RECAPTCHA_SITE_KEY = data.site_key;
-
-                        // reCAPTCHA 스크립트 동적 로드
-                        const script = document.createElement('script');
-                        script.src = `https://www.google.com/recaptcha/api.js?render=${window.RECAPTCHA_SITE_KEY}`;
-                        document.head.appendChild(script);
-                    }
-                }
-            } catch (error) {
-                console.error('Failed to load reCAPTCHA site key:', error);
-            }
-        }
-
-        // 페이지 로드 시 site key 로드
-        loadRecaptchaSiteKey();
-    </script>
+    <!-- Logger System -->
+    <script src="/static/env-config.js?v=1"></script>
+    <script src="/static/logger.js?v=1"></script>
 </head>
 <body>
     <div class="auth-container">
@@ -72,6 +47,66 @@
                     class="form-input"
                     placeholder="비밀번호를 입력하세요"
                     required
+                    autocomplete="off"
+                >
+            </div>
+
+            <!-- CAPTCHA 영역 -->
+            <div id="captchaContainer" class="form-group" style="display: none;">
+                <label for="captchaAnswer">보안 확인 <span class="required">*</span></label>
+                <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
+                    <div style="
+                        flex: 1;
+                        display: flex;
+                        justify-content: center;
+                        align-items: center;
+                        background: #f5f5f5;
+                        border: 2px solid #ddd;
+                        border-radius: 8px;
+                        padding: 8px;
+                        min-height: 80px;
+                    ">
+                        <img id="captchaImage" src="" alt="CAPTCHA 이미지" style="
+                            max-width: 100%;
+                            height: auto;
+                            display: block;
+                        ">
+                    </div>
+                    <button type="button" onclick="refreshCaptcha()" style="
+                        padding: 12px 16px;
+                        background: #4CAF50;
+                        color: white;
+                        border: none;
+                        border-radius: 8px;
+                        cursor: pointer;
+                        font-size: 20px;
+                    " title="새로고침">🔄</button>
+                </div>
+                <input type="number" id="captchaAnswer" name="captchaAnswer" class="form-input"
+                       placeholder="위 이미지의 답을 입력하세요">
+                <input type="hidden" id="captchaId" name="captchaId">
+            </div>
+
+            <!-- 2FA (Google OTP) 영역 -->
+            <div id="totpContainer" class="form-group" style="display: none;">
+                <label for="totpToken">
+                    2차 인증 코드 (Google Authenticator) <span class="required">*</span>
+                </label>
+                <div style="background: #f0f7ff; border-left: 4px solid #3b82f6; padding: 12px; margin-bottom: 12px; border-radius: 4px;">
+                    <p style="margin: 0; font-size: 14px; color: #666;">
+                        📱 Google Authenticator 앱을 열어 6자리 코드를 확인하세요
+                    </p>
+                </div>
+                <input
+                    type="text"
+                    id="totpToken"
+                    name="totpToken"
+                    class="form-input"
+                    placeholder="6자리 인증 코드 (예: 123456)"
+                    maxlength="6"
+                    pattern="[0-9]{6}"
+                    inputmode="numeric"
+                    autocomplete="off"
                 >
             </div>
 
@@ -82,16 +117,22 @@
 
         <div class="auth-links">
             <a href="/static/register.html">계정이 없으신가요? 회원가입</a>
-            <a href="/static/reset-password.html">비밀번호를 잊으셨나요?</a>
+            <a href="#" onclick="handleForgotPassword(event)" id="forgotPasswordLink">비밀번호를 잊으셨나요?</a>
         </div>
     </div>
 
-    <script src="/static/auth.js?v=2025-12-28-FIX-REDIRECT-LOOP"></script>
+    <script src="/static/auth.js?v=2026-01-01-2FA-DEBUG"></script>
     <script>
         const form = document.getElementById('loginForm');
         const loginBtn = document.getElementById('loginBtn');
         const emailInput = document.getElementById('email');
         const passwordInput = document.getElementById('password');
+
+        // CAPTCHA 관련 전역 변수
+        let currentCaptchaId = null;
+
+        // 2FA 관련 전역 변수
+        let totpRequired = false;
 
         // 이미 로그인된 경우 메인 페이지로 리다이렉트
         if (Auth.isAuthenticated()) {
@@ -102,8 +143,73 @@
         const urlParams = new URLSearchParams(window.location.search);
         const message = urlParams.get('message');
         if (message) {
-            Auth.showSuccess(decodeURIComponent(message));
+            // 메시지 코드를 사람이 읽을 수 있는 메시지로 변환
+            const messageMap = {
+                'all_sessions_revoked': '모든 세션이 종료되었습니다. 다시 로그인해주세요.',
+                'session_expired': '세션이 만료되었습니다. 다시 로그인해주세요.',
+                'logout': '로그아웃되었습니다.'
+            };
+
+            const displayMessage = messageMap[message] || decodeURIComponent(message);
+            Auth.showSuccess(displayMessage);
         }
+
+        // CAPTCHA 로드 및 활성화 확인
+        async function loadCaptcha() {
+            try {
+                const captchaData = await Auth.generateCaptcha('login');
+
+                if (captchaData.enabled) {
+                    // CAPTCHA 활성화됨
+                    currentCaptchaId = captchaData.captcha_id;
+                    document.getElementById('captchaImage').src = captchaData.image;
+                    document.getElementById('captchaId').value = captchaData.captcha_id;
+                    document.getElementById('captchaContainer').style.display = 'block';
+                } else {
+                    // CAPTCHA 비활성화됨
+                    document.getElementById('captchaContainer').style.display = 'none';
+                }
+            } catch (error) {
+                logger.error('CAPTCHA 로드 실패:', error);
+                // 에러 시 CAPTCHA 숨김
+                document.getElementById('captchaContainer').style.display = 'none';
+            }
+        }
+
+        // CAPTCHA 새로고침
+        async function refreshCaptcha() {
+            document.getElementById('captchaAnswer').value = '';
+            await loadCaptcha();
+        }
+
+        // 2FA 활성화 여부 확인 및 필드 표시
+        async function checkTotpStatus() {
+            try {
+                const response = await fetch('/api/auth/totp/status');
+                const data = await response.json();
+
+                if (data.enabled) {
+                    // 2FA 활성화됨 - 입력 필드 표시
+                    document.getElementById('totpContainer').style.display = 'block';
+                    totpRequired = true;
+                } else {
+                    // 2FA 비활성화됨 - 입력 필드 숨김
+                    document.getElementById('totpContainer').style.display = 'none';
+                    totpRequired = false;
+                }
+            } catch (error) {
+                logger.error('2FA 상태 확인 실패:', error);
+                // 에러 시 숨김 (안전한 기본값)
+                document.getElementById('totpContainer').style.display = 'none';
+                totpRequired = false;
+            }
+        }
+
+        // 페이지 로드 시 CAPTCHA 및 2FA 상태 로드
+        document.addEventListener('DOMContentLoaded', () => {
+            loadCaptcha();
+            checkTotpStatus();
+        });
 
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -122,18 +228,43 @@
             loginBtn.textContent = '로그인 중...';
 
             try {
-                // reCAPTCHA 토큰 생성 (활성화된 경우에만)
-                let captchaToken = null;
-                if (window.RECAPTCHA_SITE_KEY && typeof grecaptcha !== 'undefined') {
-                    try {
-                        captchaToken = await grecaptcha.execute(window.RECAPTCHA_SITE_KEY, { action: 'login' });
-                    } catch (captchaError) {
-                        console.error('reCAPTCHA error:', captchaError);
-                        // CAPTCHA 실패 시에도 계속 진행 (서버에서 처리)
+                // CAPTCHA 정보 가져오기
+                let captchaId = null;
+                let captchaAnswer = null;
+
+                if (document.getElementById('captchaContainer').style.display !== 'none') {
+                    captchaId = document.getElementById('captchaId').value;
+                    captchaAnswer = document.getElementById('captchaAnswer').value.trim();
+
+                    if (!captchaAnswer) {
+                        Auth.showError('보안 확인 답을 입력하세요');
+                        loginBtn.disabled = false;
+                        loginBtn.textContent = '로그인';
+                        return;
                     }
                 }
 
-                await Auth.login(email, password, captchaToken);
+                // 2FA 코드 가져오기
+                let totpToken = null;
+                if (document.getElementById('totpContainer').style.display !== 'none') {
+                    totpToken = document.getElementById('totpToken').value.trim();
+
+                    if (!totpToken) {
+                        Auth.showError('2차 인증 코드를 입력하세요');
+                        loginBtn.disabled = false;
+                        loginBtn.textContent = '로그인';
+                        return;
+                    }
+
+                    if (!/^\d{6}$/.test(totpToken)) {
+                        Auth.showError('2차 인증 코드는 6자리 숫자여야 합니다');
+                        loginBtn.disabled = false;
+                        loginBtn.textContent = '로그인';
+                        return;
+                    }
+                }
+
+                await Auth.login(email, password, captchaId, captchaAnswer, totpToken);
 
                 // 로그인 성공
                 Auth.showSuccess('로그인 성공! 리다이렉트 중...');
@@ -145,18 +276,48 @@
                 }, 1000);
 
             } catch (error) {
-                console.error('Login error:', error);
-                let errorMessage = error.message;
+                logger.error('Login error:', error);
+                logger.error('Error message:', error.message);
+                let errorMessage = error.message || '';
 
-                // 특정 에러 메시지 처리
-                if (errorMessage.includes('잠겼습니다')) {
+                // 2FA 관련 에러 처리 (더 넓은 범위로 감지)
+                if (errorMessage.includes('2FA') ||
+                    errorMessage.includes('2차 인증') ||
+                    errorMessage.includes('OTP') ||
+                    errorMessage.includes('인증 코드') ||
+                    (errorMessage.includes('유효하지') && totpRequired)) {
+
+                    // 2FA 입력 필드 표시
+                    document.getElementById('totpContainer').style.display = 'block';
+                    totpRequired = true;
+
+                    // 2FA 코드가 유효하지 않은 경우
+                    if (errorMessage.includes('유효하지')) {
+                        Auth.showError('2차 인증 코드가 올바르지 않습니다. 다시 확인해주세요.');
+                        // 입력 필드 초기화
+                        document.getElementById('totpToken').value = '';
+                        document.getElementById('totpToken').focus();
+                    } else {
+                        Auth.showError('2차 인증이 필요합니다. Google Authenticator 앱에서 6자리 코드를 입력하세요.');
+                        document.getElementById('totpToken').focus();
+                    }
+                }
+                // 기존 에러 처리
+                else if (errorMessage.includes('잠겼습니다')) {
                     Auth.showError(errorMessage);
                 } else if (errorMessage.includes('요청이 너무 많습니다')) {
                     Auth.showError(errorMessage);
                 } else if (errorMessage.includes('유효하지 않은')) {
                     Auth.showError('이메일 또는 비밀번호가 올바르지 않습니다');
+                } else if (errorMessage.includes('CAPTCHA')) {
+                    Auth.showError(errorMessage);
                 } else {
                     Auth.showError('로그인에 실패했습니다. 다시 시도해주세요.');
+                }
+
+                // 모든 실패 시 CAPTCHA 새로고침 (활성화된 경우에만)
+                if (document.getElementById('captchaContainer').style.display !== 'none') {
+                    await refreshCaptcha();
                 }
 
                 loginBtn.disabled = false;
@@ -170,6 +331,44 @@
                 form.dispatchEvent(new Event('submit'));
             }
         });
+
+        // 비밀번호 찾기 링크 처리
+        async function handleForgotPassword(event) {
+            event.preventDefault();
+
+            try {
+                // 비밀번호 재설정 방식 확인
+                const response = await fetch('/api/admin/password-reset-method');
+
+                if (!response.ok) {
+                    // API 오류 시 기본값(이메일 방식)으로 이동
+                    window.location.href = '/static/reset-password.html';
+                    return;
+                }
+
+                const data = await response.json();
+                const method = data.method;
+
+                // 방식에 따라 적절한 페이지로 이동
+                if (method === 'email') {
+                    // 이메일 방식: 토큰 기반 비밀번호 재설정
+                    window.location.href = '/static/reset-password.html';
+                } else if (method === 'otp') {
+                    // OTP 방식: Google Authenticator 기반 비밀번호 재설정
+                    window.location.href = '/static/reset-password-otp.html';
+                } else if (method === 'admin') {
+                    // 관리자 방식: 안내 메시지 표시
+                    Auth.showError('비밀번호 재설정은 관리자에게 문의하세요');
+                } else {
+                    // 알 수 없는 방식: 기본값으로 이동
+                    window.location.href = '/static/reset-password.html';
+                }
+            } catch (error) {
+                logger.error('Password reset method check failed:', error);
+                // 오류 시 기본값(이메일 방식)으로 이동
+                window.location.href = '/static/reset-password.html';
+            }
+        }
     </script>
 </body>
 </html>

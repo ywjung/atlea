@@ -29,6 +29,20 @@ const Auth = {
     },
 
     /**
+     * 세션 ID 저장
+     */
+    setSessionId(sessionId) {
+        localStorage.setItem('session_id', sessionId);
+    },
+
+    /**
+     * 세션 ID 가져오기
+     */
+    getSessionId() {
+        return localStorage.getItem('session_id');
+    },
+
+    /**
      * Access Token 가져오기
      */
     getAccessToken() {
@@ -79,52 +93,75 @@ const Auth = {
         localStorage.removeItem(this.ACCESS_TOKEN_KEY);
         localStorage.removeItem(this.REFRESH_TOKEN_KEY);
         localStorage.removeItem(this.USER_KEY);
+        localStorage.removeItem('session_id');
     },
 
     /**
      * API 요청 헬퍼 (자동 토큰 포함)
      */
     async apiCall(url, options = {}) {
-        const token = this.getAccessToken();
-        const headers = {
-            'Content-Type': 'application/json',
-            ...options.headers
-        };
+        const maxRetries = options.maxRetries || 3;
+        const retryDelay = options.retryDelay || 1000;
+        let lastError;
 
-        if (token) {
-            headers['Authorization'] = `Bearer ${token}`;
-        }
+        for (let attempt = 0; attempt < maxRetries; attempt++) {
+            try {
+                const token = this.getAccessToken();
+                const headers = {
+                    'Content-Type': 'application/json',
+                    ...options.headers
+                };
 
-        try {
-            const response = await fetch(url, {
-                ...options,
-                headers
-            });
-
-            // 401 에러 시 토큰 갱신 시도
-            if (response.status === 401 && this.getRefreshToken()) {
-                const refreshed = await this.refreshToken();
-                if (refreshed) {
-                    // 토큰 갱신 성공, 원래 요청 재시도
-                    headers['Authorization'] = `Bearer ${this.getAccessToken()}`;
-                    const retryResponse = await fetch(url, {
-                        ...options,
-                        headers
-                    });
-                    return await this.handleResponse(retryResponse);
-                } else {
-                    // 토큰 갱신 실패, 인증 정보 삭제 후 로그인 페이지로
-                    this.clearAuth();
-                    this.redirectToLogin();
-                    throw new Error('Authentication failed');
+                if (token) {
+                    headers['Authorization'] = `Bearer ${token}`;
                 }
-            }
 
-            return await this.handleResponse(response);
-        } catch (error) {
-            console.error('API call failed:', error);
-            throw error;
+                const response = await fetch(url, {
+                    ...options,
+                    headers
+                });
+
+                // 401 에러 시 토큰 갱신 시도
+                if (response.status === 401 && this.getRefreshToken()) {
+                    const refreshed = await this.refreshToken();
+                    if (refreshed) {
+                        // 토큰 갱신 성공, 원래 요청 재시도
+                        headers['Authorization'] = `Bearer ${this.getAccessToken()}`;
+                        const retryResponse = await fetch(url, {
+                            ...options,
+                            headers
+                        });
+                        return await this.handleResponse(retryResponse);
+                    } else {
+                        // 토큰 갱신 실패, 인증 정보 삭제 후 로그인 페이지로
+                        this.clearAuth();
+                        this.redirectToLogin();
+                        throw new Error('Authentication failed');
+                    }
+                }
+
+                return await this.handleResponse(response);
+            } catch (error) {
+                lastError = error;
+
+                // "Failed to fetch" 에러는 네트워크 문제이므로 재시도
+                const isNetworkError = error.message.includes('fetch') ||
+                                     error.name === 'TypeError' ||
+                                     error.message.includes('network');
+
+                if (isNetworkError && attempt < maxRetries - 1) {
+                    logger.warn(`API call failed (attempt ${attempt + 1}/${maxRetries}), retrying in ${retryDelay}ms...`, url);
+                    await new Promise(resolve => setTimeout(resolve, retryDelay * (attempt + 1)));
+                    continue;
+                }
+
+                // 재시도 불가능한 에러이거나 마지막 시도 실패
+                logger.error('API call failed:', error);
+                throw error;
+            }
         }
+
+        throw lastError;
     },
 
     /**
@@ -133,25 +170,58 @@ const Auth = {
     async handleResponse(response) {
         if (response.status === 429) {
             const retryAfter = response.headers.get('Retry-After');
-            throw new Error(`요청이 너무 많습니다. ${retryAfter}초 후에 다시 시도하세요.`);
+            const retryMessage = retryAfter
+                ? `${retryAfter}초 후에 다시 시도하세요.`
+                : '잠시 후에 다시 시도하세요.';
+            throw new Error(`요청이 너무 많습니다. ${retryMessage}`);
         }
 
-        const data = await response.json();
+        let data;
+        try {
+            data = await response.json();
+            // logger.debug('Response data:', data); // Commented: logger may not be loaded
+        } catch (e) {
+            logger.error('Failed to parse response JSON:', e);
+            if (!response.ok) {
+                throw new Error(`Request failed with status ${response.status}`);
+            }
+            throw e;
+        }
 
         if (!response.ok) {
-            throw new Error(data.detail || 'Request failed');
+            // logger.debug('Response not OK. Status:', response.status, 'Data:', data); // Commented: logger may not be loaded
+            const errorMessage = data.detail || data.message || data.error || 'Request failed';
+            logger.error('Server error detail:', errorMessage);
+            throw new Error(errorMessage);
         }
 
         return data;
     },
 
     /**
+     * CAPTCHA 생성
+     * @param {string} action - 'login' 또는 'register'
+     */
+    async generateCaptcha(action = 'login') {
+        const response = await fetch(`/api/auth/captcha/generate?action=${action}`, {
+            method: 'GET'
+        });
+
+        if (!response.ok) {
+            throw new Error('CAPTCHA 생성 실패');
+        }
+
+        return await response.json();
+    },
+
+    /**
      * 회원가입
      */
-    async register(email, username, password, captcha_token = null) {
+    async register(email, username, password, captcha_id = null, captcha_answer = null) {
         const payload = { email, username, password };
-        if (captcha_token) {
-            payload.captcha_token = captcha_token;
+        if (captcha_id && captcha_answer) {
+            payload.captcha_id = captcha_id;
+            payload.captcha_answer = captcha_answer;
         }
 
         const response = await fetch('/api/auth/register', {
@@ -166,10 +236,14 @@ const Auth = {
     /**
      * 로그인
      */
-    async login(email, password, captcha_token = null) {
+    async login(email, password, captcha_id = null, captcha_answer = null, totp_token = null) {
         const payload = { email, password };
-        if (captcha_token) {
-            payload.captcha_token = captcha_token;
+        if (captcha_id && captcha_answer) {
+            payload.captcha_id = captcha_id;
+            payload.captcha_answer = captcha_answer;
+        }
+        if (totp_token) {
+            payload.totp_token = totp_token;
         }
 
         const response = await fetch('/api/auth/login', {
@@ -183,6 +257,9 @@ const Auth = {
         // 토큰 및 사용자 정보 저장
         this.setTokens(data.tokens.access_token, data.tokens.refresh_token);
         this.setUser(data.user);
+        if (data.session_id) {
+            this.setSessionId(data.session_id);
+        }
 
         return data;
     },
@@ -194,7 +271,7 @@ const Auth = {
         try {
             await this.apiCall('/api/auth/logout', { method: 'POST' });
         } catch (error) {
-            console.error('Logout API failed:', error);
+            logger.error('Logout API failed:', error);
         } finally {
             this.clearAuth();
             this.redirectToLogin();
@@ -223,7 +300,7 @@ const Auth = {
 
             return true;
         } catch (error) {
-            console.error('Token refresh failed:', error);
+            logger.error('Token refresh failed:', error);
             return false;
         }
     },
@@ -266,6 +343,15 @@ const Auth = {
      */
     async revokeSession(sessionId) {
         return await this.apiCall(`/api/auth/sessions/${sessionId}`, {
+            method: 'DELETE'
+        });
+    },
+
+    /**
+     * 모든 세션 무효화
+     */
+    async revokeAllSessions() {
+        return await this.apiCall('/api/auth/sessions', {
             method: 'DELETE'
         });
     },
@@ -329,6 +415,36 @@ const Auth = {
     },
 
     /**
+     * 서버에서 실제 세션 유효성 확인
+     * 페이지 로드 시 호출하여 실제 세션이 유효한지 검증
+     */
+    async validateSession() {
+        logger.debug('🔐 Validating session...');
+
+        // 로컬 토큰이 없으면 바로 로그인 페이지로
+        if (!this.isAuthenticated()) {
+            logger.warn('⚠️ No local token found, redirecting to login');
+            this.redirectToLogin();
+            return false;
+        }
+
+        try {
+            // 서버에 실제 세션 확인
+            logger.debug('🔍 Checking session with server...');
+            const result = await this.apiCall('/api/auth/me');
+            logger.debug('✅ Session is valid:', result);
+            return true;
+        } catch (error) {
+            // 세션이 유효하지 않으면 (401, 403 등)
+            logger.error('❌ Session validation failed:', error.message || error);
+            logger.debug('🧹 Clearing local auth data and redirecting to login');
+            this.clearAuth();
+            this.redirectToLogin();
+            return false;
+        }
+    },
+
+    /**
      * 관리자 페이지 보호
      */
     requireAdmin() {
@@ -341,6 +457,25 @@ const Auth = {
             window.location.href = '/';
             return false;
         }
+        return true;
+    },
+
+    /**
+     * 서버에서 관리자 권한 확인
+     */
+    async validateAdmin() {
+        // 먼저 세션 유효성 확인
+        if (!await this.validateSession()) {
+            return false;
+        }
+
+        // 로컬 사용자 정보에서 관리자 권한 확인
+        if (!this.isAdmin()) {
+            alert('관리자 권한이 필요합니다.');
+            window.location.href = '/';
+            return false;
+        }
+
         return true;
     },
 
@@ -449,11 +584,7 @@ const Auth = {
         // 비활성 체크 타이머 시작
         this.startInactivityCheck();
 
-        console.log('Activity monitor initialized with settings:', {
-            inactivity_timeout: this.INACTIVITY_TIMEOUT / 60000,
-            warning_time: this.WARNING_TIME / 60000,
-            check_interval: this.CHECK_INTERVAL / 60000
-        });
+        // logger.debug('Activity monitor initialized with settings:', { ... }) // Commented: logger may not be loaded
     },
 
     /**
@@ -498,7 +629,7 @@ const Auth = {
 
         // 타임아웃 시간이 지났으면 자동 로그아웃
         if (inactiveTime >= this.INACTIVITY_TIMEOUT) {
-            console.log('Auto-logout due to inactivity');
+            // Auto-logout (silently)
             this.handleAutoLogout();
             return;
         }
@@ -597,7 +728,7 @@ const Auth = {
         try {
             await this.apiCall('/api/auth/logout', { method: 'POST' });
         } catch (error) {
-            console.error('Auto-logout API failed:', error);
+            logger.error('Auto-logout API failed:', error);
         } finally {
             this.clearAuth();
             alert('비활성 상태로 인해 자동 로그아웃되었습니다.');
@@ -625,7 +756,7 @@ const Auth = {
             this.updateSettings(data.settings);
         } catch (error) {
             // 에러 발생 시 기본값 사용
-            console.warn('Error loading settings, using defaults:', error);
+            logger.warn('Error loading settings, using defaults:', error);
         }
     },
 
@@ -644,11 +775,49 @@ const Auth = {
             this.startInactivityCheck();
         }
 
-        console.log('Settings updated:', {
-            inactivity_timeout: settings.inactivity_timeout,
-            warning_time: settings.warning_time,
-            check_interval: settings.check_interval
-        });
+        // logger.debug('Settings updated:', { ... }) // Commented: logger may not be loaded
+    },
+
+    /**
+     * 세션 유효성 검증 타이머
+     */
+    sessionValidationTimer: null,
+    SESSION_CHECK_INTERVAL: 60 * 1000, // 1분마다 세션 체크
+
+    /**
+     * 세션 유효성 주기적 검증 시작
+     */
+    startSessionValidation() {
+        // 이미 실행 중이면 중지 후 재시작
+        if (this.sessionValidationTimer) {
+            this.stopSessionValidation();
+        }
+
+        // 주기적으로 세션 유효성 확인
+        this.sessionValidationTimer = setInterval(async () => {
+            if (!this.isAuthenticated()) {
+                this.stopSessionValidation();
+                return;
+            }
+
+            try {
+                // /me 엔드포인트로 세션 유효성 확인 (가벼운 요청)
+                await this.apiCall('/api/auth/me');
+            } catch (error) {
+                // 401/403 에러는 apiCall에서 이미 처리됨 (자동 로그아웃)
+                logger.error('Session validation failed:', error);
+            }
+        }, this.SESSION_CHECK_INTERVAL);
+    },
+
+    /**
+     * 세션 유효성 검증 중지
+     */
+    stopSessionValidation() {
+        if (this.sessionValidationTimer) {
+            clearInterval(this.sessionValidationTimer);
+            this.sessionValidationTimer = null;
+        }
     }
 };
 

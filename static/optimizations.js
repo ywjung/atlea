@@ -261,7 +261,7 @@ const optimizedStorage = {
                 localStorage.setItem(key, serialized);
             }
         } catch (error) {
-            console.error('Storage error:', error);
+            logger.error('Storage error:', error);
         }
     },
 
@@ -270,7 +270,7 @@ const optimizedStorage = {
             const item = localStorage.getItem(key);
             return item ? JSON.parse(item) : defaultValue;
         } catch (error) {
-            console.error('Storage retrieval error:', error);
+            logger.error('Storage retrieval error:', error);
             return defaultValue;
         }
     },
@@ -308,7 +308,7 @@ const metricsTracker = {
     },
 
     report() {
-        console.table(this.metrics);
+        logger.table(this.metrics, 'DEBUG');
     },
 
     reset() {

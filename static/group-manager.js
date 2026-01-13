@@ -13,19 +13,23 @@ class GroupManager {
 
     /**
      * Load all groups from server
+     * @param {string} filterScope - "user" to enforce organization filtering, null for default behavior
      */
-    async loadGroups() {
+    async loadGroups(filterScope = null) {
         try {
-            const response = await fetch('/api/groups');
-            if (!response.ok) {
-                throw new Error(`Failed to load groups: ${response.statusText}`);
+            // Build URL with optional filter_scope parameter
+            let url = '/api/groups';
+            if (filterScope === 'user') {
+                url += '?filter_scope=user';
             }
 
-            const data = await response.json();
+            const data = await Auth.apiCall(url);
+            if (!data) {
+                throw new Error('Failed to load groups');
+            }
+
             this.groups = data.groups || [];
             this.tree = data.tree || {};
-
-            console.log(`Loaded ${this.groups.length} groups`);
 
             if (this.onGroupsChanged) {
                 this.onGroupsChanged(this.groups, this.tree);
@@ -33,7 +37,7 @@ class GroupManager {
 
             return { groups: this.groups, tree: this.tree };
         } catch (error) {
-            console.error('Error loading groups:', error);
+            logger.error('Error loading groups:', error);
             throw error;
         }
     }
@@ -43,26 +47,21 @@ class GroupManager {
      */
     async createGroup({ name, description = '', color = '#3B82F6', icon = '📁', parent_id = null }) {
         try {
-            const response = await fetch('/api/groups', {
+            const data = await Auth.apiCall('/api/groups', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ name, description, color, icon, parent_id })
             });
 
-            if (!response.ok) {
-                const error = await response.json();
-                throw new Error(error.detail || 'Failed to create group');
+            if (!data) {
+                throw new Error('Failed to create group');
             }
-
-            const data = await response.json();
-            console.log(`Created group: ${data.group_id}`);
 
             // Reload groups to update tree
             await this.loadGroups();
 
             return data;
         } catch (error) {
-            console.error('Error creating group:', error);
+            logger.error('Error creating group:', error);
             throw error;
         }
     }
@@ -72,26 +71,21 @@ class GroupManager {
      */
     async updateGroup(groupId, updates) {
         try {
-            const response = await fetch(`/api/groups/${groupId}`, {
+            const data = await Auth.apiCall(`/api/groups/${groupId}`, {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(updates)
             });
 
-            if (!response.ok) {
-                const error = await response.json();
-                throw new Error(error.detail || 'Failed to update group');
+            if (!data) {
+                throw new Error('Failed to update group');
             }
-
-            const data = await response.json();
-            console.log(`Updated group: ${groupId}`);
 
             // Reload groups to update tree
             await this.loadGroups();
 
             return data;
         } catch (error) {
-            console.error('Error updating group:', error);
+            logger.error('Error updating group:', error);
             throw error;
         }
     }
@@ -105,24 +99,20 @@ class GroupManager {
                 ? `/api/groups/${groupId}?reassign_to=${reassignTo}`
                 : `/api/groups/${groupId}`;
 
-            const response = await fetch(url, {
+            const data = await Auth.apiCall(url, {
                 method: 'DELETE'
             });
 
-            if (!response.ok) {
-                const error = await response.json();
-                throw new Error(error.detail || 'Failed to delete group');
+            if (!data) {
+                throw new Error('Failed to delete group');
             }
-
-            const data = await response.json();
-            console.log(`Deleted group: ${groupId}, reassigned ${data.reassigned_documents} documents`);
 
             // Reload groups to update tree
             await this.loadGroups();
 
             return data;
         } catch (error) {
-            console.error('Error deleting group:', error);
+            logger.error('Error deleting group:', error);
             throw error;
         }
     }
@@ -132,26 +122,21 @@ class GroupManager {
      */
     async moveGroup(groupId, newParentId) {
         try {
-            const response = await fetch(`/api/groups/${groupId}/move`, {
+            const data = await Auth.apiCall(`/api/groups/${groupId}/move`, {
                 method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ new_parent_id: newParentId })
             });
 
-            if (!response.ok) {
-                const error = await response.json();
-                throw new Error(error.detail || 'Failed to move group');
+            if (!data) {
+                throw new Error('Failed to move group');
             }
-
-            const data = await response.json();
-            console.log(`Moved group: ${groupId} to parent ${newParentId}`);
 
             // Reload groups to update tree
             await this.loadGroups();
 
             return data;
         } catch (error) {
-            console.error('Error moving group:', error);
+            logger.error('Error moving group:', error);
             throw error;
         }
     }
@@ -161,23 +146,18 @@ class GroupManager {
      */
     async assignDocument(filename, groupId) {
         try {
-            const response = await fetch(`/api/documents/${encodeURIComponent(filename)}/group`, {
+            const data = await Auth.apiCall(`/api/documents/${encodeURIComponent(filename)}/group`, {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ group_id: groupId })
             });
 
-            if (!response.ok) {
-                const error = await response.json();
-                throw new Error(error.detail || 'Failed to assign document');
+            if (!data) {
+                throw new Error('Failed to assign document');
             }
-
-            const data = await response.json();
-            console.log(`Assigned document '${filename}' to group ${groupId}`);
 
             return data;
         } catch (error) {
-            console.error('Error assigning document:', error);
+            logger.error('Error assigning document:', error);
             throw error;
         }
     }
@@ -187,23 +167,18 @@ class GroupManager {
      */
     async batchAssignDocuments(filenames, groupId) {
         try {
-            const response = await fetch(`/api/groups/${groupId}/documents`, {
+            const data = await Auth.apiCall(`/api/groups/${groupId}/documents`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ filenames })
             });
 
-            if (!response.ok) {
-                const error = await response.json();
-                throw new Error(error.detail || 'Failed to batch assign documents');
+            if (!data) {
+                throw new Error('Failed to batch assign documents');
             }
-
-            const data = await response.json();
-            console.log(`Batch assigned ${data.assigned_count}/${data.total_requested} documents to group ${groupId}`);
 
             return data;
         } catch (error) {
-            console.error('Error batch assigning documents:', error);
+            logger.error('Error batch assigning documents:', error);
             throw error;
         }
     }
@@ -213,17 +188,15 @@ class GroupManager {
      */
     async getGroupDocuments(groupId) {
         try {
-            const response = await fetch(`/api/groups/${groupId}/documents`);
+            const data = await Auth.apiCall(`/api/groups/${groupId}/documents`);
 
-            if (!response.ok) {
-                const error = await response.json();
-                throw new Error(error.detail || 'Failed to get group documents');
+            if (!data) {
+                throw new Error('Failed to get group documents');
             }
 
-            const data = await response.json();
             return data.documents || [];
         } catch (error) {
-            console.error('Error getting group documents:', error);
+            logger.error('Error getting group documents:', error);
             throw error;
         }
     }
@@ -233,24 +206,20 @@ class GroupManager {
      */
     async removeDocumentFromGroup(filename, groupId) {
         try {
-            const response = await fetch(`/api/groups/${groupId}/documents/${encodeURIComponent(filename)}`, {
+            const data = await Auth.apiCall(`/api/groups/${groupId}/documents/${encodeURIComponent(filename)}`, {
                 method: 'DELETE'
             });
 
-            if (!response.ok) {
-                const error = await response.json();
-                throw new Error(error.detail || 'Failed to remove document from group');
+            if (!data) {
+                throw new Error('Failed to remove document from group');
             }
-
-            const data = await response.json();
-            console.log(`Removed document '${filename}' from group ${groupId}`);
 
             // Reload groups to update counts
             await this.loadGroups();
 
             return data;
         } catch (error) {
-            console.error('Error removing document from group:', error);
+            logger.error('Error removing document from group:', error);
             throw error;
         }
     }
@@ -313,7 +282,7 @@ class GroupManager {
                      style="padding-left: ${indent}px">
                     <div class="group-item-content">
                         ${hasChildren ? '<span class="group-toggle">▼</span>' : '<span class="group-toggle-space"></span>'}
-                        <span class="group-icon" style="color: ${group.color}">${group.icon}</span>
+                        <span class="group-icon" style="color: ${group.color || '#3B82F6'}">${group.icon || '📁'}</span>
                         <span class="group-name">${escapeHtml(group.name)}</span>
                         ${showDocumentCount ? `<span class="group-doc-count">(${totalCount})</span>` : ''}
                         <div class="group-actions">
@@ -527,11 +496,10 @@ async function initializeGroupManagement() {
     try {
         // Load groups on initialization
         await groupManager.loadGroups();
-        console.log('Group management initialized');
 
         return { groupManager, groupFilter };
     } catch (error) {
-        console.error('Failed to initialize group management:', error);
+        logger.error('Failed to initialize group management:', error);
         throw error;
     }
 }

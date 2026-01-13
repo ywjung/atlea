@@ -74,7 +74,7 @@ class LazyLoader {
             await loader();
             this.loaded.add(feature);
         } catch (error) {
-            console.error(`Failed to load feature: ${feature}`, error);
+            logger.error(`Failed to load feature: ${feature}`, error);
         }
     }
 
@@ -149,7 +149,6 @@ class PerformanceMonitor {
         const startTime = this.marks.get(label);
         if (startTime) {
             const duration = performance.now() - startTime;
-            console.log(`[Perf] ${label}: ${duration.toFixed(2)}ms`);
             this.marks.delete(label);
             return duration;
         }
@@ -187,7 +186,7 @@ function safeJSONParse(str, fallback = null) {
     try {
         return JSON.parse(str);
     } catch (error) {
-        console.error('JSON parse error:', error);
+        logger.error('JSON parse error:', error);
         return fallback;
     }
 }

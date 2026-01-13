@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- CACHE BUSTER: 2025-12-28-12-45-DOCUMENT-COUNT -->
+<!-- CACHE BUSTER: 2026-01-13-05-50-EXPORT-7-FORMATS -->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
@@ -8,7 +8,8 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <title>문서 RAG 챗봇 v2025.12.28</title>
+    <meta name="version" content="2026.01.13-export7">
+    <title>문서 RAG 챗봇 v2026.01.13</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <!-- Early theme initialization to prevent flash -->
     <script>
@@ -151,18 +152,42 @@
     <!-- Highlight.js for code syntax highlighting - v11.10.0 (2024) -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/styles/github-dark.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/highlight.min.js"></script>
+    <!-- Additional language modules for Highlight.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/properties.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/ini.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/java.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/javascript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/typescript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/bash.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/yaml.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/sql.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/json.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/xml.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/markdown.min.js"></script>
     <!-- KaTeX for math rendering - v0.16.11 (2024) -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
     <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
     <!-- KaTeX mhchem extension for chemistry - v0.16.11 (2024) -->
     <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/mhchem.min.js"></script>
+    <!-- docx for Word document generation - v7.8.2 (browser UMD build) -->
+    <script src="https://cdn.jsdelivr.net/npm/docx@7.8.2/build/index.js"></script>
+    <!-- FileSaver.js for file downloads - v2.0.5 (2024) -->
+    <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
+    <!-- html2pdf.js for PDF generation - v0.10.1 (2024) -->
+    <script src="https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.1/dist/html2pdf.bundle.min.js"></script>
     <!-- Mermaid.js for diagrams - v10.9.0 (2024) -->
     <script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.0/dist/mermaid.min.js"></script>
     <!-- abcjs for music notation - v6.4.0 (2024) -->
     <script src="https://cdn.jsdelivr.net/npm/abcjs@6.4.0/dist/abcjs-basic-min.js"></script>
     <!-- Chart.js for charts and graphs - v4.4.1 (2024) -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+    <!-- Logger System (Load early for all scripts) -->
+    <script src="/static/env-config.js?v=1"></script>
+    <script src="/static/logger.js?v=1"></script>
+
     <!-- Authentication -->
     <script src="/static/auth.js?v=2025-12-28-FIX-REDIRECT-LOOP"></script>
     <style>
@@ -754,12 +779,40 @@
         }
     </style>
 </head>
-<body>
+<body style="visibility: hidden;">
+    <!-- 세션 확인 중 로딩 표시 -->
+    <div id="session-check-loader" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #f5f7fa; display: flex; align-items: center; justify-content: center; z-index: 10000;">
+        <div style="text-align: center;">
+            <div style="font-size: 48px; margin-bottom: 20px;">🔐</div>
+            <div style="font-size: 18px; color: #333;">세션 확인 중...</div>
+        </div>
+    </div>
     <script>
         // 인증 확인 - 페이지 로드 시 즉시 실행
-        (function() {
-            if (!Auth.requireAuth()) {
-                throw new Error('Authentication required');
+        (async function() {
+            try {
+                // 먼저 로컬 인증 체크 (빠른 리다이렉트)
+                if (!Auth.requireAuth()) {
+                    return; // 이미 리다이렉트됨
+                }
+
+                // 서버에서 실제 세션 유효성 확인
+                const isValid = await Auth.validateSession();
+                if (!isValid) {
+                    return; // 이미 리다이렉트됨
+                }
+
+                // 세션 확인 성공 - 페이지 표시
+                document.body.style.visibility = 'visible';
+                const loader = document.getElementById('session-check-loader');
+                if (loader) {
+                    loader.remove();
+                }
+            } catch (error) {
+                logger.error('Session validation error:', error);
+                // 에러 발생 시에도 로그인 페이지로
+                Auth.clearAuth();
+                Auth.redirectToLogin();
             }
         })();
     </script>
@@ -1645,20 +1698,210 @@
                     </ul>
                 </section>
 
+                <!-- Quick Examples -->
+                <section class="help-section">
+                    <h3>📝 질문 예시</h3>
+                    <p>효과적인 질문 방법을 예시로 알아보세요.</p>
+
+                    <h4 style="margin-top: 16px; color: var(--primary-600);">✅ 좋은 질문 예시</h4>
+                    <div style="background: #e8f5e9; padding: 12px; border-radius: 8px; margin-bottom: 12px;">
+                        <p style="margin: 0 0 8px 0; font-weight: 600; color: #2e7d32;">📄 문서 내용 요약</p>
+                        <ul style="margin: 0; padding-left: 20px;">
+                            <li>"2024년 1분기 매출 보고서의 주요 내용을 요약해줘"</li>
+                            <li>"프로젝트 제안서의 예산 계획 부분만 설명해줘"</li>
+                        </ul>
+                    </div>
+
+                    <div style="background: #e8f5e9; padding: 12px; border-radius: 8px; margin-bottom: 12px;">
+                        <p style="margin: 0 0 8px 0; font-weight: 600; color: #2e7d32;">🔍 특정 정보 찾기</p>
+                        <ul style="margin: 0; padding-left: 20px;">
+                            <li>"계약서에서 위약금 조항을 찾아줘"</li>
+                            <li>"회의록에서 김철수 팀장의 발언 내용을 알려줘"</li>
+                        </ul>
+                    </div>
+
+                    <div style="background: #e8f5e9; padding: 12px; border-radius: 8px; margin-bottom: 12px;">
+                        <p style="margin: 0 0 8px 0; font-weight: 600; color: #2e7d32;">📊 비교 분석</p>
+                        <ul style="margin: 0; padding-left: 20px;">
+                            <li>"2023년과 2024년의 매출 증가율을 비교해줘"</li>
+                            <li>"A안과 B안의 장단점을 비교 분석해줘"</li>
+                        </ul>
+                    </div>
+
+                    <div style="background: #e8f5e9; padding: 12px; border-radius: 8px; margin-bottom: 12px;">
+                        <p style="margin: 0 0 8px 0; font-weight: 600; color: #2e7d32;">💡 설명 요청</p>
+                        <ul style="margin: 0; padding-left: 20px;">
+                            <li>"이 기술 문서의 핵심 개념을 쉽게 설명해줘"</li>
+                            <li>"이 정책의 적용 대상과 절차를 알려줘"</li>
+                        </ul>
+                    </div>
+
+                    <h4 style="margin-top: 16px; color: #e65100;">❌ 개선이 필요한 질문</h4>
+                    <div style="background: #ffebee; padding: 12px; border-radius: 8px; margin-bottom: 12px;">
+                        <ul style="margin: 0; padding-left: 20px;">
+                            <li style="color: #c62828;"><strong>너무 모호함:</strong> "이거 뭐야?" → "이 문서의 주요 내용이 무엇인가요?"</li>
+                            <li style="color: #c62828;"><strong>문서에 없는 내용:</strong> "내일 날씨는?" → 하이브리드 RAG 활성화 시 가능</li>
+                            <li style="color: #c62828;"><strong>너무 광범위함:</strong> "모든 걸 설명해줘" → "1장의 핵심 요약을 해줘"</li>
+                        </ul>
+                    </div>
+                </section>
+
+                <!-- FAQ -->
+                <section class="help-section">
+                    <h3>❓ 자주 묻는 질문 (FAQ)</h3>
+
+                    <div style="margin-bottom: 16px;">
+                        <p style="font-weight: 600; color: var(--primary-600); margin-bottom: 4px;">Q1. 답변이 "문서에 정보가 없습니다"라고 나와요</p>
+                        <p style="margin: 0; padding-left: 16px; color: #666;">
+                            <strong>A:</strong> 다음을 확인해보세요:<br>
+                            1. 문서 필터에서 올바른 문서가 선택되었는지 확인<br>
+                            2. 조직 범위 내의 문서인지 확인 (조직명 확인)<br>
+                            3. 질문을 더 구체적으로 바꿔서 다시 시도<br>
+                            4. 하이브리드 RAG 모드를 "스마트" 또는 "모든 소스"로 변경
+                        </p>
+                    </div>
+
+                    <div style="margin-bottom: 16px;">
+                        <p style="font-weight: 600; color: var(--primary-600); margin-bottom: 4px;">Q2. 로그인이 계속 풀려요</p>
+                        <p style="margin: 0; padding-left: 16px; color: #666;">
+                            <strong>A:</strong> 브라우저 쿠키 설정을 확인하세요. 사이트의 쿠키를 허용해야 로그인 상태가 유지됩니다. 시크릿 모드에서는 자동 로그인이 작동하지 않을 수 있습니다.
+                        </p>
+                    </div>
+
+                    <div style="margin-bottom: 16px;">
+                        <p style="font-weight: 600; color: var(--primary-600); margin-bottom: 4px;">Q3. 문서를 업로드했는데 검색이 안 돼요</p>
+                        <p style="margin: 0; padding-left: 16px; color: #666;">
+                            <strong>A:</strong> 문서 업로드 후 시스템이 인덱싱을 완료하는 데 시간이 걸립니다. 큰 문서의 경우 1-2분 정도 기다린 후 다시 시도해보세요. 시스템 상태에서 "준비 완료" 표시를 확인하세요.
+                        </p>
+                    </div>
+
+                    <div style="margin-bottom: 16px;">
+                        <p style="font-weight: 600; color: var(--primary-600); margin-bottom: 4px;">Q4. 답변 생성이 느려요</p>
+                        <p style="margin: 0; padding-left: 16px; color: #666;">
+                            <strong>A:</strong> AI 모델이 문서를 검색하고 답변을 생성하는 데 시간이 필요합니다. 특히 하이브리드 RAG 모드에서는 외부 검색도 진행되어 더 오래 걸릴 수 있습니다. 일반적으로 10-30초 정도 소요됩니다.
+                        </p>
+                    </div>
+
+                    <div style="margin-bottom: 16px;">
+                        <p style="font-weight: 600; color: var(--primary-600); margin-bottom: 4px;">Q5. 이전 대화를 찾을 수 없어요</p>
+                        <p style="margin: 0; padding-left: 16px; color: #666;">
+                            <strong>A:</strong> 좌측 사이드바의 대화 히스토리를 확인하세요 (Ctrl/Cmd + H). 검색 기능을 사용하면 키워드로 빠르게 찾을 수 있습니다. 중요한 대화는 ⭐ 북마크로 표시해두면 나중에 쉽게 찾을 수 있습니다.
+                        </p>
+                    </div>
+
+                    <div style="margin-bottom: 16px;">
+                        <p style="font-weight: 600; color: var(--primary-600); margin-bottom: 4px;">Q6. 출처 문서를 볼 수 없어요</p>
+                        <p style="margin: 0; padding-left: 16px; color: #666;">
+                            <strong>A:</strong> 답변 하단의 "📚 참고 문서" 섹션을 확인하세요. 각 문서를 클릭하면 AI가 참조한 원문 내용이 모달로 표시됩니다. 조직 권한 때문에 일부 문서는 접근이 제한될 수 있습니다.
+                        </p>
+                    </div>
+
+                    <div style="margin-bottom: 16px;">
+                        <p style="font-weight: 600; color: var(--primary-600); margin-bottom: 4px;">Q7. 한국어 외 다른 언어도 지원하나요?</p>
+                        <p style="margin: 0; padding-left: 16px; color: #666;">
+                            <strong>A:</strong> 네, 영어를 포함한 다국어를 지원합니다. 다만 한국어에 최적화되어 있어 한국어 질문과 답변이 가장 정확합니다.
+                        </p>
+                    </div>
+
+                    <div style="margin-bottom: 16px;">
+                        <p style="font-weight: 600; color: var(--primary-600); margin-bottom: 4px;">Q8. 설정을 변경했는데 적용이 안 돼요</p>
+                        <p style="margin: 0; padding-left: 16px; color: #666;">
+                            <strong>A:</strong> 대부분의 설정은 즉시 적용됩니다. 페이지를 새로고침해도 설정이 유지됩니다. 만약 적용이 안 된다면 브라우저 캐시를 삭제하거나 시크릿 모드에서 테스트해보세요.
+                        </p>
+                    </div>
+                </section>
+
+                <!-- Troubleshooting -->
+                <section class="help-section">
+                    <h3>🔧 문제 해결</h3>
+
+                    <h4 style="margin-top: 16px; color: var(--primary-600);">⚠️ 일반적인 문제</h4>
+
+                    <div style="background: #fff3e0; padding: 12px; border-radius: 8px; border-left: 4px solid #ff9800; margin-bottom: 12px;">
+                        <p style="margin: 0 0 8px 0; font-weight: 600; color: #e65100;">문제: 페이지가 하얗게 표시되거나 로딩이 안 됨</p>
+                        <p style="margin: 0; color: #666;"><strong>해결:</strong></p>
+                        <ul style="margin: 4px 0 0 0; padding-left: 20px; color: #666;">
+                            <li>Ctrl + Shift + R (또는 Cmd + Shift + R)로 강력 새로고침</li>
+                            <li>브라우저 캐시 삭제 후 재접속</li>
+                            <li>다른 브라우저로 접속 시도 (Chrome, Edge, Firefox)</li>
+                            <li>브라우저 확장 프로그램 비활성화 후 재시도</li>
+                        </ul>
+                    </div>
+
+                    <div style="background: #fff3e0; padding: 12px; border-radius: 8px; border-left: 4px solid #ff9800; margin-bottom: 12px;">
+                        <p style="margin: 0 0 8px 0; font-weight: 600; color: #e65100;">문제: 네트워크 오류 (연결 실패)</p>
+                        <p style="margin: 0; color: #666;"><strong>해결:</strong></p>
+                        <ul style="margin: 4px 0 0 0; padding-left: 20px; color: #666;">
+                            <li>인터넷 연결 상태 확인</li>
+                            <li>VPN 사용 중이면 비활성화 후 재시도</li>
+                            <li>"다시 시도" 버튼 클릭 (자동 재시도 3회)</li>
+                            <li>서버 상태 확인 (관리자에게 문의)</li>
+                        </ul>
+                    </div>
+
+                    <div style="background: #fff3e0; padding: 12px; border-radius: 8px; border-left: 4px solid #ff9800; margin-bottom: 12px;">
+                        <p style="margin: 0 0 8px 0; font-weight: 600; color: #e65100;">문제: 답변이 중간에 끊김</p>
+                        <p style="margin: 0; color: #666;"><strong>해결:</strong></p>
+                        <ul style="margin: 4px 0 0 0; padding-left: 20px; color: #666;">
+                            <li>네트워크 연결 안정성 확인</li>
+                            <li>동일한 질문을 다시 전송</li>
+                            <li>설정에서 "최대 토큰" 값을 증가 (예: 2048 → 4096)</li>
+                            <li>질문을 더 짧고 명확하게 수정</li>
+                        </ul>
+                    </div>
+
+                    <div style="background: #fff3e0; padding: 12px; border-radius: 8px; border-left: 4px solid #ff9800; margin-bottom: 12px;">
+                        <p style="margin: 0 0 8px 0; font-weight: 600; color: #e65100;">문제: 한글 입력이 이상함</p>
+                        <p style="margin: 0; color: #666;"><strong>해결:</strong></p>
+                        <ul style="margin: 4px 0 0 0; padding-left: 20px; color: #666;">
+                            <li>브라우저를 최신 버전으로 업데이트</li>
+                            <li>한글 입력기 설정 확인 (Windows: 한/영 전환)</li>
+                            <li>다른 입력 필드(메모장 등)에서 작성 후 복사/붙여넣기</li>
+                        </ul>
+                    </div>
+
+                    <h4 style="margin-top: 16px; color: var(--primary-600);">📞 추가 지원</h4>
+                    <div style="background: #e3f2fd; padding: 12px; border-radius: 8px; border-left: 4px solid #2196f3;">
+                        <p style="margin: 0; color: #0d47a1;">
+                            <strong>문제가 지속되면?</strong><br>
+                            관리자 페이지의 지원 섹션을 통해 문의하거나, 시스템 관리자에게 다음 정보와 함께 연락하세요:<br>
+                            • 발생한 오류 메시지<br>
+                            • 브라우저 종류 및 버전<br>
+                            • 문제 발생 시점<br>
+                            • 재현 단계
+                        </p>
+                    </div>
+                </section>
+
                 <!-- Tips -->
                 <section class="help-section">
                     <h3>💡 사용 팁</h3>
-                    <ul>
-                        <li>구체적인 질문일수록 더 정확한 답변을 받을 수 있습니다</li>
-                        <li>이전 답변과 관련된 추가 질문을 자유롭게 하세요</li>
-                        <li>문서 필터를 사용하면 특정 문서에서만 검색할 수 있습니다</li>
-                        <li>테마 전환 버튼으로 다크/라이트 모드를 선택할 수 있습니다</li>
-                        <li>출처를 클릭하면 AI가 참조한 원문을 직접 확인할 수 있습니다</li>
-                        <li>후속 질문 제안을 활용하면 주제를 더 깊이 탐구할 수 있습니다</li>
-                        <li>대화 내보내기로 중요한 대화를 외부에 백업할 수 있습니다</li>
-                        <li>피드백 제공으로 AI 서비스 품질 향상에 기여할 수 있습니다</li>
-                        <li>대화 히스토리에서 ⭐ 북마크 기능으로 중요한 대화를 표시할 수 있습니다</li>
-                    </ul>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px;">
+                        <div style="background: #f3e5f5; padding: 12px; border-radius: 8px;">
+                            <p style="margin: 0; font-weight: 600; color: #6a1b9a;">🎯 정확한 답변받기</p>
+                            <p style="margin: 4px 0 0 0; font-size: 14px; color: #666;">구체적이고 명확한 질문을 하세요. "이거 뭐야?"보다 "2024년 1분기 매출 보고서의 주요 지표는?"이 훨씬 효과적입니다.</p>
+                        </div>
+                        <div style="background: #e8f5e9; padding: 12px; border-radius: 8px;">
+                            <p style="margin: 0; font-weight: 600; color: #2e7d32;">🔍 검색 범위 좁히기</p>
+                            <p style="margin: 4px 0 0 0; font-size: 14px; color: #666;">문서 필터나 그룹 필터를 활용하면 특정 주제에 집중된 더 정확한 답변을 받을 수 있습니다.</p>
+                        </div>
+                        <div style="background: #e3f2fd; padding: 12px; border-radius: 8px;">
+                            <p style="margin: 0; font-weight: 600; color: #1565c0;">💬 대화 이어가기</p>
+                            <p style="margin: 4px 0 0 0; font-size: 14px; color: #666;">"더 자세히 설명해줘", "예시를 들어줘" 같은 후속 질문으로 주제를 깊이 있게 탐구하세요.</p>
+                        </div>
+                        <div style="background: #fff3e0; padding: 12px; border-radius: 8px;">
+                            <p style="margin: 0; font-weight: 600; color: #e65100;">⭐ 중요 대화 관리</p>
+                            <p style="margin: 4px 0 0 0; font-size: 14px; color: #666;">중요한 대화는 북마크로 표시하고, 대화 내보내기로 백업하세요. 나중에 쉽게 찾을 수 있습니다.</p>
+                        </div>
+                        <div style="background: #fce4ec; padding: 12px; border-radius: 8px;">
+                            <p style="margin: 0; font-weight: 600; color: #c2185b;">📚 출처 확인하기</p>
+                            <p style="margin: 4px 0 0 0; font-size: 14px; color: #666;">답변 하단의 참고 문서를 클릭하면 AI가 참조한 원문을 직접 확인할 수 있어 답변의 신뢰도를 검증할 수 있습니다.</p>
+                        </div>
+                        <div style="background: #f1f8e9; padding: 12px; border-radius: 8px;">
+                            <p style="margin: 0; font-weight: 600; color: #558b2f;">⚙️ 설정 최적화</p>
+                            <p style="margin: 4px 0 0 0; font-size: 14px; color: #666;">검색 개수(Top K)를 늘리면 더 많은 문서를 참조하고, 온도 값을 낮추면 더 일관된 답변을 받을 수 있습니다.</p>
+                        </div>
+                    </div>
                 </section>
             </div>
         </div>
@@ -1752,7 +1995,7 @@
                 <div class="export-option" onclick="exportAsFormat('json')">
                     <div class="export-icon">📄</div>
                     <div class="export-details">
-                        <h3>JSON</h3>
+                        <h3>JSON (.json)</h3>
                         <p>원본 데이터 구조 보존, 프로그래밍 활용 가능</p>
                     </div>
                     <div class="export-arrow">→</div>
@@ -1772,6 +2015,42 @@
                     <div class="export-details">
                         <h3>마크다운 (MD)</h3>
                         <p>서식 보존, GitHub/노션 등에서 사용 가능</p>
+                    </div>
+                    <div class="export-arrow">→</div>
+                </div>
+
+                <div class="export-option" onclick="exportAsFormat('html')">
+                    <div class="export-icon">🌐</div>
+                    <div class="export-details">
+                        <h3>HTML</h3>
+                        <p>웹 브라우저에서 열기, 서식 완벽 보존</p>
+                    </div>
+                    <div class="export-arrow">→</div>
+                </div>
+
+                <div class="export-option" onclick="exportAsFormat('pdf')">
+                    <div class="export-icon">📕</div>
+                    <div class="export-details">
+                        <h3>PDF (.pdf)</h3>
+                        <p>인쇄 및 배포용, 범용 문서 형식</p>
+                    </div>
+                    <div class="export-arrow">→</div>
+                </div>
+
+                <div class="export-option" onclick="exportAsFormat('docx')">
+                    <div class="export-icon">📄</div>
+                    <div class="export-details">
+                        <h3>Word 문서 (DOCX)</h3>
+                        <p>MS Word에서 편집 가능, 범용 문서</p>
+                    </div>
+                    <div class="export-arrow">→</div>
+                </div>
+
+                <div class="export-option" onclick="exportAsFormat('hwpx')">
+                    <div class="export-icon">📝</div>
+                    <div class="export-details">
+                        <h3>한글 문서 (HWPX)</h3>
+                        <p>한글 2014 이상에서 편집 가능</p>
                     </div>
                     <div class="export-arrow">→</div>
                 </div>
@@ -1890,7 +2169,7 @@
                     document.getElementById('userOrg').style.display = 'block';
                 }
             } catch (error) {
-                console.error('조직 정보 로드 실패:', error);
+                logger.error('조직 정보 로드 실패:', error);
                 // 조직 정보 로드 실패 시 표시하지 않음
                 document.getElementById('userOrg').style.display = 'none';
             }
@@ -2086,7 +2365,7 @@
 
                 modal.style.display = 'flex';
             } catch (error) {
-                console.error('조직 목록 로드 실패:', error);
+                logger.error('조직 목록 로드 실패:', error);
                 showChangeOrgError('조직 목록을 불러올 수 없습니다');
             }
         }
@@ -2129,7 +2408,7 @@
                     }, 1500);
                 }
             } catch (error) {
-                console.error('조직 변경 실패:', error);
+                logger.error('조직 변경 실패:', error);
                 showChangeOrgError(error.message || '조직 변경에 실패했습니다');
             }
         }
@@ -2161,9 +2440,6 @@
         });
     </script>
 
-    <!-- Logger System -->
-    <script src="/static/logger.js?v=1"></script>
-
     <!-- Performance Metrics -->
     <script src="/static/performance-metrics.js?v=1"></script>
 
@@ -2173,7 +2449,7 @@
     <!-- Cache Buster Verification -->
     <script>
         // Page load verification (commented out for cleaner console)
-        // console.log('%c🔄 PAGE LOADED: 2025-12-28-12-45-DOCUMENT-COUNT', 'background: #667eea; color: white; padding: 5px 10px; font-size: 14px; font-weight: bold;');
+        // logger.debug('%c🔄 PAGE LOADED: 2025-12-28-12-45-DOCUMENT-COUNT', 'background: #667eea; color: white; padding: 5px 10px; font-size: 14px; font-weight: bold;');
 
         // Debug progress bar on page load
         window.addEventListener('DOMContentLoaded', () => {
@@ -2181,19 +2457,19 @@
                 const progressBar = document.querySelector('#reindexProgressModal .progress-bar');
                 if (progressBar) {
                     const computedStyle = window.getComputedStyle(progressBar);
-                    console.log('%c📊 Progress Bar Debug:', 'background: #f093fb; color: black; padding: 5px; font-weight: bold;');
-                    console.log('  Height (computed):', computedStyle.height);
-                    console.log('  Height (inline):', progressBar.style.height);
-                    console.log('  Overflow (computed):', computedStyle.overflow);
-                    console.log('  Element:', progressBar);
+                    logger.debug('%c📊 Progress Bar Debug:', 'background: #f093fb; color: black; padding: 5px; font-weight: bold;');
+                    logger.debug('  Height (computed):', computedStyle.height);
+                    logger.debug('  Height (inline):', progressBar.style.height);
+                    logger.debug('  Overflow (computed):', computedStyle.overflow);
+                    logger.debug('  Element:', progressBar);
 
                     const modal = document.querySelector('#reindexProgressModal .modal-content');
                     if (modal) {
                         const modalStyle = window.getComputedStyle(modal);
-                        console.log('%c🪟 Modal Debug:', 'background: #764ba2; color: white; padding: 5px; font-weight: bold;');
-                        console.log('  Overflow (computed):', modalStyle.overflow);
-                        console.log('  Max-height (computed):', modalStyle.maxHeight);
-                        console.log('  Element:', modal);
+                        logger.debug('%c🪟 Modal Debug:', 'background: #764ba2; color: white; padding: 5px; font-weight: bold;');
+                        logger.debug('  Overflow (computed):', modalStyle.overflow);
+                        logger.debug('  Max-height (computed):', modalStyle.maxHeight);
+                        logger.debug('  Element:', modal);
                     }
                 }
             }, 1000);

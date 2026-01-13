@@ -91,7 +91,7 @@ marked.setOptions({
             try {
                 return hljs.highlight(code, { language: lang }).value;
             } catch (e) {
-                console.warn('Highlight.js error:', e);
+                logger.warn('Highlight.js error:', e);
                 return code;
             }
         }
@@ -151,7 +151,7 @@ function renderMath(element) {
                 }
             });
         } catch (e) {
-            console.error('KaTeX rendering error:', e);
+            logger.error('KaTeX rendering error:', e);
         }
     }
 }
@@ -192,12 +192,12 @@ function renderMermaid(element) {
                 mermaid.render(`mermaid-svg-${Date.now()}-${index}`, code).then(result => {
                     container.innerHTML = result.svg;
                 }).catch(err => {
-                    console.error('Mermaid rendering error:', err);
+                    logger.error('Mermaid rendering error:', err);
                     container.innerHTML = `<div class="render-error">❌ Diagram rendering error: ${err.message}</div>`;
                 });
             });
         } catch (e) {
-            console.error('Mermaid initialization error:', e);
+            logger.error('Mermaid initialization error:', e);
         }
     }
 }
@@ -229,12 +229,12 @@ function renderMusic(element) {
                         add_classes: true
                     });
                 } catch (err) {
-                    console.error('ABC rendering error:', err);
+                    logger.error('ABC rendering error:', err);
                     container.innerHTML = `<div class="render-error">❌ Music notation error: ${err.message}</div>`;
                 }
             });
         } catch (e) {
-            console.error('ABC initialization error:', e);
+            logger.error('ABC initialization error:', e);
         }
     }
 }
@@ -267,7 +267,7 @@ function renderCharts(element) {
                     // Render chart
                     new Chart(canvas, config);
                 } catch (err) {
-                    console.error('Chart rendering error:', err);
+                    logger.error('Chart rendering error:', err);
                     const errorDiv = document.createElement('div');
                     errorDiv.className = 'render-error';
                     errorDiv.textContent = `❌ Chart rendering error: ${err.message}`;
@@ -275,7 +275,7 @@ function renderCharts(element) {
                 }
             });
         } catch (e) {
-            console.error('Chart.js initialization error:', e);
+            logger.error('Chart.js initialization error:', e);
         }
     }
 }
@@ -288,26 +288,22 @@ function renderSpecialContent(element) {
     renderCharts(element);
 }
 
-// Debug mode control
-const DEBUG_MODE = false; // Set to true for development, false for production
-
-// Console wrapper for production
-const devLog = (...args) => DEBUG_MODE && console.log(...args);
-const devWarn = (...args) => DEBUG_MODE && console.warn(...args);
-// Keep console.error for production errors
+// Debug logging (automatically suppressed in production via logger)
+const devLog = (...args) => logger.debug(...args);
+const devWarn = (...args) => logger.warn(...args);
 
 // Simple notification functions for export operations
 function showInfo(message) {
-    console.log('ℹ️', message);
+    logger.info('ℹ️', message);
 }
 
 function showError(message) {
-    console.error('❌', message);
+    logger.error('❌', message);
     alert(message);
 }
 
 function showSuccess(message) {
-    console.log('✅', message);
+    logger.info('✅', message);
 }
 
 // DOM elements
@@ -537,7 +533,7 @@ function setupEventListeners() {
                     if (response.ok) {
                         devLog('✅ Cancellation request sent successfully');
                     } else {
-                        console.error('❌ Failed to cancel reindex:', result.detail);
+                        logger.error('❌ Failed to cancel reindex:', result.detail);
                         alert('재색인 취소에 실패했습니다: ' + result.detail);
 
                         // Re-enable button on error
@@ -545,7 +541,7 @@ function setupEventListeners() {
                         cancelReindexBtn.textContent = '🛑 재색인 중지';
                     }
                 } catch (error) {
-                    console.error('❌ Error cancelling reindex:', error);
+                    logger.error('❌ Error cancelling reindex:', error);
                     alert('재색인 취소 중 오류가 발생했습니다: ' + error.message);
 
                     // Re-enable button on error
@@ -679,7 +675,7 @@ function setupEventListeners() {
 
             alert(`${data.deleted_count}개의 대화가 삭제되었습니다.\n새 대화가 시작되었습니다.`);
         } catch (error) {
-            console.error('Error deleting all conversations:', error);
+            logger.error('Error deleting all conversations:', error);
             alert('전체 삭제에 실패했습니다.');
         }
     });
@@ -900,7 +896,7 @@ async function checkStatus() {
             setTimeout(checkStatus, 2000);
         }
     } catch (error) {
-        console.error('Status check failed:', error);
+        logger.error('Status check failed:', error);
         statusEl.textContent = '연결 실패';
         statusEl.style.color = '#ef4444';
         setTimeout(checkStatus, 5000);
@@ -1062,7 +1058,7 @@ async function loadConversations() {
             conversationList.appendChild(item);
         });
     } catch (error) {
-        console.error('Error loading conversations:', error);
+        logger.error('Error loading conversations:', error);
         conversationList.innerHTML = '<div class="loading-conversations"><span>대화 목록 로딩 실패</span></div>';
     } finally {
         isLoadingConversations = false;
@@ -1086,7 +1082,7 @@ async function toggleBookmark(sessionId) {
         // Show brief feedback
         devLog(`Bookmark ${data.is_bookmarked ? 'added' : 'removed'} for session ${sessionId}`);
     } catch (error) {
-        console.error('Error toggling bookmark:', error);
+        logger.error('Error toggling bookmark:', error);
         alert('북마크 변경에 실패했습니다.');
     }
 }
@@ -1137,7 +1133,7 @@ async function createNewConversation() {
 
         devLog('Created new conversation:', currentSessionId);
     } catch (error) {
-        console.error('Error creating conversation:', error);
+        logger.error('Error creating conversation:', error);
         alert('새 대화 생성에 실패했습니다.');
     }
 }
@@ -1222,7 +1218,7 @@ async function loadConversation(sessionId) {
 
         devLog('Loaded conversation:', sessionId);
     } catch (error) {
-        console.error('Error loading conversation:', error);
+        logger.error('Error loading conversation:', error);
         alert('대화 로딩에 실패했습니다.');
     }
 }
@@ -1264,7 +1260,7 @@ async function deleteConversation(sessionId) {
 
         devLog('Successfully deleted conversation:', sessionId);
     } catch (error) {
-        console.error('Error deleting conversation:', error);
+        logger.error('Error deleting conversation:', error);
         alert(`대화 삭제에 실패했습니다: ${error.message}`);
         // Reload list anyway to sync with server state
         await loadConversations();
@@ -1401,12 +1397,12 @@ async function initConversationHistory() {
 
         devLog('Conversation history initialized');
     } catch (error) {
-        console.error('Failed to initialize conversation history:', error);
+        logger.error('Failed to initialize conversation history:', error);
         // Fallback: create new conversation
         try {
             await createNewConversation();
         } catch (e) {
-            console.error('Failed to create fallback conversation:', e);
+            logger.error('Failed to create fallback conversation:', e);
         }
     }
 }
@@ -1728,7 +1724,7 @@ async function sendMessage(regenerate = false) {
                                 // Scroll to bottom
                                 chatContainer.scrollTop = chatContainer.scrollHeight;
                             } catch (renderError) {
-                                console.error('Render error:', renderError);
+                                logger.error('Render error:', renderError);
                                 // Continue streaming even if rendering fails
                             }
                         } else if (data.type === 'stats') {
@@ -1820,18 +1816,18 @@ async function sendMessage(regenerate = false) {
                                     });
                                 }
                             } catch (error) {
-                                console.error('Failed to generate/display follow-up questions:', error);
+                                logger.error('Failed to generate/display follow-up questions:', error);
                             }
                         }
                     } catch (parseError) {
-                        console.error('JSON parse error:', parseError, 'Line:', line);
+                        logger.error('JSON parse error:', parseError, 'Line:', line);
                     }
                 }
             }
         }
 
     } catch (error) {
-        console.error('Query failed:', error);
+        logger.error('Query failed:', error);
 
         // Show error in StreamingVisualizer
         streamingVisualizer.showError('응답 생성 중 오류가 발생했습니다.');
@@ -2117,7 +2113,7 @@ async function reindexDocuments() {
             }
         }
     } catch (error) {
-        console.error('Failed to check reindex status:', error);
+        logger.error('Failed to check reindex status:', error);
         // If check fails, proceed with confirmation
     }
 
@@ -2252,12 +2248,12 @@ async function reindexDocuments() {
                     consecutiveErrors++;
                 }
             } catch (error) {
-                console.error('Failed to fetch progress:', error);
+                logger.error('Failed to fetch progress:', error);
                 consecutiveErrors++;
 
                 // Stop polling after consecutive errors
                 if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
-                    console.warn('Too many consecutive errors, stopping progress polling');
+                    logger.warn('Too many consecutive errors, stopping progress polling');
                     clearInterval(progressInterval);
                     progressStep.textContent = '서버 연결 실패';
                 }
@@ -2281,7 +2277,7 @@ async function reindexDocuments() {
         // Progress interval will continue until completion or error is detected
 
     } catch (error) {
-        console.error('Reindex failed:', error);
+        logger.error('Reindex failed:', error);
 
         // Clear progress polling
         if (progressInterval) {
@@ -2413,12 +2409,12 @@ function monitorReindexProgress(modal, progressBar, progressPercent, progressSte
                 consecutiveErrors++;
             }
         } catch (error) {
-            console.error('Failed to fetch progress:', error);
+            logger.error('Failed to fetch progress:', error);
             consecutiveErrors++;
 
             // Stop polling after consecutive errors
             if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
-                console.warn('Too many consecutive errors, stopping progress polling');
+                logger.warn('Too many consecutive errors, stopping progress polling');
                 clearInterval(progressInterval);
                 progressStep.textContent = '서버 연결 실패';
 
@@ -2518,7 +2514,7 @@ function addActionButtons(contentDiv, text) {
             <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
                 <path d="M3 3h10v10H3V3zm1 1v8h8V4H4zm1 1h6v1H5V5zm0 2h6v1H5V7zm0 2h4v1H5V9z"/>
             </svg>
-            <span>JSON</span>
+            <span>JSON (.json)</span>
         </div>
         <div class="download-option" data-format="markdown">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
@@ -2543,7 +2539,7 @@ function addActionButtons(contentDiv, text) {
                 <path d="M3 2h7l3 3v9H3V2zm1 1v10h8V6h-3V3H4zm5 0v2h2l-2-2z"/>
                 <text x="5" y="12" font-size="6" fill="white" font-weight="bold">PDF</text>
             </svg>
-            <span>PDF</span>
+            <span>PDF (.pdf)</span>
         </div>
         <div class="download-option" data-format="docx">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
@@ -2677,7 +2673,7 @@ function addActionButtonsToWrapper(wrapperDiv, text) {
             <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
                 <path d="M3 3h10v10H3V3zm1 1v8h8V4H4zm1 1h6v1H5V5zm0 2h6v1H5V7zm0 2h4v1H5V9z"/>
             </svg>
-            <span>JSON</span>
+            <span>JSON (.json)</span>
         </div>
         <div class="download-option" data-format="markdown">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
@@ -2702,7 +2698,7 @@ function addActionButtonsToWrapper(wrapperDiv, text) {
                 <path d="M3 2h7l3 3v9H3V2zm1 1v10h8V6h-3V3H4zm5 0v2h2l-2-2z"/>
                 <text x="5" y="12" font-size="6" fill="white" font-weight="bold">PDF</text>
             </svg>
-            <span>PDF</span>
+            <span>PDF (.pdf)</span>
         </div>
         <div class="download-option" data-format="docx">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
@@ -2789,7 +2785,7 @@ async function copyToClipboard(text, button) {
             button.setAttribute('title', originalTooltip);
         }, 2000);
     } catch (error) {
-        console.error('Copy failed:', error);
+        logger.error('Copy failed:', error);
 
         // Show error feedback
         const originalHTML = button.innerHTML;
@@ -2938,7 +2934,7 @@ async function downloadAnswer(text, format, button) {
                 return; // Early return for async hwpx generation
 
             default:
-                console.error('Unknown format:', format);
+                logger.error('Unknown format:', format);
                 return;
         }
 
@@ -2969,7 +2965,7 @@ async function downloadAnswer(text, format, button) {
             }, 2000);
         }
     } catch (error) {
-        console.error('Download failed:', error);
+        logger.error('Download failed:', error);
 
         // Show error feedback
         if (button) {
@@ -3139,7 +3135,7 @@ async function generateAnswerPdf(text, filename, button) {
             }, 2000);
         }
     } catch (error) {
-        console.error('PDF generation failed:', error);
+        logger.error('PDF generation failed:', error);
 
         // Show error feedback
         if (button) {
@@ -3445,7 +3441,7 @@ async function generateDocx(text, filename, button) {
             }, 2000);
         }
     } catch (error) {
-        console.error('Word document generation failed:', error);
+        logger.error('Word document generation failed:', error);
 
         // Show error feedback
         if (button) {
@@ -3522,7 +3518,7 @@ async function generateHwpx(text, filename, button) {
             }, 2000);
         }
     } catch (error) {
-        console.error('HWPX 생성 실패:', error);
+        logger.error('HWPX 생성 실패:', error);
 
         // Show error feedback
         if (button) {
@@ -3690,7 +3686,7 @@ async function submitFeedback(button, feedbackType) {
         devLog(`✅ Feedback submitted: ${feedbackType}`);
 
     } catch (error) {
-        console.error('Feedback submission failed:', error);
+        logger.error('Feedback submission failed:', error);
 
         // Show error feedback
         button.style.color = '#ef4444';
@@ -4098,7 +4094,7 @@ async function viewDocumentChunks(filename) {
         `).join('');
 
     } catch (error) {
-        console.error('Error loading chunks:', error);
+        logger.error('Error loading chunks:', error);
         chunkViewerList.innerHTML = `
             <div class="empty-state">
                 <p>청크를 불러오는데 실패했습니다</p>
@@ -4257,7 +4253,7 @@ function loadSettings() {
         try {
             currentSettings = { ...defaultSettings, ...JSON.parse(saved) };
         } catch (e) {
-            console.error('Failed to load settings:', e);
+            logger.error('Failed to load settings:', e);
         }
     }
     applySettings();
@@ -4326,7 +4322,7 @@ async function checkHybridRAGStatus() {
                     }
                 });
 
-                console.log('⚠️ 하이브리드 RAG 비활성화 - 검색 모드를 로컬 문서만으로 고정');
+                logger.info('⚠️ 하이브리드 RAG 비활성화 - 검색 모드를 로컬 문서만으로 고정');
             } else {
                 // 하이브리드 RAG 활성화 상태 - 정상 동작
                 searchModeSelect.disabled = false;
@@ -4338,11 +4334,11 @@ async function checkHybridRAGStatus() {
                     option.disabled = false;
                 });
 
-                console.log('✅ 하이브리드 RAG 활성화 - 모든 검색 모드 사용 가능');
+                logger.info('✅ 하이브리드 RAG 활성화 - 모든 검색 모드 사용 가능');
             }
         }
     } catch (error) {
-        console.error('하이브리드 RAG 상태 확인 실패:', error);
+        logger.error('하이브리드 RAG 상태 확인 실패:', error);
         // 에러 시 안전하게 local-only로 고정
         if (searchModeSelect) {
             searchModeSelect.value = 'local-only';
@@ -4406,7 +4402,7 @@ async function loadAvailableModels() {
     const embeddingModelDisplay = document.getElementById('embeddingModelDisplay');
 
     if (!llmModelDisplay || !embeddingModelDisplay) {
-        console.error('Model display elements not found');
+        logger.error('Model display elements not found');
         return;
     }
 
@@ -4428,7 +4424,7 @@ async function openSettingsPanel() {
         if (data.llm_model) currentSettings.llm_model = data.llm_model;
         if (data.embedding_model) currentSettings.embedding_model = data.embedding_model;
     } catch (error) {
-        console.error('Failed to fetch latest model info:', error);
+        logger.error('Failed to fetch latest model info:', error);
     }
 
     // Load latest system prompt from server (admin-configured)
@@ -4472,7 +4468,7 @@ if (topKSlider && topKValue) {
     topKSlider.addEventListener('change', (e) => {
         currentSettings.top_k = parseInt(e.target.value);
         localStorage.setItem('chatSettings', JSON.stringify(currentSettings));
-        console.log('✅ Top K 저장됨:', e.target.value);
+        logger.info('✅ Top K 저장됨:', e.target.value);
     });
 }
 
@@ -4493,7 +4489,7 @@ if (searchModeSelect) {
                 return;
             }
         } catch (error) {
-            console.error('하이브리드 RAG 상태 확인 실패:', error);
+            logger.error('하이브리드 RAG 상태 확인 실패:', error);
         }
 
         // 현재 설정 업데이트
@@ -4502,7 +4498,7 @@ if (searchModeSelect) {
         // localStorage에 즉시 저장
         localStorage.setItem('chatSettings', JSON.stringify(currentSettings));
 
-        console.log('✅ 검색 모드 저장됨:', e.target.value);
+        logger.info('✅ 검색 모드 저장됨:', e.target.value);
     });
 }
 
@@ -4516,7 +4512,7 @@ if (temperatureSlider && temperatureValue) {
     temperatureSlider.addEventListener('change', (e) => {
         currentSettings.temperature = parseFloat(e.target.value);
         localStorage.setItem('chatSettings', JSON.stringify(currentSettings));
-        console.log('✅ Temperature 저장됨:', e.target.value);
+        logger.info('✅ Temperature 저장됨:', e.target.value);
     });
 }
 
@@ -4530,7 +4526,7 @@ if (maxTokensSlider && maxTokensValue) {
     maxTokensSlider.addEventListener('change', (e) => {
         currentSettings.max_tokens = parseInt(e.target.value);
         localStorage.setItem('chatSettings', JSON.stringify(currentSettings));
-        console.log('✅ Max Tokens 저장됨:', e.target.value);
+        logger.info('✅ Max Tokens 저장됨:', e.target.value);
     });
 }
 
@@ -4544,7 +4540,7 @@ if (cacheThresholdSlider && cacheThresholdValue) {
     cacheThresholdSlider.addEventListener('change', (e) => {
         currentSettings.cache_threshold = parseFloat(e.target.value);
         localStorage.setItem('chatSettings', JSON.stringify(currentSettings));
-        console.log('✅ Cache Threshold 저장됨:', e.target.value);
+        logger.info('✅ Cache Threshold 저장됨:', e.target.value);
     });
 }
 
@@ -4558,7 +4554,7 @@ if (cacheTTLSlider && cacheTTLValue) {
     cacheTTLSlider.addEventListener('change', (e) => {
         currentSettings.cache_ttl = parseInt(e.target.value);
         localStorage.setItem('chatSettings', JSON.stringify(currentSettings));
-        console.log('✅ Cache TTL 저장됨:', e.target.value);
+        logger.info('✅ Cache TTL 저장됨:', e.target.value);
     });
 }
 
@@ -4627,7 +4623,7 @@ if (resetSettingsBtn) {
                     resetSettingsBtn.textContent = originalText;
                 }, 2000);
             } catch (error) {
-                console.error('Failed to fetch current models:', error);
+                logger.error('Failed to fetch current models:', error);
                 // Fallback to complete defaults if fetch fails
                 currentSettings = { ...defaultSettings };
 
@@ -4635,7 +4631,7 @@ if (resetSettingsBtn) {
                 try {
                     await loadSystemPromptFromServer();
                 } catch (e) {
-                    console.error('Failed to load system prompt:', e);
+                    logger.error('Failed to load system prompt:', e);
                 }
 
                 applySettings();
@@ -4701,7 +4697,7 @@ async function loadCacheStats() {
             }
         }
     } catch (error) {
-        console.error('Failed to load cache stats:', error);
+        logger.error('Failed to load cache stats:', error);
         // Safe error handling - only set if elements exist
         const statTotalEntries = document.getElementById('statTotalEntries');
         const statTotalQueries = document.getElementById('statTotalQueries');
@@ -4783,7 +4779,7 @@ async function loadCacheEnabled() {
             }
         }
     } catch (error) {
-        console.error('Failed to load cache enabled status:', error);
+        logger.error('Failed to load cache enabled status:', error);
     }
 }
 
@@ -4867,7 +4863,7 @@ async function showSourceDetails(filename) {
 
             if (!response.ok) {
                 const errorText = await response.text();
-                console.error('[showSourceDetails] Server error:', errorText);
+                logger.error('[showSourceDetails] Server error:', errorText);
                 throw new Error(`Server returned ${response.status}: ${response.statusText}`);
             }
 
@@ -4894,8 +4890,8 @@ async function showSourceDetails(filename) {
 
             devLog('[showSourceDetails] Successfully loaded', sourceContexts.length, 'chunks from server');
         } catch (error) {
-            console.error('[showSourceDetails] Error:', error);
-            console.error('[showSourceDetails] Error stack:', error.stack);
+            logger.error('[showSourceDetails] Error:', error);
+            logger.error('[showSourceDetails] Error stack:', error.stack);
             sourceModal.classList.remove('active');
             alert(`출처 정보를 불러오는데 실패했습니다.\n파일명: ${filename}\n에러: ${error.message}`);
             return;
@@ -4962,7 +4958,7 @@ function loadDraft() {
             }, 3000);
         }
     } catch (e) {
-        console.error('Failed to load draft:', e);
+        logger.error('Failed to load draft:', e);
     }
 }
 
@@ -4999,7 +4995,7 @@ function saveHistory() {
         const limitedHistory = conversationHistory.slice(-MAX_HISTORY_ITEMS);
         localStorage.setItem(HISTORY_KEY, JSON.stringify(limitedHistory));
     } catch (e) {
-        console.error('Failed to save history:', e);
+        logger.error('Failed to save history:', e);
     }
 }
 
@@ -5016,7 +5012,7 @@ function loadHistory() {
             }
         }
     } catch (e) {
-        console.error('Failed to load history:', e);
+        logger.error('Failed to load history:', e);
         conversationHistory = [];
     }
 }
@@ -5119,7 +5115,7 @@ function exportHistory() {
     const messageCount = document.getElementById('exportMessageCount');
 
     if (!modal || !messageCount) {
-        console.error('Export modal elements not found');
+        logger.error('Export modal elements not found');
         return;
     }
 
@@ -5175,7 +5171,7 @@ async function exportAsFormat(format) {
                 return; // HWPX export handles modal closing internally
 
             default:
-                console.error('Unknown format:', format);
+                logger.error('Unknown format:', format);
                 return;
         }
 
@@ -5197,7 +5193,7 @@ async function exportAsFormat(format) {
 
         logger.info(`✅ 대화 내용을 ${format.toUpperCase()} 형식으로 내보냈습니다.`);
     } catch (error) {
-        console.error('Export error:', error);
+        logger.error('Export error:', error);
         showError(`내보내기 실패: ${error.message}`);
     }
 }
@@ -5376,7 +5372,7 @@ async function exportAsPDF(date) {
         showSuccess('PDF 내보내기 완료');
         logger.info('✅ 대화 내용을 PDF 형식으로 내보냈습니다.');
     } catch (error) {
-        console.error('PDF export error:', error);
+        logger.error('PDF export error:', error);
         showError(`PDF 내보내기 실패: ${error.message}`);
     }
 }
@@ -5471,7 +5467,7 @@ async function exportAsDocx(date) {
         showSuccess('Word 문서 내보내기 완료');
         logger.info('✅ 대화 내용을 DOCX 형식으로 내보냈습니다.');
     } catch (error) {
-        console.error('DOCX export error:', error);
+        logger.error('DOCX export error:', error);
         showError(`Word 문서 내보내기 실패: ${error.message}`);
     }
 }
@@ -5520,7 +5516,7 @@ async function exportAsHwpx(date) {
         showSuccess('한글 문서 내보내기 완료');
         logger.info('✅ 대화 내용을 HWPX 형식으로 내보냈습니다.');
     } catch (error) {
-        console.error('HWPX export error:', error);
+        logger.error('HWPX export error:', error);
         showError(`한글 문서 내보내기 실패: ${error.message}`);
     }
 }
@@ -5570,7 +5566,7 @@ function importHistory() {
 
             alert(`대화 내용을 불러왔습니다. (${imported.length}개 메시지)`);
         } catch (err) {
-            console.error('Import error:', err);
+            logger.error('Import error:', err);
             alert(`파일을 불러오는데 실패했습니다: ${err.message}`);
         }
     };
@@ -5729,7 +5725,7 @@ async function copyToClipboard(text, button) {
             button.classList.remove('copied');
         }, 2000);
     } catch (err) {
-        console.error('Failed to copy:', err);
+        logger.error('Failed to copy:', err);
         alert('복사에 실패했습니다');
     }
 }
@@ -5854,7 +5850,7 @@ function setTheme(theme, skipTransition = false) {
     try {
         localStorage.setItem('theme', theme);
     } catch (error) {
-        console.error('Failed to save theme to localStorage:', error);
+        logger.error('Failed to save theme to localStorage:', error);
     }
 
     // Update theme toggle button icons with null checks
@@ -6013,7 +6009,7 @@ async function loadFilterDocuments() {
     const documentList = document.getElementById('filterDocumentList');
 
     if (!documentList) {
-        console.warn('filterDocumentList element not found');
+        logger.warn('filterDocumentList element not found');
         return;
     }
 
@@ -6037,7 +6033,7 @@ async function loadFilterDocuments() {
         availableDocuments = data.documents || [];
         renderFilterDocumentList();
     } catch (error) {
-        console.error('Error loading filter documents:', error);
+        logger.error('Error loading filter documents:', error);
         if (error.name === 'TimeoutError') {
             documentList.innerHTML = '<div class="loading-documents" style="color: #ef4444;">⏱️ 시간 초과: 서버 응답이 없습니다.</div>';
         } else if (error.message.includes('인증')) {
@@ -6053,7 +6049,7 @@ function renderFilterDocumentList() {
     const documentList = document.getElementById('filterDocumentList');
 
     if (!documentList) {
-        console.warn('filterDocumentList element not found');
+        logger.warn('filterDocumentList element not found');
         return;
     }
 
@@ -6240,7 +6236,7 @@ async function loadSuggestedQuestions() {
             }
         }
     } catch (error) {
-        console.error('Error loading suggested questions:', error);
+        logger.error('Error loading suggested questions:', error);
     }
 }
 
@@ -6270,7 +6266,7 @@ async function refreshSuggestedQuestions() {
             listElement.style.opacity = '1';
         }
     } catch (error) {
-        console.error('Error refreshing suggested questions:', error);
+        logger.error('Error refreshing suggested questions:', error);
     } finally {
         // Remove animation after it completes
         setTimeout(() => {
@@ -6383,7 +6379,7 @@ async function initGroupManagement() {
         updateFilterTabCounts();
 
     } catch (error) {
-        console.error('Failed to initialize group management:', error);
+        logger.error('Failed to initialize group management:', error);
     }
 }
 
@@ -6601,7 +6597,7 @@ async function loadFilterOrgInfo() {
             filterOrgName.textContent = '조직 없음';
         }
     } catch (error) {
-        console.error('Failed to load organization info:', error);
+        logger.error('Failed to load organization info:', error);
         filterOrgName.textContent = '로드 실패';
     }
 }
@@ -6617,7 +6613,7 @@ async function loadHybridRagStatus() {
             logger.info(`✅ Hybrid RAG status loaded: ${isHybridRagEnabled ? 'enabled' : 'disabled'}`);
         }
     } catch (error) {
-        console.error('Failed to load Hybrid RAG status:', error);
+        logger.error('Failed to load Hybrid RAG status:', error);
         // Default to false on error
         isHybridRagEnabled = false;
     }
@@ -6630,7 +6626,7 @@ async function loadGroupsIntoFilter() {
     try {
         // Check if groupManager exists (may not be initialized if elements are missing)
         if (!groupManager) {
-            console.warn('Group manager not initialized - skipping group filter load');
+            logger.warn('Group manager not initialized - skipping group filter load');
             return;
         }
 
@@ -6664,7 +6660,7 @@ async function loadGroupsIntoFilter() {
             updateFilterTabCounts();
         }
     } catch (error) {
-        console.error('Failed to load groups into filter:', error);
+        logger.error('Failed to load groups into filter:', error);
     }
 }
 
@@ -6686,7 +6682,7 @@ async function loadGroupTree() {
             });
         }
     } catch (error) {
-        console.error('Failed to load group tree:', error);
+        logger.error('Failed to load group tree:', error);
     }
 }
 
@@ -6744,7 +6740,7 @@ async function handleGroupUpdate() {
 
         alert('그룹이 업데이트되었습니다.');
     } catch (error) {
-        console.error('Failed to update group:', error);
+        logger.error('Failed to update group:', error);
         alert('그룹 업데이트 실패: ' + error.message);
     }
 }
@@ -6775,7 +6771,7 @@ async function handleGroupDelete() {
 
         alert('그룹이 삭제되었습니다.');
     } catch (error) {
-        console.error('Failed to delete group:', error);
+        logger.error('Failed to delete group:', error);
         alert('그룹 삭제 실패: ' + error.message);
     }
 }
@@ -6807,7 +6803,7 @@ async function handleGroupCreate() {
 
         alert('그룹이 생성되었습니다.');
     } catch (error) {
-        console.error('Failed to create group:', error);
+        logger.error('Failed to create group:', error);
         alert('그룹 생성 실패: ' + error.message);
     }
 }
@@ -6887,7 +6883,7 @@ async function loadGroupDocuments(groupId) {
         // Load all documents into the assign select
         await loadAllDocumentsForAssign();
     } catch (error) {
-        console.error('Failed to load group documents:', error);
+        logger.error('Failed to load group documents:', error);
     }
 }
 
@@ -6904,7 +6900,7 @@ async function updateGroupDocCount(groupId) {
             }
         }
     } catch (error) {
-        console.error('Failed to update group doc count:', error);
+        logger.error('Failed to update group doc count:', error);
     }
 }
 
@@ -6926,7 +6922,7 @@ async function loadAllDocumentsForAssign() {
             try {
                 assignedDocs = await groupManager.getGroupDocuments(selectedGroupForEdit);
             } catch (error) {
-                console.error('Failed to load assigned documents:', error);
+                logger.error('Failed to load assigned documents:', error);
             }
         }
 
@@ -6948,7 +6944,7 @@ async function loadAllDocumentsForAssign() {
             select.innerHTML = '<option>문서가 없습니다</option>';
         }
     } catch (error) {
-        console.error('Failed to load documents:', error);
+        logger.error('Failed to load documents:', error);
     }
 }
 
@@ -6982,7 +6978,7 @@ async function handleDocumentAssign() {
 
         alert(`${selectedDocs.length}개 문서가 할당되었습니다.`);
     } catch (error) {
-        console.error('Failed to assign documents:', error);
+        logger.error('Failed to assign documents:', error);
         alert('문서 할당 실패: ' + error.message);
     }
 }
@@ -7009,7 +7005,7 @@ async function showVersionModal(filename) {
     const versionsList = document.getElementById('versionsList');
 
     if (!modal || !filenameElement || !versionsList) {
-        console.error('Version modal elements not found');
+        logger.error('Version modal elements not found');
         return;
     }
 
@@ -7092,7 +7088,7 @@ async function loadVersions(filename) {
         `).join('');
 
     } catch (error) {
-        console.error('Error loading versions:', error);
+        logger.error('Error loading versions:', error);
         versionsList.innerHTML = `
             <div class="empty-state">
                 <p>버전 목록을 불러오는데 실패했습니다</p>
@@ -7157,7 +7153,7 @@ async function compareVersions(filename, version1, version2) {
         showComparisonModal(comparison);
 
     } catch (error) {
-        console.error('Error comparing versions:', error);
+        logger.error('Error comparing versions:', error);
         showUploadStatus(`✗ 비교 실패: ${error.message}`, 'error');
     }
 }
@@ -7168,7 +7164,7 @@ function showComparisonModal(comparison) {
     const content = document.getElementById('comparisonContent');
 
     if (!modal || !content) {
-        console.error('Comparison modal elements not found');
+        logger.error('Comparison modal elements not found');
         return;
     }
 
@@ -7519,7 +7515,7 @@ async function loadSecurityLogs() {
         nextBtn.disabled = (currentLogsPage + 1) * logsPerPage >= data.total_count;
 
     } catch (error) {
-        console.error('Failed to load security logs:', error);
+        logger.error('Failed to load security logs:', error);
         logsTableBody.innerHTML = '<tr><td colspan="6" class="loading">로그 로딩 실패: ' + error.message + '</td></tr>';
     }
 }
@@ -7662,7 +7658,7 @@ async function saveUserPreferences() {
             return true;
         }
     } catch (error) {
-        console.error('사용자 설정 저장 실패:', error);
+        logger.error('사용자 설정 저장 실패:', error);
     }
     return false;
 }
@@ -7766,7 +7762,7 @@ async function downloadDocument(filename, event) {
 
         showSuccess(`${filename} 다운로드 완료`);
     } catch (error) {
-        console.error('Download error:', error);
+        logger.error('Download error:', error);
         showError(error.message || '파일 다운로드 중 오류가 발생했습니다.');
     }
 }
@@ -7830,7 +7826,7 @@ async function downloadDocumentAsPDF(filename, event) {
 
         showSuccess(`${pdfFilename} 다운로드 완료`);
     } catch (error) {
-        console.error('PDF download error:', error);
+        logger.error('PDF download error:', error);
         showError(error.message || 'PDF 다운로드 중 오류가 발생했습니다.');
     }
 }

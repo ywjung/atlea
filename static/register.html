@@ -6,35 +6,10 @@
     <title>회원가입 - AI 챗봇</title>
     <link rel="stylesheet" href="/static/auth.css">
     <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-    <!-- Google reCAPTCHA v3 -->
-    <script>
-        // reCAPTCHA Site Key를 서버에서 가져옴
-        window.RECAPTCHA_SITE_KEY = null;
 
-        // Site Key 로드 함수
-        async function loadRecaptchaSiteKey() {
-            try {
-                // 관리자 API로부터 site key 가져오기 (인증 불필요)
-                const response = await fetch('/api/admin/captcha');
-                if (response.ok) {
-                    const data = await response.json();
-                    if (data.site_key && data.site_key !== '설정되지 않음') {
-                        window.RECAPTCHA_SITE_KEY = data.site_key;
-
-                        // reCAPTCHA 스크립트 동적 로드
-                        const script = document.createElement('script');
-                        script.src = `https://www.google.com/recaptcha/api.js?render=${window.RECAPTCHA_SITE_KEY}`;
-                        document.head.appendChild(script);
-                    }
-                }
-            } catch (error) {
-                console.error('Failed to load reCAPTCHA site key:', error);
-            }
-        }
-
-        // 페이지 로드 시 site key 로드
-        loadRecaptchaSiteKey();
-    </script>
+    <!-- Logger System -->
+    <script src="/static/env-config.js?v=1"></script>
+    <script src="/static/logger.js?v=1"></script>
 </head>
 <body>
     <div class="auth-container">
@@ -115,6 +90,42 @@
                 >
             </div>
 
+            <!-- CAPTCHA 영역 -->
+            <div id="captchaContainer" class="form-group" style="display: none;">
+                <label for="captchaAnswer">보안 확인 <span class="required">*</span></label>
+                <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
+                    <div style="
+                        flex: 1;
+                        display: flex;
+                        justify-content: center;
+                        align-items: center;
+                        background: #f5f5f5;
+                        border: 2px solid #ddd;
+                        border-radius: 8px;
+                        padding: 8px;
+                        min-height: 80px;
+                    ">
+                        <img id="captchaImage" src="" alt="CAPTCHA 이미지" style="
+                            max-width: 100%;
+                            height: auto;
+                            display: block;
+                        ">
+                    </div>
+                    <button type="button" onclick="refreshCaptcha()" style="
+                        padding: 12px 16px;
+                        background: #4CAF50;
+                        color: white;
+                        border: none;
+                        border-radius: 8px;
+                        cursor: pointer;
+                        font-size: 20px;
+                    " title="새로고침">🔄</button>
+                </div>
+                <input type="number" id="captchaAnswer" name="captchaAnswer" class="form-input"
+                       placeholder="위 이미지의 답을 입력하세요">
+                <input type="hidden" id="captchaId" name="captchaId">
+            </div>
+
             <button type="submit" class="btn btn-primary btn-block" id="registerBtn">
                 회원가입
             </button>
@@ -125,7 +136,7 @@
         </div>
     </div>
 
-    <script src="/static/auth.js"></script>
+    <script src="/static/auth.js?v=2025-12-31-SIMPLE-CAPTCHA"></script>
     <script>
         const form = document.getElementById('registerForm');
         const registerBtn = document.getElementById('registerBtn');
@@ -134,10 +145,46 @@
         const passwordInput = document.getElementById('password');
         const confirmPasswordInput = document.getElementById('confirmPassword');
 
+        // CAPTCHA 관련 전역 변수
+        let currentCaptchaId = null;
+
         // 이미 로그인된 경우 메인 페이지로 리다이렉트
         if (Auth.isAuthenticated()) {
             window.location.href = '/';
         }
+
+        // CAPTCHA 로드 및 활성화 확인
+        async function loadCaptcha() {
+            try {
+                const captchaData = await Auth.generateCaptcha('register');
+
+                if (captchaData.enabled) {
+                    // CAPTCHA 활성화됨
+                    currentCaptchaId = captchaData.captcha_id;
+                    document.getElementById('captchaImage').src = captchaData.image;
+                    document.getElementById('captchaId').value = captchaData.captcha_id;
+                    document.getElementById('captchaContainer').style.display = 'block';
+                } else {
+                    // CAPTCHA 비활성화됨
+                    document.getElementById('captchaContainer').style.display = 'none';
+                }
+            } catch (error) {
+                logger.error('CAPTCHA 로드 실패:', error);
+                // 에러 시 CAPTCHA 숨김
+                document.getElementById('captchaContainer').style.display = 'none';
+            }
+        }
+
+        // CAPTCHA 새로고침
+        async function refreshCaptcha() {
+            document.getElementById('captchaAnswer').value = '';
+            await loadCaptcha();
+        }
+
+        // 페이지 로드 시 CAPTCHA 로드
+        document.addEventListener('DOMContentLoaded', () => {
+            loadCaptcha();
+        });
 
         // 비밀번호 실시간 검증
         passwordInput.addEventListener('input', () => {
@@ -207,18 +254,23 @@
             registerBtn.textContent = '가입 처리 중...';
 
             try {
-                // reCAPTCHA 토큰 생성 (활성화된 경우에만)
-                let captchaToken = null;
-                if (window.RECAPTCHA_SITE_KEY && typeof grecaptcha !== 'undefined') {
-                    try {
-                        captchaToken = await grecaptcha.execute(window.RECAPTCHA_SITE_KEY, { action: 'register' });
-                    } catch (captchaError) {
-                        console.error('reCAPTCHA error:', captchaError);
-                        // CAPTCHA 실패 시에도 계속 진행 (서버에서 처리)
+                // CAPTCHA 정보 가져오기
+                let captchaId = null;
+                let captchaAnswer = null;
+
+                if (document.getElementById('captchaContainer').style.display !== 'none') {
+                    captchaId = document.getElementById('captchaId').value;
+                    captchaAnswer = document.getElementById('captchaAnswer').value.trim();
+
+                    if (!captchaAnswer) {
+                        Auth.showError('보안 확인 답을 입력하세요');
+                        registerBtn.disabled = false;
+                        registerBtn.textContent = '회원가입';
+                        return;
                     }
                 }
 
-                await Auth.register(email, username, password, captchaToken);
+                await Auth.register(email, username, password, captchaId, captchaAnswer);
 
                 // 회원가입 성공
                 Auth.showSuccess('회원가입이 완료되었습니다! 로그인 페이지로 이동합니다...');
@@ -230,7 +282,7 @@
                 }, 2000);
 
             } catch (error) {
-                console.error('Registration error:', error);
+                logger.error('Registration error:', error);
                 let errorMessage = error.message;
 
                 // 서버에서 반환한 상세 에러 메시지를 그대로 표시
@@ -244,8 +296,15 @@
                 } else if (errorMessage.includes('사용자명')) {
                     // 사용자명 검증 실패 시 서버의 에러 메시지 표시
                     Auth.showError(errorMessage);
+                } else if (errorMessage.includes('CAPTCHA')) {
+                    Auth.showError(errorMessage);
                 } else {
                     Auth.showError('회원가입에 실패했습니다: ' + errorMessage);
+                }
+
+                // 모든 실패 시 CAPTCHA 새로고침 (활성화된 경우에만)
+                if (document.getElementById('captchaContainer').style.display !== 'none') {
+                    await refreshCaptcha();
                 }
 
                 registerBtn.disabled = false;

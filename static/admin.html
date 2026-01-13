@@ -262,36 +262,126 @@
         /* Stats Grid */
         .stats-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 20px;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 24px;
             margin-bottom: 30px;
         }
 
         .stat-card {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 20px;
-            border-radius: 10px;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            background: white;
+            padding: 24px;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            overflow: hidden;
+            animation: fadeInUp 0.5s ease-out forwards;
+            opacity: 0;
+        }
+
+        .stat-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 12px 24px rgba(0,0,0,0.15);
         }
 
         .stat-card h3 {
             margin: 0 0 10px 0;
-            font-size: 14px;
-            opacity: 0.9;
+            font-size: 0.85rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
 
         .stat-card .value {
-            font-size: 36px;
-            font-weight: bold;
-            margin: 0;
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin: 10px 0;
+            line-height: 1;
         }
 
         .stat-card .subtext {
-            margin-top: 10px;
-            font-size: 12px;
-            opacity: 0.8;
+            margin-top: 8px;
+            font-size: 0.875rem;
+            opacity: 0.7;
         }
+
+        /* Progress Bar for percentage values */
+        .progress-bar {
+            width: 100%;
+            height: 6px;
+            background: rgba(0, 0, 0, 0.1);
+            border-radius: 10px;
+            margin-top: 12px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .progress-fill {
+            height: 100%;
+            border-radius: 10px;
+            transition: width 1.5s ease-out;
+            width: 0%;
+        }
+
+        /* Trend Indicator */
+        .trend-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 0.875rem;
+            font-weight: 600;
+            margin-left: 8px;
+            padding: 2px 8px;
+            border-radius: 12px;
+            background: rgba(0,0,0,0.05);
+        }
+
+        .trend-up {
+            color: #22c55e;
+        }
+
+        .trend-down {
+            color: #ef4444;
+        }
+
+        /* Stagger Animation Delays */
+        .stat-card:nth-child(1) { animation-delay: 0.05s; }
+        .stat-card:nth-child(2) { animation-delay: 0.1s; }
+        .stat-card:nth-child(3) { animation-delay: 0.15s; }
+        .stat-card:nth-child(4) { animation-delay: 0.2s; }
+        .stat-card:nth-child(5) { animation-delay: 0.25s; }
+
+        /* Animations */
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.8; }
+        }
+
+        @keyframes shimmer {
+            0% { background-position: -1000px 0; }
+            100% { background-position: 1000px 0; }
+        }
+
 
         /* Users Table */
         .users-table-container {
@@ -1261,6 +1351,10 @@
             background: #f0f4ff !important;
         }
     </style>
+
+    <!-- Logger System -->
+    <script src="/static/env-config.js?v=1"></script>
+    <script src="/static/logger.js?v=1"></script>
 </head>
 <body>
     <!-- Security Check: Immediate authentication verification -->
@@ -1404,51 +1498,247 @@
         <!-- Dashboard Tab -->
         <div id="dashboard-tab" class="tab-content active">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                <h2 style="margin: 0;">시스템 통계</h2>
-                <button class="btn btn-primary" onclick="loadDashboard(true)" style="padding: 8px 16px;">
-                    🔄 새로고침
-                </button>
+                <h2 style="margin: 0;">📊 시스템 통계</h2>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <span id="last-update-time" style="font-size: 0.85em; color: #666;"></span>
+                    <button class="btn btn-primary" onclick="loadDashboard(true)" style="padding: 8px 16px;">
+                        🔄 새로고침
+                    </button>
+                </div>
             </div>
-            <div class="stats-grid">
-                <div class="stat-card">
-                    <h3>전체 사용자</h3>
-                    <p class="value" id="stat-total-users">0</p>
-                    <p class="subtext">등록된 모든 사용자</p>
+
+            <!-- 사용자 통계 -->
+            <div style="margin-bottom: 24px;">
+                <h3 style="color: #667eea; margin-bottom: 16px; font-size: 1.2em; font-weight: 700;">
+                    <span style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
+                        👥 사용자 및 세션
+                    </span>
+                </h3>
+                <div class="stats-grid">
+                    <div class="stat-card" style="background: linear-gradient(135deg, #f8f9ff 0%, #ffffff 100%);">
+                        <div style="position: absolute; top: 0; left: 0; right: 0; height: 4px; background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);"></div>
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                            <div>
+                                <h3 style="color: #667eea;">👤 전체 사용자</h3>
+                                <p class="value" id="stat-total-users" style="color: #667eea;" data-target="0">0</p>
+                                <p class="subtext" style="color: #64748b;">등록된 모든 사용자</p>
+                            </div>
+                            <div style="font-size: 2.5em; opacity: 0.15;">👥</div>
+                        </div>
+                    </div>
+                    <div class="stat-card" style="background: linear-gradient(135deg, #f0fdf4 0%, #ffffff 100%);">
+                        <div style="position: absolute; top: 0; left: 0; right: 0; height: 4px; background: linear-gradient(90deg, #22c55e 0%, #10b981 100%);"></div>
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                            <div>
+                                <h3 style="color: #22c55e;">✅ 활성 사용자</h3>
+                                <p class="value" id="stat-active-users" style="color: #22c55e;" data-target="0">0</p>
+                                <p class="subtext" style="color: #64748b;">활성화된 계정</p>
+                            </div>
+                            <div style="font-size: 2.5em; opacity: 0.15;">✓</div>
+                        </div>
+                    </div>
+                    <div class="stat-card" style="background: linear-gradient(135deg, #fffbeb 0%, #ffffff 100%);">
+                        <div style="position: absolute; top: 0; left: 0; right: 0; height: 4px; background: linear-gradient(90deg, #f59e0b 0%, #d97706 100%);"></div>
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                            <div>
+                                <h3 style="color: #f59e0b;">⭐ 관리자</h3>
+                                <p class="value" id="stat-admin-users" style="color: #f59e0b;" data-target="0">0</p>
+                                <p class="subtext" style="color: #64748b;">관리자 권한</p>
+                            </div>
+                            <div style="font-size: 2.5em; opacity: 0.15;">👑</div>
+                        </div>
+                    </div>
+                    <div class="stat-card" style="background: linear-gradient(135deg, #eff6ff 0%, #ffffff 100%);">
+                        <div style="position: absolute; top: 0; left: 0; right: 0; height: 4px; background: linear-gradient(90deg, #3b82f6 0%, #2563eb 100%);"></div>
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                            <div>
+                                <h3 style="color: #3b82f6;">🔐 활성 세션</h3>
+                                <p class="value" id="stat-sessions" style="color: #3b82f6;" data-target="0">0</p>
+                                <p class="subtext" style="color: #64748b;">현재 로그인 중</p>
+                            </div>
+                            <div style="font-size: 2.5em; opacity: 0.15;">🔗</div>
+                        </div>
+                    </div>
+                    <div class="stat-card" style="background: linear-gradient(135deg, #f5f3ff 0%, #ffffff 100%);">
+                        <div style="position: absolute; top: 0; left: 0; right: 0; height: 4px; background: linear-gradient(90deg, #8b5cf6 0%, #7c3aed 100%);"></div>
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                            <div>
+                                <h3 style="color: #8b5cf6;">📅 최근 로그인</h3>
+                                <p class="value" id="stat-recent-logins" style="color: #8b5cf6;" data-target="0">0</p>
+                                <p class="subtext" style="color: #64748b;">24시간 내</p>
+                            </div>
+                            <div style="font-size: 2.5em; opacity: 0.15;">⏰</div>
+                        </div>
+                    </div>
                 </div>
-                <div class="stat-card">
-                    <h3>활성 사용자</h3>
-                    <p class="value" id="stat-active-users">0</p>
-                    <p class="subtext">현재 활성화된 사용자</p>
+            </div>
+
+            <!-- 피드백 및 만족도 -->
+            <div style="margin-bottom: 24px;">
+                <h3 style="color: #22c55e; margin-bottom: 16px; font-size: 1.2em; font-weight: 700;">
+                    <span style="background: linear-gradient(135deg, #22c55e 0%, #10b981 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
+                        💬 사용자 피드백
+                    </span>
+                </h3>
+                <div class="stats-grid">
+                    <div class="stat-card" style="background: linear-gradient(135deg, #f0fdf4 0%, #ffffff 100%);">
+                        <div style="position: absolute; top: 0; left: 0; right: 0; height: 4px; background: linear-gradient(90deg, #22c55e 0%, #10b981 100%);"></div>
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                            <div style="flex: 1;">
+                                <h3 style="color: #22c55e;">👍 긍정 피드백</h3>
+                                <p class="value" id="stat-positive-feedback" style="color: #22c55e;" data-target="0">0</p>
+                                <p class="subtext" style="color: #64748b;">도움이 된 답변</p>
+                            </div>
+                            <div style="font-size: 2.5em; opacity: 0.15;">😊</div>
+                        </div>
+                    </div>
+                    <div class="stat-card" style="background: linear-gradient(135deg, #fef2f2 0%, #ffffff 100%);">
+                        <div style="position: absolute; top: 0; left: 0; right: 0; height: 4px; background: linear-gradient(90deg, #ef4444 0%, #dc2626 100%);"></div>
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                            <div style="flex: 1;">
+                                <h3 style="color: #ef4444;">👎 부정 피드백</h3>
+                                <p class="value" id="stat-negative-feedback" style="color: #ef4444;" data-target="0">0</p>
+                                <p class="subtext" style="color: #64748b;">개선 필요</p>
+                            </div>
+                            <div style="font-size: 2.5em; opacity: 0.15;">😟</div>
+                        </div>
+                    </div>
+                    <div class="stat-card" style="background: linear-gradient(135deg, #eff6ff 0%, #ffffff 100%);">
+                        <div style="position: absolute; top: 0; left: 0; right: 0; height: 4px; background: linear-gradient(90deg, #3b82f6 0%, #2563eb 100%);"></div>
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                            <div style="flex: 1;">
+                                <h3 style="color: #3b82f6;">📊 만족도</h3>
+                                <p class="value" id="stat-satisfaction-rate" style="color: #3b82f6;" data-target="0">0%</p>
+                                <p class="subtext" style="color: #64748b;">긍정 피드백 비율</p>
+                                <div class="progress-bar">
+                                    <div class="progress-fill" id="satisfaction-progress" style="background: linear-gradient(90deg, #3b82f6 0%, #2563eb 100%);"></div>
+                                </div>
+                            </div>
+                            <div style="font-size: 2.5em; opacity: 0.15;">⭐</div>
+                        </div>
+                    </div>
                 </div>
-                <div class="stat-card">
-                    <h3>관리자 계정</h3>
-                    <p class="value" id="stat-admin-users">0</p>
-                    <p class="subtext">관리자 권한 사용자</p>
+            </div>
+
+            <!-- 문서 및 대화 통계 -->
+            <div style="margin-bottom: 24px;">
+                <h3 style="color: #f59e0b; margin-bottom: 16px; font-size: 1.2em; font-weight: 700;">
+                    <span style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
+                        📚 문서 및 대화
+                    </span>
+                </h3>
+                <div class="stats-grid">
+                    <div class="stat-card" style="background: linear-gradient(135deg, #fffbeb 0%, #ffffff 100%);">
+                        <div style="position: absolute; top: 0; left: 0; right: 0; height: 4px; background: linear-gradient(90deg, #f59e0b 0%, #d97706 100%);"></div>
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                            <div>
+                                <h3 style="color: #f59e0b;">📄 업로드 문서</h3>
+                                <p class="value" id="stat-documents" style="color: #f59e0b;" data-target="0">0</p>
+                                <p class="subtext" style="color: #64748b;">총 업로드된 파일</p>
+                            </div>
+                            <div style="font-size: 2.5em; opacity: 0.15;">📁</div>
+                        </div>
+                    </div>
+                    <div class="stat-card" style="background: linear-gradient(135deg, #f0fdf4 0%, #ffffff 100%);">
+                        <div style="position: absolute; top: 0; left: 0; right: 0; height: 4px; background: linear-gradient(90deg, #10b981 0%, #059669 100%);"></div>
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                            <div>
+                                <h3 style="color: #10b981;">🔍 문서 청크</h3>
+                                <p class="value" id="stat-chunks" style="color: #10b981;" data-target="0">0</p>
+                                <p class="subtext" style="color: #64748b;">인덱싱된 청크</p>
+                            </div>
+                            <div style="font-size: 2.5em; opacity: 0.15;">📑</div>
+                        </div>
+                    </div>
+                    <div class="stat-card" style="background: linear-gradient(135deg, #ecfeff 0%, #ffffff 100%);">
+                        <div style="position: absolute; top: 0; left: 0; right: 0; height: 4px; background: linear-gradient(90deg, #0891b2 0%, #0e7490 100%);"></div>
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                            <div>
+                                <h3 style="color: #0891b2;">💬 총 대화</h3>
+                                <p class="value" id="stat-conversations" style="color: #0891b2;" data-target="0">0</p>
+                                <p class="subtext" style="color: #64748b;">생성된 대화방</p>
+                            </div>
+                            <div style="font-size: 2.5em; opacity: 0.15;">💭</div>
+                        </div>
+                    </div>
                 </div>
-                <div class="stat-card">
-                    <h3>활성 세션</h3>
-                    <p class="value" id="stat-sessions">0</p>
-                    <p class="subtext">현재 로그인 중인 세션</p>
-                </div>
-                <div class="stat-card">
-                    <h3>최근 로그인</h3>
-                    <p class="value" id="stat-recent-logins">0</p>
-                    <p class="subtext">24시간 내 로그인 수</p>
-                </div>
-                <div class="stat-card">
-                    <h3>👍 긍정 피드백</h3>
-                    <p class="value" id="stat-positive-feedback" style="color: #22c55e;">0</p>
-                    <p class="subtext">도움이 된 답변</p>
-                </div>
-                <div class="stat-card">
-                    <h3>👎 부정 피드백</h3>
-                    <p class="value" id="stat-negative-feedback" style="color: #ef4444;">0</p>
-                    <p class="subtext">개선이 필요한 답변</p>
-                </div>
-                <div class="stat-card">
-                    <h3>📊 만족도</h3>
-                    <p class="value" id="stat-satisfaction-rate" style="color: #3b82f6;">0%</p>
-                    <p class="subtext">긍정 피드백 비율</p>
+            </div>
+
+            <!-- Redis 및 시스템 리소스 -->
+            <div style="margin-bottom: 24px;">
+                <h3 style="color: #ef4444; margin-bottom: 16px; font-size: 1.2em; font-weight: 700;">
+                    <span style="background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
+                        🗄️ Redis & 시스템
+                    </span>
+                </h3>
+                <div class="stats-grid">
+                    <div class="stat-card" style="background: linear-gradient(135deg, #fef2f2 0%, #ffffff 100%);">
+                        <div style="position: absolute; top: 0; left: 0; right: 0; height: 4px; background: linear-gradient(90deg, #ef4444 0%, #dc2626 100%);"></div>
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                            <div>
+                                <h3 style="color: #ef4444;">🔑 Redis 키</h3>
+                                <p class="value" id="stat-redis-keys" style="color: #ef4444;" data-target="0">0</p>
+                                <p class="subtext" style="color: #64748b;">저장된 총 키</p>
+                            </div>
+                            <div style="font-size: 2.5em; opacity: 0.15;">🗃️</div>
+                        </div>
+                    </div>
+                    <div class="stat-card" style="background: linear-gradient(135deg, #f0fdf4 0%, #ffffff 100%);">
+                        <div style="position: absolute; top: 0; left: 0; right: 0; height: 4px; background: linear-gradient(90deg, #10b981 0%, #059669 100%);"></div>
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                            <div style="flex: 1;">
+                                <h3 style="color: #10b981;">⚡ 캐시 히트율</h3>
+                                <p class="value" id="stat-cache-hit-rate" style="color: #10b981;" data-target="0">0%</p>
+                                <p class="subtext" style="color: #64748b;">Redis 성능</p>
+                                <div class="progress-bar">
+                                    <div class="progress-fill" id="cache-progress" style="background: linear-gradient(90deg, #10b981 0%, #059669 100%);"></div>
+                                </div>
+                            </div>
+                            <div style="font-size: 2.5em; opacity: 0.15;">📈</div>
+                        </div>
+                    </div>
+                    <div class="stat-card" style="background: linear-gradient(135deg, #eff6ff 0%, #ffffff 100%);">
+                        <div style="position: absolute; top: 0; left: 0; right: 0; height: 4px; background: linear-gradient(90deg, #3b82f6 0%, #2563eb 100%);"></div>
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                            <div style="flex: 1;">
+                                <h3 style="color: #3b82f6;">🖥️ CPU 사용률</h3>
+                                <p class="value" id="stat-cpu-usage" style="color: #3b82f6;" data-target="0">0%</p>
+                                <p class="subtext" style="color: #64748b;">프로세서 부하</p>
+                                <div class="progress-bar">
+                                    <div class="progress-fill" id="cpu-progress" style="background: linear-gradient(90deg, #3b82f6 0%, #2563eb 100%);"></div>
+                                </div>
+                            </div>
+                            <div style="font-size: 2.5em; opacity: 0.15;">⚙️</div>
+                        </div>
+                    </div>
+                    <div class="stat-card" style="background: linear-gradient(135deg, #fffbeb 0%, #ffffff 100%);">
+                        <div style="position: absolute; top: 0; left: 0; right: 0; height: 4px; background: linear-gradient(90deg, #f59e0b 0%, #d97706 100%);"></div>
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                            <div style="flex: 1;">
+                                <h3 style="color: #f59e0b;">💾 메모리</h3>
+                                <p class="value" id="stat-memory-usage" style="color: #f59e0b;" data-target="0">0%</p>
+                                <p class="subtext" style="color: #64748b;">RAM 사용률</p>
+                                <div class="progress-bar">
+                                    <div class="progress-fill" id="memory-progress" style="background: linear-gradient(90deg, #f59e0b 0%, #d97706 100%);"></div>
+                                </div>
+                            </div>
+                            <div style="font-size: 2.5em; opacity: 0.15;">🧠</div>
+                        </div>
+                    </div>
+                    <div class="stat-card" style="background: linear-gradient(135deg, #f5f3ff 0%, #ffffff 100%);">
+                        <div style="position: absolute; top: 0; left: 0; right: 0; height: 4px; background: linear-gradient(90deg, #8b5cf6 0%, #7c3aed 100%);"></div>
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                            <div style="flex: 1;">
+                                <h3 style="color: #8b5cf6;">💿 디스크</h3>
+                                <p class="value" id="stat-disk-usage" style="color: #8b5cf6;" data-target="0">0%</p>
+                                <p class="subtext" style="color: #64748b;">저장소 사용률</p>
+                                <div class="progress-bar">
+                                    <div class="progress-fill" id="disk-progress" style="background: linear-gradient(90deg, #8b5cf6 0%, #7c3aed 100%);"></div>
+                                </div>
+                            </div>
+                            <div style="font-size: 2.5em; opacity: 0.15;">📀</div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -4862,21 +5152,34 @@
         // Debug logging wrapper
         function devLog(...args) {
             if (DEBUG_MODE) {
-                console.log(...args);
+                logger.debug(...args);
             }
         }
 
-        // 관리자 권한 확인
-        if (!Auth.requireAuth() || !Auth.isAdmin()) {
-            alert('관리자 권한이 필요합니다');
-            window.location.href = '/';
-        }
+        // 관리자 권한 확인 (비동기)
+        (async function() {
+            // 먼저 로컬 인증 및 관리자 권한 체크 (빠른 리다이렉트)
+            if (!Auth.requireAuth() || !Auth.isAdmin()) {
+                alert('관리자 권한이 필요합니다');
+                window.location.href = '/';
+                return;
+            }
 
-        // 활동 모니터링 초기화 (자동 로그아웃)
-        Auth.initActivityMonitor();
+            // 서버에서 실제 세션 및 관리자 권한 확인
+            const isValid = await Auth.validateAdmin();
+            if (!isValid) {
+                return; // validateAdmin이 이미 리다이렉트 처리함
+            }
 
-        // 세션 유효성 검증 초기화 (주기적 세션 체크)
-        Auth.startSessionValidation();
+            // 활동 모니터링 초기화 (자동 로그아웃)
+            Auth.initActivityMonitor();
+
+            // 세션 유효성 검증 초기화 (주기적 세션 체크)
+            Auth.startSessionValidation();
+
+            // 초기 대시보드 로드
+            await loadDashboard();
+        })();
 
         const user = Auth.getUser();
         let currentPage = 1;
@@ -4935,7 +5238,7 @@
 
                 // 데이터 유효성 검사
                 if (!data || !data.stats) {
-                    console.error('Invalid dashboard data structure:', data);
+                    logger.error('Invalid dashboard data structure:', data);
                     throw new Error('Invalid data structure received from server');
                 }
 
@@ -4955,24 +5258,83 @@
                 // 피드백 통계 로드
                 await loadFeedbackStats();
 
+                // 시스템 헬스 정보 로드
+                await loadSystemHealth();
+
+                // 문서 및 대화 통계 로드
+                await loadDocumentStats();
+
+                // 최종 업데이트 시간 표시
+                const now = new Date();
+                document.getElementById('last-update-time').textContent =
+                    `마지막 업데이트: ${now.toLocaleTimeString('ko-KR')}`;
+
                 devLog('Dashboard updated successfully');  // 디버깅 로그
             } catch (error) {
-                console.error('Failed to load dashboard:', error);
-                console.error('Error details:', error.message, error.stack);  // 상세 에러 로그
+                logger.error('Failed to load dashboard:', error);
+                logger.error('Error details:', error.message, error.stack);  // 상세 에러 로그
                 Auth.showError('대시보드를 불러오는데 실패했습니다: ' + error.message);
             } finally {
                 setLoading(false);
             }
         }
 
+        // 카운터 애니메이션 헬퍼 함수
+        function animateCounter(element, target, duration = 1000, isPercentage = false, decimals = 0) {
+            const start = 0;
+            const startTime = performance.now();
+
+            function update(currentTime) {
+                const elapsed = currentTime - startTime;
+                const progress = Math.min(elapsed / duration, 1);
+
+                // Easing function (easeOutCubic)
+                const easeProgress = 1 - Math.pow(1 - progress, 3);
+                const current = start + (target - start) * easeProgress;
+
+                if (isPercentage) {
+                    element.textContent = current.toFixed(decimals) + '%';
+                } else {
+                    element.textContent = Math.floor(current).toLocaleString();
+                }
+
+                if (progress < 1) {
+                    requestAnimationFrame(update);
+                } else {
+                    // Final value
+                    if (isPercentage) {
+                        element.textContent = target.toFixed(decimals) + '%';
+                    } else {
+                        element.textContent = target.toLocaleString();
+                    }
+                }
+            }
+
+            requestAnimationFrame(update);
+        }
+
+        // 진행 바 애니메이션 헬퍼 함수
+        function animateProgressBar(elementId, percentage) {
+            const element = document.getElementById(elementId);
+            if (!element) return;
+
+            // 짧은 지연 후 애니메이션 시작 (CSS transition이 적용되도록)
+            setTimeout(() => {
+                element.style.width = Math.min(percentage, 100) + '%';
+            }, 100);
+        }
+
         // 통계 업데이트
         function updateStats(stats) {
             devLog('Updating stats:', stats);  // 디버깅 로그
-            document.getElementById('stat-total-users').textContent = stats.total_users || 0;
-            document.getElementById('stat-active-users').textContent = stats.active_users || 0;
-            document.getElementById('stat-admin-users').textContent = stats.admin_users || 0;
-            document.getElementById('stat-sessions').textContent = stats.active_sessions || 0;
-            document.getElementById('stat-recent-logins').textContent = stats.recent_logins_24h || 0;
+
+            // 카운터 애니메이션 적용
+            animateCounter(document.getElementById('stat-total-users'), stats.total_users || 0);
+            animateCounter(document.getElementById('stat-active-users'), stats.active_users || 0);
+            animateCounter(document.getElementById('stat-admin-users'), stats.admin_users || 0);
+            animateCounter(document.getElementById('stat-sessions'), stats.active_sessions || 0);
+            animateCounter(document.getElementById('stat-recent-logins'), stats.recent_logins_24h || 0);
+
             devLog('Active sessions:', stats.active_sessions, 'Recent logins:', stats.recent_logins_24h);  // 디버깅 로그
         }
 
@@ -4982,17 +5344,122 @@
                 const data = await Auth.apiCall('/api/admin/feedback/stats');
                 devLog('Feedback stats:', data);
 
-                // 피드백 통계 업데이트
-                document.getElementById('stat-positive-feedback').textContent = data.positive_count || 0;
-                document.getElementById('stat-negative-feedback').textContent = data.negative_count || 0;
-                document.getElementById('stat-satisfaction-rate').textContent = data.positive_ratio ? data.positive_ratio.toFixed(1) + '%' : '0%';
+                // 피드백 통계 업데이트 (카운터 애니메이션 적용)
+                animateCounter(document.getElementById('stat-positive-feedback'), data.positive_count || 0);
+                animateCounter(document.getElementById('stat-negative-feedback'), data.negative_count || 0);
+
+                const satisfactionRate = data.positive_ratio || 0;
+                animateCounter(document.getElementById('stat-satisfaction-rate'), satisfactionRate, 1000, true, 1);
+                animateProgressBar('satisfaction-progress', satisfactionRate);
 
             } catch (error) {
-                console.error('Failed to load feedback stats:', error);
+                logger.error('Failed to load feedback stats:', error);
                 // 피드백 통계 로드 실패 시 0으로 표시
                 document.getElementById('stat-positive-feedback').textContent = '0';
                 document.getElementById('stat-negative-feedback').textContent = '0';
                 document.getElementById('stat-satisfaction-rate').textContent = '0%';
+                animateProgressBar('satisfaction-progress', 0);
+            }
+        }
+
+        // 시스템 헬스 정보 로드
+        async function loadSystemHealth() {
+            try {
+                const response = await fetch('/health');
+                const data = await response.json();
+                devLog('System health:', data);
+
+                // Redis 통계
+                const redisInfo = await Auth.apiCall('/api/admin/redis-stats').catch(() => ({
+                    total_keys: 0,
+                    keyspace_hits: 0,
+                    keyspace_misses: 0
+                }));
+
+                const totalHits = redisInfo.keyspace_hits || 0;
+                const totalMisses = redisInfo.keyspace_misses || 0;
+                const hitRate = totalHits + totalMisses > 0
+                    ? parseFloat(((totalHits / (totalHits + totalMisses)) * 100).toFixed(1))
+                    : 0;
+
+                // Redis 키와 캐시 히트율 애니메이션
+                animateCounter(document.getElementById('stat-redis-keys'), redisInfo.total_keys || 0);
+                animateCounter(document.getElementById('stat-cache-hit-rate'), hitRate, 1000, true, 1);
+                animateProgressBar('cache-progress', hitRate);
+
+                // 시스템 리소스
+                if (data.system) {
+                    const cpuPercent = parseFloat((data.system.cpu_percent || 0).toFixed(1));
+                    const memoryPercent = parseFloat((data.system.memory_percent || 0).toFixed(1));
+                    const diskPercent = parseFloat((data.system.disk_percent || 0).toFixed(1));
+
+                    // 리소스 사용률 카운터 애니메이션
+                    animateCounter(document.getElementById('stat-cpu-usage'), cpuPercent, 1000, true, 1);
+                    animateCounter(document.getElementById('stat-memory-usage'), memoryPercent, 1000, true, 1);
+                    animateCounter(document.getElementById('stat-disk-usage'), diskPercent, 1000, true, 1);
+
+                    // 진행 바 애니메이션
+                    animateProgressBar('cpu-progress', cpuPercent);
+                    animateProgressBar('memory-progress', memoryPercent);
+                    animateProgressBar('disk-progress', diskPercent);
+
+                    // 리소스 사용률에 따른 색상 변경
+                    updateResourceColor('stat-cpu-usage', cpuPercent);
+                    updateResourceColor('stat-memory-usage', memoryPercent);
+                    updateResourceColor('stat-disk-usage', diskPercent);
+                }
+
+            } catch (error) {
+                logger.error('Failed to load system health:', error);
+                document.getElementById('stat-redis-keys').textContent = '0';
+                document.getElementById('stat-cache-hit-rate').textContent = '0%';
+                document.getElementById('stat-cpu-usage').textContent = '0%';
+                document.getElementById('stat-memory-usage').textContent = '0%';
+                document.getElementById('stat-disk-usage').textContent = '0%';
+                animateProgressBar('cache-progress', 0);
+                animateProgressBar('cpu-progress', 0);
+                animateProgressBar('memory-progress', 0);
+                animateProgressBar('disk-progress', 0);
+            }
+        }
+
+        // 리소스 사용률에 따른 색상 변경
+        function updateResourceColor(elementId, percentage) {
+            const element = document.getElementById(elementId);
+            if (!element) return;
+
+            if (percentage >= 90) {
+                element.style.color = '#ef4444';  // 위험 (빨강)
+            } else if (percentage >= 75) {
+                element.style.color = '#f59e0b';  // 경고 (주황)
+            } else if (percentage >= 50) {
+                element.style.color = '#3b82f6';  // 보통 (파랑)
+            } else {
+                element.style.color = '#22c55e';  // 양호 (초록)
+            }
+        }
+
+        // 문서 및 대화 통계 로드
+        async function loadDocumentStats() {
+            try {
+                const stats = await Auth.apiCall('/api/admin/document-stats').catch(() => ({
+                    total_documents: 0,
+                    total_chunks: 0,
+                    total_conversations: 0
+                }));
+
+                devLog('Document stats:', stats);
+
+                // 문서 통계 애니메이션
+                animateCounter(document.getElementById('stat-documents'), stats.total_documents || 0);
+                animateCounter(document.getElementById('stat-chunks'), stats.total_chunks || 0);
+                animateCounter(document.getElementById('stat-conversations'), stats.total_conversations || 0);
+
+            } catch (error) {
+                logger.error('Failed to load document stats:', error);
+                document.getElementById('stat-documents').textContent = '0';
+                document.getElementById('stat-chunks').textContent = '0';
+                document.getElementById('stat-conversations').textContent = '0';
             }
         }
 
@@ -5162,8 +5629,8 @@
                 container.innerHTML = filterInfo + logsHtml;
                 devLog('Container updated successfully');
                 } catch (error) {
-                    console.error('Error rendering logs:', error);
-                    console.error('Error stack:', error.stack);
+                    logger.error('Error rendering logs:', error);
+                    logger.error('Error stack:', error.stack);
                     container.innerHTML = `
                         <p style="text-align: center; padding: 40px; color: var(--danger-color);">
                             로그 표시 중 오류가 발생했습니다: ${error.message}
@@ -5199,7 +5666,7 @@
 
             const dropdown = document.getElementById('dropdown-' + dropdownId);
             if (!dropdown) {
-                console.error('Dropdown not found:', 'dropdown-' + dropdownId);
+                logger.error('Dropdown not found:', 'dropdown-' + dropdownId);
                 return;
             }
 
@@ -5320,7 +5787,7 @@
                 dashboardCache.stats = stats;
                 updateStats(stats);
             } catch (error) {
-                console.error('Failed to load stats:', error);
+                logger.error('Failed to load stats:', error);
                 Auth.showError('통계를 불러오는데 실패했습니다');
             }
         }
@@ -5335,7 +5802,7 @@
                 dashboardCache.users = data;
                 updateUsers(data);
             } catch (error) {
-                console.error('Failed to load users:', error);
+                logger.error('Failed to load users:', error);
                 Auth.showError('사용자 목록을 불러오는데 실패했습니다');
             } finally {
                 setLoading(false);
@@ -5363,7 +5830,7 @@
                 setTimeout(() => Auth.hideSuccess(), 3000);
                 await loadUsers();
             } catch (error) {
-                console.error('Admin action failed:', error);
+                logger.error('Admin action failed:', error);
                 Auth.showError(error.message || '작업에 실패했습니다');
             }
         }
@@ -5464,7 +5931,7 @@
                     throw new Error(data.message || '비밀번호 재설정에 실패했습니다');
                 }
             } catch (error) {
-                console.error('Password reset failed:', error);
+                logger.error('Password reset failed:', error);
                 resultDiv.innerHTML = `
                     <div style="padding: 16px; background: #f8d7da; border: 1px solid #f5c6cb; border-radius: 6px; color: #721c24;">
                         ❌ ${error.message || '비밀번호 재설정에 실패했습니다'}
@@ -5485,7 +5952,7 @@
                 document.execCommand('copy');
                 Auth.showSuccess('임시 비밀번호가 클립보드에 복사되었습니다');
             } catch (err) {
-                console.error('Failed to copy:', err);
+                logger.error('Failed to copy:', err);
                 Auth.showError('복사에 실패했습니다. 수동으로 복사해주세요.');
             }
         }
@@ -5530,7 +5997,7 @@
                     Auth.showSuccess('SMTP 설정이 로드되었습니다');
                 }
             } catch (error) {
-                console.error('Failed to load SMTP settings:', error);
+                logger.error('Failed to load SMTP settings:', error);
                 Auth.showError('SMTP 설정 로드에 실패했습니다');
             }
         }
@@ -5575,7 +6042,7 @@
                     throw new Error(data.message || 'SMTP 연결 테스트 실패');
                 }
             } catch (error) {
-                console.error('SMTP test failed:', error);
+                logger.error('SMTP test failed:', error);
                 resultDiv.innerHTML = `
                     <div style="padding: 12px; background: #f8d7da; border: 1px solid #f5c6cb; border-radius: 6px; color: #721c24;">
                         ❌ ${error.message || 'SMTP 연결 테스트 실패'}
@@ -5642,7 +6109,7 @@
                     throw new Error(data.message || 'SMTP 설정 저장 실패');
                 }
             } catch (error) {
-                console.error('SMTP save failed:', error);
+                logger.error('SMTP save failed:', error);
                 resultDiv.innerHTML = `
                     <div style="padding: 12px; background: #f8d7da; border: 1px solid #f5c6cb; border-radius: 6px; color: #721c24;">
                         ❌ ${error.message || 'SMTP 설정 저장 실패'}
@@ -5701,7 +6168,7 @@
                 }
 
             } catch (error) {
-                console.error('Failed to load password reset method:', error);
+                logger.error('Failed to load password reset method:', error);
             }
         }
 
@@ -5718,7 +6185,7 @@
                     `;
                 }
             } catch (error) {
-                console.error('Failed to load SMTP status:', error);
+                logger.error('Failed to load SMTP status:', error);
             }
         }
 
@@ -5769,7 +6236,7 @@
                 Auth.showSuccess(data.message);
 
             } catch (error) {
-                console.error('Failed to update password reset method:', error);
+                logger.error('Failed to update password reset method:', error);
                 Auth.showError(error.message || '설정 업데이트에 실패했습니다');
 
                 // 실패 시 이전 선택으로 되돌리기
@@ -5855,7 +6322,7 @@
 
                 updateLogs(data);
             } catch (error) {
-                console.error('Failed to load logs:', error);
+                logger.error('Failed to load logs:', error);
                 document.getElementById('logsContainer').innerHTML = `
                     <p style="text-align: center; padding: 40px; color: var(--danger-color);">
                         로그를 불러오는데 실패했습니다
@@ -5972,7 +6439,7 @@
 
                 devLog(`✅ CSV exported: ${allLogsData.length} logs`);
             } catch (error) {
-                console.error('CSV export failed:', error);
+                logger.error('CSV export failed:', error);
                 alert('CSV 내보내기에 실패했습니다: ' + error.message);
             }
         }
@@ -6034,7 +6501,7 @@
                 updateLoginHistoryStats(data.history || []);
 
             } catch (error) {
-                console.error('Failed to load login history:', error);
+                logger.error('Failed to load login history:', error);
                 document.getElementById('loginHistoryTableBody').innerHTML = `
                     <tr>
                         <td colspan="5" style="text-align: center; padding: 40px; color: var(--danger-color);">
@@ -6207,7 +6674,7 @@
                     select.innerHTML = '<option value="">전체 사용자</option>' + options;
                 }
             } catch (error) {
-                console.error('Failed to load users for filter:', error);
+                logger.error('Failed to load users for filter:', error);
             }
         }
 
@@ -6293,10 +6760,10 @@
                 // 최근 검색 기록 로드
                 await loadRecentSearches();
 
-                console.log('Performance metrics loaded successfully');
+                logger.debug('Performance metrics loaded successfully');
 
             } catch (error) {
-                console.error('Failed to load performance metrics:', error);
+                logger.error('Failed to load performance metrics:', error);
 
                 // 오류 표시
                 document.getElementById('metric-total-searches').textContent = 'Error';
@@ -6353,7 +6820,7 @@
                 }).join('');
 
             } catch (error) {
-                console.error('Failed to load recent searches:', error);
+                logger.error('Failed to load recent searches:', error);
                 const tbody = document.getElementById('recent-searches-tbody');
                 tbody.innerHTML = `
                     <tr>
@@ -6375,7 +6842,7 @@
                 const webhooks = await Auth.apiCall('/api/auth/webhooks');
                 displayWebhooks(webhooks);
             } catch (error) {
-                console.error('Failed to load webhooks:', error);
+                logger.error('Failed to load webhooks:', error);
                 document.getElementById('webhooksListContainer').innerHTML = `
                     <p style="text-align: center; padding: 40px; color: var(--danger-color);">
                         웹훅 목록을 불러오는데 실패했습니다
@@ -6493,7 +6960,7 @@
 
                 document.getElementById('webhookModal').style.display = 'flex';
             } catch (error) {
-                console.error('Failed to load webhook:', error);
+                logger.error('Failed to load webhook:', error);
                 Auth.showError('웹훅 정보를 불러오는데 실패했습니다');
             }
         }
@@ -6594,7 +7061,7 @@
                 closeWebhookModal();
                 loadWebhooks();
             } catch (error) {
-                console.error('Failed to save webhook:', error);
+                logger.error('Failed to save webhook:', error);
                 Auth.showError(error.message || '웹훅 저장에 실패했습니다');
             }
         }
@@ -6613,7 +7080,7 @@
                 setTimeout(() => Auth.hideSuccess(), 3000);
                 loadWebhooks();
             } catch (error) {
-                console.error('Failed to delete webhook:', error);
+                logger.error('Failed to delete webhook:', error);
                 Auth.showError('웹훅 삭제에 실패했습니다');
             }
         }
@@ -6638,7 +7105,7 @@
                 }, 5000);
                 loadWebhooks();
             } catch (error) {
-                console.error('Failed to test webhook:', error);
+                logger.error('Failed to test webhook:', error);
                 Auth.showError('웹훅 테스트에 실패했습니다');
             }
         }
@@ -6730,7 +7197,7 @@
 
                 document.getElementById('webhookDetailsModal').style.display = 'flex';
             } catch (error) {
-                console.error('Failed to load webhook details:', error);
+                logger.error('Failed to load webhook details:', error);
                 Auth.showError('웹훅 상세 정보를 불러오는데 실패했습니다');
             }
         }
@@ -6760,7 +7227,7 @@
                     Auth.updateSettings(settings);
                 }
             } catch (error) {
-                console.error('Failed to load settings:', error);
+                logger.error('Failed to load settings:', error);
                 Auth.showError('설정을 불러오는데 실패했습니다: ' + error.message, 'settings-error');
             }
         }
@@ -6803,7 +7270,7 @@
                     Auth.hideSuccess('settings-success');
                 }, 3000);
             } catch (error) {
-                console.error('Failed to save settings:', error);
+                logger.error('Failed to save settings:', error);
                 Auth.showError('설정 저장에 실패했습니다: ' + error.message, 'settings-error');
             }
         });
@@ -6838,7 +7305,7 @@
                 document.getElementById('audit-stat-active-users').textContent =
                     Object.keys(stats.daily).length || 0;
             } catch (error) {
-                console.error('Failed to load audit stats:', error);
+                logger.error('Failed to load audit stats:', error);
                 Auth.showError('감사 로그 통계를 불러오는데 실패했습니다');
             }
         }
@@ -6862,7 +7329,7 @@
                     select.appendChild(option);
                 });
             } catch (error) {
-                console.error('Failed to load audit actions:', error);
+                logger.error('Failed to load audit actions:', error);
             }
         }
 
@@ -6899,7 +7366,7 @@
                 updateAuditLogsTable(data.logs || []);
                 updateAuditPagination();
             } catch (error) {
-                console.error('Failed to load audit logs:', error);
+                logger.error('Failed to load audit logs:', error);
                 const tbody = document.getElementById('auditLogsTableBody');
                 tbody.innerHTML = `
                     <tr>
@@ -7053,12 +7520,12 @@
                         devLog('🏓 Pong received');
                     }
                 } catch (error) {
-                    console.error('Failed to parse WebSocket message:', error);
+                    logger.error('Failed to parse WebSocket message:', error);
                 }
             };
 
             alertSocket.onerror = (error) => {
-                console.error('❌ WebSocket error:', error);
+                logger.error('❌ WebSocket error:', error);
                 showConnectionStatus(false);
             };
 
@@ -7213,7 +7680,7 @@
         // ========================================
 
         // 초기 로드 (통합 대시보드 API 사용)
-        loadDashboard();
+        // loadDashboard(); // 이미 비동기 권한 확인 함수에서 호출됨
 
         // 감사 로그 작업 유형 목록 로드
         loadAuditActions();
@@ -7254,7 +7721,7 @@
                 }
 
             } catch (error) {
-                console.error('Error loading model settings:', error);
+                logger.error('Error loading model settings:', error);
                 Auth.showError('모델 설정을 불러오는데 실패했습니다: ' + error.message);
             }
         }
@@ -7295,7 +7762,7 @@
                 });
 
             } catch (error) {
-                console.error('Error loading model list:', error);
+                logger.error('Error loading model list:', error);
                 if (error.message && error.message.includes('503')) {
                     Auth.showError('Ollama 서버에 연결할 수 없습니다. Ollama가 실행 중인지 확인하세요.');
                 } else {
@@ -7368,7 +7835,7 @@
                 }
 
             } catch (error) {
-                console.error('Error saving model config:', error);
+                logger.error('Error saving model config:', error);
                 Auth.showError('모델 설정 저장에 실패했습니다: ' + error.message);
             } finally {
                 saveBtn.disabled = false;
@@ -7418,7 +7885,7 @@
                 document.getElementById('adminStatTotalQueries').textContent = stats.total_queries || 0;
                 document.getElementById('adminStatCacheHits').textContent = stats.cache_hits || 0;
             } catch (error) {
-                console.error('Error refreshing cache stats:', error);
+                logger.error('Error refreshing cache stats:', error);
                 Auth.showError('캐시 통계를 불러오는데 실패했습니다: ' + error.message);
             }
         }
@@ -7437,7 +7904,7 @@
                 alert('캐시가 초기화되었습니다.');
                 await adminRefreshCacheStats();
             } catch (error) {
-                console.error('Error clearing cache:', error);
+                logger.error('Error clearing cache:', error);
                 Auth.showError('캐시 초기화에 실패했습니다: ' + error.message);
             }
         }
@@ -7475,7 +7942,7 @@
                     Auth.hideSuccess('prompt-success');
                 }, 3000);
             } catch (error) {
-                console.error('Error saving system prompt:', error);
+                logger.error('Error saving system prompt:', error);
                 Auth.showError('시스템 프롬프트 저장에 실패했습니다: ' + error.message, 'prompt-error');
             }
         }
@@ -7488,7 +7955,7 @@
                 Auth.hideError('prompt-error');
                 Auth.hideSuccess('prompt-success');
             } catch (error) {
-                console.error('Error loading system prompt:', error);
+                logger.error('Error loading system prompt:', error);
                 Auth.showError('시스템 프롬프트 로드에 실패했습니다', 'prompt-error');
             }
         }
@@ -7559,12 +8026,12 @@
                     document.getElementById('toolsOnlyPromptEditor').value =
                         response.prompts.tools_only || '';
 
-                    console.log('✅ 프롬프트 로드 완료 (3개)');
+                    logger.debug('✅ 프롬프트 로드 완료 (3개)');
                 } else {
                     Auth.showError('프롬프트 데이터를 불러올 수 없습니다', 'prompt-error');
                 }
             } catch (error) {
-                console.error('Error loading prompts:', error);
+                logger.error('Error loading prompts:', error);
                 Auth.showError('프롬프트 로드에 실패했습니다: ' + error.message, 'prompt-error');
             }
         }
@@ -7636,7 +8103,7 @@
                     Auth.showError('프롬프트 저장에 실패했습니다', 'prompt-error');
                 }
             } catch (error) {
-                console.error('Error saving prompts:', error);
+                logger.error('Error saving prompts:', error);
                 Auth.showError('프롬프트 저장에 실패했습니다: ' + error.message, 'prompt-error');
             }
         }
@@ -7707,7 +8174,7 @@
                 adminUpdateDocStats(allDocuments);
 
             } catch (error) {
-                console.error('❌ Error loading documents:', error);
+                logger.error('❌ Error loading documents:', error);
                 docsList.innerHTML = '<div style="text-align: center; padding: 40px; color: #dc3545;">문서 목록 로드 실패: ' + error.message + '</div>';
             }
         }
@@ -7785,7 +8252,7 @@
             // 필터 카운트 표시
             // allDocuments가 비어있는데 documents에 데이터가 있다면, allDocuments를 업데이트
             if (allDocuments.length === 0 && documents.length > 0) {
-                console.warn('⚠️ allDocuments가 비어있지만 documents에 데이터가 있습니다. allDocuments를 업데이트합니다.');
+                logger.warn('⚠️ allDocuments가 비어있지만 documents에 데이터가 있습니다. allDocuments를 업데이트합니다.');
                 allDocuments = documents;
             }
 
@@ -7862,7 +8329,7 @@
 
             // allDocuments가 비어있으면 문서를 다시 로드
             if (allDocuments.length === 0) {
-                console.warn('⚠️ allDocuments 배열이 비어있습니다. 문서를 다시 로드합니다.');
+                logger.warn('⚠️ allDocuments 배열이 비어있습니다. 문서를 다시 로드합니다.');
                 // 비동기 로드 후 검색 재시도
                 adminLoadDocuments().then(() => {
                     devLog('문서 로드 완료 후 재검색 시도');
@@ -7943,7 +8410,7 @@
                 await adminLoadDocuments();
 
             } catch (error) {
-                console.error('Error deleting document:', error);
+                logger.error('Error deleting document:', error);
                 Auth.showError('문서 삭제에 실패했습니다: ' + error.message);
             }
         }
@@ -8055,7 +8522,7 @@
                     fileInput.value = '';
 
                 } catch (error) {
-                    console.error('Error uploading file:', error);
+                    logger.error('Error uploading file:', error);
                     // Show error message with filename
                     uploadStatus.innerHTML = `<div style="color: #dc3545;">❌ <strong>${file.name}</strong>: ${error.message}</div>`;
                 }
@@ -8092,7 +8559,7 @@
                 adminPopulateParentSelect();
 
             } catch (error) {
-                console.error('Error loading groups:', error);
+                logger.error('Error loading groups:', error);
                 groupTree.innerHTML = '<div style="text-align: center; padding: 40px; color: #dc3545;">그룹 로드 실패: ' + error.message + '</div>';
             }
         }
@@ -8220,7 +8687,7 @@
                 docsList.innerHTML = html;
 
             } catch (error) {
-                console.error('Error loading group documents:', error);
+                logger.error('Error loading group documents:', error);
                 docsList.innerHTML = '<div style="text-align: center; color: #dc3545;">문서 로드 실패: ' + error.message + '</div>';
             }
         }
@@ -8243,7 +8710,7 @@
                 await adminLoadGroups();
 
             } catch (error) {
-                console.error('Error removing document from group:', error);
+                logger.error('Error removing document from group:', error);
                 Auth.showError('문서 제거에 실패했습니다: ' + error.message);
             }
         }
@@ -8298,7 +8765,7 @@
                 });
 
             } catch (error) {
-                console.error('Error loading organizations:', error);
+                logger.error('Error loading organizations:', error);
                 select.innerHTML = '<option value="">조직을 불러올 수 없습니다</option>';
             }
         }
@@ -8398,7 +8865,7 @@
                 await adminLoadGroups();
 
             } catch (error) {
-                console.error('❌ 그룹 생성 오류:', error);
+                logger.error('❌ 그룹 생성 오류:', error);
                 Auth.showError('그룹 생성에 실패했습니다: ' + error.message);
             }
         }
@@ -8450,7 +8917,7 @@
                 await adminSelectGroup(adminSelectedGroupId); // Refresh details
 
             } catch (error) {
-                console.error('Error saving group:', error);
+                logger.error('Error saving group:', error);
                 Auth.showError('그룹 저장에 실패했습니다: ' + error.message);
             }
         }
@@ -8488,7 +8955,7 @@
                 await adminLoadGroups();
 
             } catch (error) {
-                console.error('Error deleting group:', error);
+                logger.error('Error deleting group:', error);
                 Auth.showError('그룹 삭제에 실패했습니다: ' + error.message);
             }
         }
@@ -8536,7 +9003,7 @@
                 adminRenderAvailableDocs(availableDocs);
 
             } catch (error) {
-                console.error('Error loading available documents:', error);
+                logger.error('Error loading available documents:', error);
                 docsList.innerHTML = '<div style="text-align: center; color: #dc3545;">문서 로드 실패: ' + error.message + '</div>';
             }
         }
@@ -8601,7 +9068,7 @@
 
                 adminRenderAvailableDocs(filtered);
             } catch (error) {
-                console.error('Error filtering documents:', error);
+                logger.error('Error filtering documents:', error);
             }
         }
 
@@ -8626,7 +9093,7 @@
                 await adminLoadGroups();
 
             } catch (error) {
-                console.error('Error assigning documents:', error);
+                logger.error('Error assigning documents:', error);
                 Auth.showError('문서 추가에 실패했습니다: ' + error.message);
             }
         }
@@ -8767,7 +9234,7 @@
                 adminMonitorReindex();
 
             } catch (error) {
-                console.error('Error starting reindex:', error);
+                logger.error('Error starting reindex:', error);
                 Auth.showError('재색인 시작에 실패했습니다: ' + error.message);
 
                 // 에러 시 버튼 상태 복원
@@ -8814,7 +9281,7 @@
                     }
 
                 } catch (error) {
-                    console.error('Error monitoring reindex:', error);
+                    logger.error('Error monitoring reindex:', error);
                     clearInterval(reindexInterval);
                     reindexInterval = null;
 
@@ -8861,7 +9328,7 @@
                 setTimeout(() => Auth.hideSuccess(), 3000);
 
             } catch (error) {
-                console.error('Error canceling reindex:', error);
+                logger.error('Error canceling reindex:', error);
                 Auth.showError('재색인 취소에 실패했습니다: ' + error.message);
             }
         }
@@ -8899,7 +9366,7 @@
                 setTimeout(() => Auth.hideSuccess(), 3000);
 
             } catch (error) {
-                console.error('Error clearing reindex progress:', error);
+                logger.error('Error clearing reindex progress:', error);
                 Auth.showError('진행 상태 초기화에 실패했습니다: ' + error.message);
             }
         }
@@ -8947,7 +9414,7 @@
                 listEl.innerHTML = html;
 
             } catch (error) {
-                console.error('Error loading chunks:', error);
+                logger.error('Error loading chunks:', error);
                 listEl.innerHTML = '<div style="text-align: center; padding: 40px; color: #dc3545;">청크를 불러오는데 실패했습니다: ' + error.message + '</div>';
                 countEl.textContent = '';
             }
@@ -9024,7 +9491,7 @@
                 listEl.innerHTML = html;
 
             } catch (error) {
-                console.error('Error loading versions:', error);
+                logger.error('Error loading versions:', error);
                 listEl.innerHTML = '<div style="text-align: center; padding: 40px; color: #dc3545;">버전 목록을 불러오는데 실패했습니다: ' + error.message + '</div>';
                 countEl.textContent = '';
             }
@@ -9142,7 +9609,7 @@
                 `;
 
             } catch (error) {
-                console.error('Error comparing versions:', error);
+                logger.error('Error comparing versions:', error);
                 contentEl.innerHTML = '<div style="text-align: center; padding: 40px; color: #dc3545;">비교 실패: ' + error.message + '</div>';
             }
         }
@@ -9246,7 +9713,7 @@
                 }
 
             } catch (error) {
-                console.error('Error viewing document:', error);
+                logger.error('Error viewing document:', error);
                 contentEl.innerHTML = `
                     <div style="text-align: center; padding: 40px; color: #dc3545;">
                         문서를 불러올 수 없습니다: ${error.message}
@@ -9302,7 +9769,7 @@
                 // Render first page
                 await renderPdfPage(1);
             } catch (error) {
-                console.error('Error loading PDF:', error);
+                logger.error('Error loading PDF:', error);
                 throw error;
             }
         }
@@ -9730,7 +10197,7 @@
                     );
                 }
             } catch (error) {
-                console.error('Backup creation error:', error);
+                logger.error('Backup creation error:', error);
 
                 // Find the active step and mark as error
                 const activeStepIndex = Array.from(document.querySelectorAll('.progress-step')).findIndex(
@@ -9761,10 +10228,10 @@
                     displayBackupList(data.backups);
                     updateBackupStats(data.stats, data.backups);
                 } else {
-                    console.error('Failed to load backups:', data.error);
+                    logger.error('Failed to load backups:', data.error);
                 }
             } catch (error) {
-                console.error('Error loading backups:', error);
+                logger.error('Error loading backups:', error);
                 document.getElementById('backupListContainer').innerHTML = `
                     <div style="text-align: center; padding: 40px; color: #f44336;">
                         <div style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
@@ -10010,7 +10477,7 @@
                     );
                 }
             } catch (error) {
-                console.error('Restore error:', error);
+                logger.error('Restore error:', error);
 
                 // Find the active step and mark as error
                 const activeStepIndex = Array.from(document.querySelectorAll('.progress-step')).findIndex(
@@ -10071,7 +10538,7 @@
 
                 devLog(`✅ Backup downloaded: ${filename}`);
             } catch (error) {
-                console.error('Download error:', error);
+                logger.error('Download error:', error);
                 alert(`백업 다운로드 중 오류가 발생했습니다.\n${error.message}`);
             }
         }
@@ -10095,7 +10562,7 @@
                     alert(`❌ 삭제 실패: ${data.error || '알 수 없는 오류'}`);
                 }
             } catch (error) {
-                console.error('Delete error:', error);
+                logger.error('Delete error:', error);
                 alert(`백업 삭제 중 오류가 발생했습니다.\n${error.message}`);
             }
         }
@@ -10178,7 +10645,7 @@
                     alert(`❌ 저장 실패: ${data.error}`);
                 }
             } catch (error) {
-                console.error('Schedule update error:', error);
+                logger.error('Schedule update error:', error);
                 alert('스케줄 저장 중 오류가 발생했습니다.');
             }
         }
@@ -10208,7 +10675,7 @@
                     toggleBackupTimeField();
                 }
             } catch (error) {
-                console.error('Error loading backup schedule:', error);
+                logger.error('Error loading backup schedule:', error);
             }
         }
 
@@ -10232,7 +10699,7 @@
                 updateRateLimitStatus(data.enabled);
 
             } catch (error) {
-                console.error('Error loading rate limit config:', error);
+                logger.error('Error loading rate limit config:', error);
                 showRateLimitError('Rate Limit 설정을 불러올 수 없습니다: ' + error.message);
             }
         }
@@ -10260,7 +10727,7 @@
                 }, 3000);
 
             } catch (error) {
-                console.error('Error toggling rate limit:', error);
+                logger.error('Error toggling rate limit:', error);
                 // 에러 발생 시 토글 원래대로 되돌림
                 toggle.checked = !enabled;
                 showRateLimitError('Rate Limit 설정 변경 실패: ' + error.message);
@@ -10336,7 +10803,7 @@
                 updateCaptchaStatus('register', data.register_enabled);
 
             } catch (error) {
-                console.error('Error loading CAPTCHA config:', error);
+                logger.error('Error loading CAPTCHA config:', error);
                 showCaptchaError('CAPTCHA 설정을 불러올 수 없습니다: ' + error.message);
             }
         }
@@ -10375,7 +10842,7 @@
                 }, 3000);
 
             } catch (error) {
-                console.error('Error toggling CAPTCHA:', error);
+                logger.error('Error toggling CAPTCHA:', error);
                 // 에러 발생 시 토글 원래대로 되돌림
                 toggle.checked = !enabled;
                 showCaptchaError('CAPTCHA 설정 변경 실패: ' + error.message);
@@ -10453,7 +10920,7 @@
                 updateTotpStatus(data.enabled);
 
             } catch (error) {
-                console.error('Error loading 2FA config:', error);
+                logger.error('Error loading 2FA config:', error);
                 showTotpError('2FA 설정을 불러올 수 없습니다: ' + error.message);
             }
         }
@@ -10479,7 +10946,7 @@
                 setTimeout(() => hideTotpMessages(), 3000);
 
             } catch (error) {
-                console.error('Error toggling 2FA:', error);
+                logger.error('Error toggling 2FA:', error);
                 // 에러 발생 시 토글 원래대로 되돌림
                 toggle.checked = !enabled;
                 showTotpError('2FA 설정 변경 실패: ' + error.message);
@@ -10565,7 +11032,7 @@
                 document.getElementById('userTotpModal').style.display = 'flex';
 
             } catch (error) {
-                console.error('Error loading user TOTP:', error);
+                logger.error('Error loading user TOTP:', error);
                 alert('QR 코드를 불러오는데 실패했습니다: ' + error.message);
             }
         }
@@ -10606,7 +11073,7 @@
                 showUserTotp(userId);
 
             } catch (error) {
-                console.error('Error resetting user TOTP:', error);
+                logger.error('Error resetting user TOTP:', error);
                 alert('Secret 재생성에 실패했습니다: ' + error.message);
             }
         }
@@ -10638,7 +11105,7 @@
 
                 devLog('브루트 포스 보호 설정 로드 완료:', data);
             } catch (error) {
-                console.error('Error loading brute force config:', error);
+                logger.error('Error loading brute force config:', error);
                 showBfError('브루트 포스 보호 설정을 불러올 수 없습니다: ' + error.message);
             }
         }
@@ -10684,7 +11151,7 @@
                 showBfSuccess(data.message);
                 devLog('브루트 포스 보호 설정 저장 완료:', data);
             } catch (error) {
-                console.error('Error saving brute force config:', error);
+                logger.error('Error saving brute force config:', error);
                 showBfError('브루트 포스 보호 설정 저장 실패: ' + error.message);
             }
         }
@@ -10754,7 +11221,7 @@
 
                 devLog('하이브리드 RAG 설정 로드 완료:', data);
             } catch (error) {
-                console.error('Error loading hybrid RAG config:', error);
+                logger.error('Error loading hybrid RAG config:', error);
                 showHybridRagError('하이브리드 RAG 설정을 불러올 수 없습니다: ' + error.message);
             }
         }
@@ -10794,7 +11261,7 @@
                 updateTavilyStatus(data.has_key);
 
             } catch (error) {
-                console.error('Error loading Tavily API key:', error);
+                logger.error('Error loading Tavily API key:', error);
                 document.getElementById('currentApiKey').textContent = '현재 키: 로드 실패';
             }
         }
@@ -10808,12 +11275,12 @@
             const btn = document.getElementById('toggleApiKeyBtn');
 
             if (!input) {
-                console.error('tavilyApiKeyInput element not found');
+                logger.error('tavilyApiKeyInput element not found');
                 return;
             }
 
-            console.log('Current input type:', input.type);
-            console.log('Current input value length:', input.value.length);
+            logger.debug('Current input type:', input.type);
+            logger.debug('Current input value length:', input.value.length);
 
             if (input.type === 'password') {
                 // 비밀번호 표시
@@ -10821,11 +11288,11 @@
                 icon.textContent = '🙈'; // 닫힌 눈
                 btn.title = '키 숨김';
                 input.placeholder = 'API 키가 표시됩니다 (입력 후 확인 가능)';
-                console.log('Changed to text (visible)');
+                logger.debug('Changed to text (visible)');
 
                 // 입력된 내용이 있으면 알림
                 if (input.value.length === 0) {
-                    console.warn('입력 필드가 비어있습니다. API 키를 입력하면 표시됩니다.');
+                    logger.warn('입력 필드가 비어있습니다. API 키를 입력하면 표시됩니다.');
                 }
             } else {
                 // 비밀번호 숨김
@@ -10833,7 +11300,7 @@
                 icon.textContent = '👁️'; // 열린 눈
                 btn.title = '키 표시';
                 input.placeholder = 'tvly-dev-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx';
-                console.log('Changed to password (hidden)');
+                logger.debug('Changed to password (hidden)');
             }
         }
 
@@ -10865,7 +11332,7 @@
                 setTimeout(() => hideHybridRagMessages(), 3000);
 
             } catch (error) {
-                console.error('Error saving Tavily API key:', error);
+                logger.error('Error saving Tavily API key:', error);
                 showHybridRagError('API 키 저장 실패: ' + error.message);
             }
         }
@@ -10890,7 +11357,7 @@
                 setTimeout(() => hideHybridRagMessages(), 3000);
 
             } catch (error) {
-                console.error('Error deleting Tavily API key:', error);
+                logger.error('Error deleting Tavily API key:', error);
                 showHybridRagError('API 키 삭제 실패: ' + error.message);
             }
         }
@@ -10932,7 +11399,7 @@
                 updateContext7Status(data.has_key);
 
             } catch (error) {
-                console.error('Error loading Context7 API key:', error);
+                logger.error('Error loading Context7 API key:', error);
                 document.getElementById('currentContext7Key').textContent = '현재 키: 로드 실패';
             }
         }
@@ -10946,12 +11413,12 @@
             const btn = document.getElementById('toggleContext7KeyBtn');
 
             if (!input) {
-                console.error('context7ApiKeyInput element not found');
+                logger.error('context7ApiKeyInput element not found');
                 return;
             }
 
-            console.log('Current input type:', input.type);
-            console.log('Current input value length:', input.value.length);
+            logger.debug('Current input type:', input.type);
+            logger.debug('Current input value length:', input.value.length);
 
             if (input.type === 'password') {
                 // 비밀번호 표시
@@ -10959,11 +11426,11 @@
                 icon.textContent = '🙈'; // 닫힌 눈
                 btn.title = '키 숨김';
                 input.placeholder = 'API 키가 표시됩니다 (입력 후 확인 가능)';
-                console.log('Changed to text (visible)');
+                logger.debug('Changed to text (visible)');
 
                 // 입력된 내용이 있으면 알림
                 if (input.value.length === 0) {
-                    console.warn('입력 필드가 비어있습니다. API 키를 입력하면 표시됩니다.');
+                    logger.warn('입력 필드가 비어있습니다. API 키를 입력하면 표시됩니다.');
                 }
             } else {
                 // 비밀번호 숨김
@@ -10971,7 +11438,7 @@
                 icon.textContent = '👁️'; // 열린 눈
                 btn.title = '키 표시';
                 input.placeholder = 'ctx7sk-xxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx';
-                console.log('Changed to password (hidden)');
+                logger.debug('Changed to password (hidden)');
             }
         }
 
@@ -11003,7 +11470,7 @@
                 setTimeout(() => hideHybridRagMessages(), 3000);
 
             } catch (error) {
-                console.error('Error saving Context7 API key:', error);
+                logger.error('Error saving Context7 API key:', error);
                 showHybridRagError('API 키 저장 실패: ' + error.message);
             }
         }
@@ -11017,7 +11484,7 @@
             const btn = document.getElementById('revealSavedContext7KeyBtn');
 
             if (!btn || !currentKeyEl || !icon) {
-                console.error('Required elements not found');
+                logger.error('Required elements not found');
                 return;
             }
 
@@ -11025,7 +11492,7 @@
             if (btn.dataset.revealed === 'true') {
                 // 숨김 - 마스킹된 버전으로 다시 로드
                 await loadContext7ApiKey();
-                console.log('Context7 API key hidden');
+                logger.debug('Context7 API key hidden');
             } else {
                 // 표시 - API 호출하여 전체 키 가져오기
                 try {
@@ -11037,12 +11504,12 @@
                         icon.textContent = '🙈';
                         btn.dataset.revealed = 'true';
                         btn.title = '저장된 키 숨김';
-                        console.log('Context7 API key revealed');
+                        logger.debug('Context7 API key revealed');
                     } else {
                         showHybridRagError('API 키를 조회할 수 없습니다');
                     }
                 } catch (error) {
-                    console.error('Error revealing Context7 API key:', error);
+                    logger.error('Error revealing Context7 API key:', error);
                     showHybridRagError('API 키 조회 실패: ' + error.message);
                 }
             }
@@ -11068,7 +11535,7 @@
                 setTimeout(() => hideHybridRagMessages(), 3000);
 
             } catch (error) {
-                console.error('Error deleting Context7 API key:', error);
+                logger.error('Error deleting Context7 API key:', error);
                 showHybridRagError('API 키 삭제 실패: ' + error.message);
             }
         }
@@ -11101,7 +11568,7 @@
             const btn = document.getElementById('revealSavedKeyBtn');
 
             if (!btn || !currentKeyEl || !icon) {
-                console.error('Required elements not found');
+                logger.error('Required elements not found');
                 return;
             }
 
@@ -11109,7 +11576,7 @@
             if (btn.dataset.revealed === 'true') {
                 // 숨김 - 마스킹된 버전으로 다시 로드
                 await loadTavilyApiKey();
-                console.log('API key hidden');
+                logger.debug('API key hidden');
             } else {
                 // 표시 - API 호출하여 전체 키 가져오기
                 try {
@@ -11121,12 +11588,12 @@
                         icon.textContent = '🙈';
                         btn.dataset.revealed = 'true';
                         btn.title = '저장된 키 숨김';
-                        console.log('API key revealed');
+                        logger.debug('API key revealed');
                     } else {
                         showHybridRagError('API 키를 조회할 수 없습니다');
                     }
                 } catch (error) {
-                    console.error('Error revealing Tavily API key:', error);
+                    logger.error('Error revealing Tavily API key:', error);
                     showHybridRagError('API 키 조회 실패: ' + error.message);
                 }
             }
@@ -11153,7 +11620,7 @@
                 setTimeout(() => hideHybridRagMessages(), 3000);
 
             } catch (error) {
-                console.error('Error changing search mode:', error);
+                logger.error('Error changing search mode:', error);
                 showHybridRagError('검색 모드 변경 실패: ' + error.message);
             }
         }
@@ -11190,7 +11657,7 @@
                 setTimeout(() => hideHybridRagMessages(), 3000);
 
             } catch (error) {
-                console.error('Error toggling hybrid RAG:', error);
+                logger.error('Error toggling hybrid RAG:', error);
                 // 에러 발생 시 토글 원래대로 되돌림
                 toggle.checked = !enabled;
                 showHybridRagError('설정 변경 실패: ' + error.message);
@@ -11221,7 +11688,7 @@
                 setTimeout(() => hideHybridRagMessages(), 3000);
 
             } catch (error) {
-                console.error('Error toggling web search:', error);
+                logger.error('Error toggling web search:', error);
                 toggle.checked = !enabled;
                 showHybridRagError('웹 검색 설정 변경 실패: ' + error.message);
             }
@@ -11251,7 +11718,7 @@
                 setTimeout(() => hideHybridRagMessages(), 3000);
 
             } catch (error) {
-                console.error('Error toggling doc search:', error);
+                logger.error('Error toggling doc search:', error);
                 toggle.checked = !enabled;
                 showHybridRagError('문서 검색 설정 변경 실패: ' + error.message);
             }
@@ -11392,7 +11859,7 @@
                 }).join('');
 
             } catch (error) {
-                console.error('Failed to load sessions:', error);
+                logger.error('Failed to load sessions:', error);
                 Auth.showError('세션 목록을 불러오는데 실패했습니다: ' + error.message);
             }
         }
@@ -11430,7 +11897,7 @@
                 }
 
             } catch (error) {
-                console.error('Failed to revoke session:', error);
+                logger.error('Failed to revoke session:', error);
                 Auth.showError('세션 종료에 실패했습니다: ' + error.message);
             }
         }
@@ -11467,7 +11934,7 @@
                 }
 
             } catch (error) {
-                console.error('Failed to revoke user sessions:', error);
+                logger.error('Failed to revoke user sessions:', error);
                 Auth.showError('사용자 세션 종료에 실패했습니다: ' + error.message);
             }
         }
@@ -11510,7 +11977,7 @@
                     encodeURIComponent('전체 세션이 종료되었습니다. 다시 로그인해주세요.');
 
             } catch (error) {
-                console.error('Failed to revoke all sessions:', error);
+                logger.error('Failed to revoke all sessions:', error);
                 Auth.showError('전체 세션 종료에 실패했습니다: ' + error.message);
             }
         }
