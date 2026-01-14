@@ -55,7 +55,7 @@ from .exceptions import (
 )
 
 # v2.2.0: Authentication router
-from .routers import auth, admin, organizations, documents, cache, conversations, feedback, settings, groups
+from .routers import auth, admin, organizations, documents, cache, conversations, feedback, settings, groups, audit
 from .auth.middleware import get_current_active_user, require_admin
 
 # Load environment variables
@@ -972,6 +972,9 @@ app.include_router(settings.router)
 
 # Register groups router (Phase 1: Modularization - 9 endpoints)
 app.include_router(groups.router)
+
+# Register audit router (Phase 1: Modularization - 4 endpoints)
+app.include_router(audit.router)
 
 
 # WebSocket endpoint for real-time security alerts
@@ -2819,6 +2822,14 @@ async def startup_event():
             grp_manager=group_manager
         )
         logger.info("✅ Groups router dependencies injected (9 endpoints)")
+
+        # Inject dependencies into audit router (4 endpoints)
+        logger.info("📋 Injecting dependencies into audit router...")
+        audit.inject_dependencies(
+            audit_log=audit_logger,
+            cache_mgr=cache_manager
+        )
+        logger.info("✅ Audit router dependencies injected (4 endpoints)")
 
         # Auto-migrate existing documents to version control
         logger.info("🔄 Running document version migration...")
@@ -5615,212 +5626,6 @@ async def update_prompts(data: PromptsUpdateRequest, request: Request):
     except Exception as e:
         logger.error(f"Failed to update prompts: {e}")
         raise HTTPException(status_code=500, detail="Failed to update prompts")
-
-
-# ============================================================================
-# Audit Log APIs (v2.4.0)
-# ============================================================================
-
-@app.get("/api/admin/audit/logs", tags=["Admin"])
-async def get_audit_logs(
-    request: Request,
-    user_id: Optional[str] = None,
-    username: Optional[str] = None,
-    action: Optional[str] = None,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    limit: int = 100,
-    offset: int = 0
-):
-    """감사 로그 조회 (관리자 전용)
-
-    Query params:
-        user_id: 사용자 ID 필터
-        username: 사용자명 필터 (부분 매칭 지원)
-        action: 작업 유형 필터 (login, document_upload, chat_query 등)
-        start_date: 시작 날짜 (YYYY-MM-DD)
-        end_date: 종료 날짜 (YYYY-MM-DD)
-        limit: 최대 반환 개수 (기본: 100)
-        offset: 오프셋 (페이지네이션)
-
-    Returns:
-        감사 로그 목록
-    """
-    try:
-        # 관리자 권한 확인
-        from .auth.utils import require_admin
-        redis_client = request.app.state.cache_manager.redis
-        require_admin(request, redis_client)
-
-        # Audit logger 가져오기
-        audit_logger = request.app.state.audit_logger
-        if not audit_logger:
-            raise HTTPException(status_code=503, detail="Audit logger not initialized")
-
-        # 작업 유형 검증
-        action_enum = None
-        if action:
-            try:
-                action_enum = AuditAction(action)
-            except ValueError:
-                raise HTTPException(status_code=400, detail=f"Invalid action: {action}")
-
-        # 로그 조회 (더 많이 가져와서 필터링 후 페이지네이션 적용)
-        fetch_limit = limit * 10 if username else limit
-        logs = audit_logger.get_logs(
-            user_id=user_id,
-            action=action_enum,
-            start_date=start_date,
-            end_date=end_date,
-            limit=fetch_limit,
-            offset=0 if username else offset
-        )
-
-        # username 필터링 (부분 매칭)
-        if username:
-            username_lower = username.lower()
-            logs = [
-                log for log in logs
-                if log.get("username") and username_lower in log["username"].lower()
-            ]
-            # 필터링 후 페이지네이션 적용
-            logs = logs[offset:offset + limit]
-
-        return {
-            "logs": logs,
-            "count": len(logs),
-            "limit": limit,
-            "offset": offset,
-            "filters": {
-                "user_id": user_id,
-                "username": username,
-                "action": action,
-                "start_date": start_date,
-                "end_date": end_date
-            }
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to get audit logs: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve audit logs")
-
-
-@app.get("/api/admin/audit/stats", tags=["Admin"])
-async def get_audit_stats(
-    request: Request,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None
-):
-    """감사 로그 통계 조회 (관리자 전용)
-
-    Query params:
-        start_date: 시작 날짜 (YYYY-MM-DD, 기본: 7일 전)
-        end_date: 종료 날짜 (YYYY-MM-DD, 기본: 오늘)
-
-    Returns:
-        감사 로그 통계
-    """
-    try:
-        # 관리자 권한 확인
-        from .auth.utils import require_admin
-        redis_client = request.app.state.cache_manager.redis
-        require_admin(request, redis_client)
-
-        # Audit logger 가져오기
-        audit_logger = request.app.state.audit_logger
-        if not audit_logger:
-            raise HTTPException(status_code=503, detail="Audit logger not initialized")
-
-        # 통계 조회
-        stats = audit_logger.get_stats(
-            start_date=start_date,
-            end_date=end_date
-        )
-
-        return stats
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to get audit stats: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve audit statistics")
-
-
-@app.get("/api/admin/audit/user/{user_id}", tags=["Admin"])
-async def get_user_audit_logs(
-    request: Request,
-    user_id: str,
-    limit: int = 50
-):
-    """특정 사용자의 감사 로그 조회 (관리자 전용)
-
-    Path params:
-        user_id: 사용자 ID
-
-    Query params:
-        limit: 최대 반환 개수 (기본: 50)
-
-    Returns:
-        사용자 활동 로그
-    """
-    try:
-        # 관리자 권한 확인
-        from .auth.utils import require_admin
-        redis_client = request.app.state.cache_manager.redis
-        require_admin(request, redis_client)
-
-        # Audit logger 가져오기
-        audit_logger = request.app.state.audit_logger
-        if not audit_logger:
-            raise HTTPException(status_code=503, detail="Audit logger not initialized")
-
-        # 사용자 활동 조회
-        logs = audit_logger.get_user_activity(
-            user_id=user_id,
-            limit=limit
-        )
-
-        return {
-            "user_id": user_id,
-            "logs": logs,
-            "count": len(logs)
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to get user audit logs: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve user audit logs")
-
-
-@app.get("/api/admin/audit/actions", tags=["Admin"])
-async def get_audit_actions(request: Request):
-    """사용 가능한 감사 로그 작업 유형 목록 (관리자 전용)
-
-    Returns:
-        작업 유형 목록
-    """
-    try:
-        # 관리자 권한 확인
-        from .auth.utils import require_admin
-        redis_client = request.app.state.cache_manager.redis
-        require_admin(request, redis_client)
-
-        # 작업 유형 목록
-        actions = [
-            {"value": action.value, "description": action.value.replace("_", " ").title()}
-            for action in AuditAction
-        ]
-
-        return {"actions": actions}
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to get audit actions: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve audit actions")
 
 
 # ============================================================================
