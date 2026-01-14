@@ -2782,7 +2782,7 @@ async def startup_event():
         )
         logger.info(f"Document version manager configured: max_versions={max_versions}")
 
-        # Inject dependencies into documents router
+        # Inject dependencies into documents router (18 endpoints)
         logger.info("📄 Injecting dependencies into documents router...")
         documents.inject_dependencies(
             vdb=vector_db,
@@ -2790,9 +2790,15 @@ async def startup_event():
             doc_version=document_version,
             grp_manager=group_manager,
             cache_mgr=cache_manager,
-            data_dir=DATA_DIR
+            emb_model=embedding_model,
+            data_dir=DATA_DIR,
+            chunk_size=CHUNK_SIZE,
+            chunk_overlap=CHUNK_OVERLAP,
+            max_file_size=MAX_FILE_SIZE,
+            max_file_size_mb=MAX_FILE_SIZE_MB,
+            reindex_evt=reindex_event
         )
-        logger.info("✅ Documents router dependencies injected")
+        logger.info("✅ Documents router dependencies injected (18 endpoints)")
 
         # Auto-migrate existing documents to version control
         logger.info("🔄 Running document version migration...")
