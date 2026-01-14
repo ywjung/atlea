@@ -55,7 +55,7 @@ from .exceptions import (
 )
 
 # v2.2.0: Authentication router
-from .routers import auth, admin, organizations, documents, cache, conversations
+from .routers import auth, admin, organizations, documents, cache, conversations, feedback
 from .auth.middleware import get_current_active_user, require_admin
 
 # Load environment variables
@@ -964,6 +964,9 @@ app.include_router(cache.router)
 # Register conversations router (Phase 1: Modularization - 7 endpoints)
 app.include_router(conversations.router)
 
+# Register feedback router (Phase 1: Modularization - 5 endpoints)
+app.include_router(feedback.router)
+
 
 # WebSocket endpoint for real-time security alerts
 @app.websocket("/ws/alerts")
@@ -1541,20 +1544,6 @@ class EmbeddingChangeRequest(BaseModel):
 
 class CacheEnabledRequest(BaseModel):
     enabled: bool
-
-
-class FeedbackRequest(BaseModel):
-    """답변 평가 피드백 요청"""
-    conversation_id: str
-    message_id: str
-    feedback_type: str  # 'positive' or 'negative'
-
-    @validator('feedback_type')
-    def validate_feedback_type(cls, v):
-        """Validate feedback type"""
-        if v not in ['positive', 'negative']:
-            raise ValueError("feedback_type은 'positive' 또는 'negative'여야 합니다.")
-        return v
 
 
 class UserPreferences(BaseModel):
@@ -2811,6 +2800,15 @@ async def startup_event():
         )
         logger.info("✅ Conversations router dependencies injected (7 endpoints)")
 
+        # Inject dependencies into feedback router (5 endpoints)
+        logger.info("👍 Injecting dependencies into feedback router...")
+        feedback.inject_dependencies(
+            fb_analyzer=feedback_analyzer,
+            conv_manager=conversation_manager,
+            cache_mgr=cache_manager
+        )
+        logger.info("✅ Feedback router dependencies injected (5 endpoints)")
+
         # Auto-migrate existing documents to version control
         logger.info("🔄 Running document version migration...")
         try:
@@ -3854,234 +3852,6 @@ async def query_stream(
     except Exception as e:
         # Security: Use sanitized error message (prevents information disclosure)
         safe_message = get_safe_error_message(e, "streaming query endpoint")
-        raise HTTPException(status_code=500, detail=safe_message)
-
-
-@app.post("/api/feedback", tags=["Feedback"])
-async def submit_feedback(
-    request: Request,
-    feedback: FeedbackRequest,
-    current_user: dict = Depends(get_current_active_user)
-):
-    """
-    답변 평가 피드백 제출
-
-    사용자가 챗봇 답변에 대해 👍/👎 피드백을 제공합니다.
-    Redis에 피드백을 저장하고 통계 데이터를 업데이트합니다.
-    """
-    try:
-        redis = request.app.state.cache_manager.redis
-
-        # 피드백 데이터 구성
-        feedback_key = f"feedback:{feedback.conversation_id}:{feedback.message_id}"
-        feedback_data = {
-            "type": feedback.feedback_type,
-            "timestamp": datetime.utcnow().isoformat() + 'Z',
-            "conversation_id": feedback.conversation_id,
-            "message_id": feedback.message_id
-        }
-
-        # Redis에 피드백 저장 (TTL: 90일)
-        redis.setex(
-            feedback_key,
-            90 * 24 * 60 * 60,  # 90 days
-            json.dumps(feedback_data)
-        )
-
-        # 통계용 ZSET에 추가 (타임스탬프를 스코어로 사용)
-        timestamp_score = datetime.utcnow().timestamp()
-        stats_key = f"feedback:stats:{feedback.feedback_type}"
-        redis.zadd(stats_key, {feedback_key: timestamp_score})
-
-        # 전체 피드백 카운트 증가
-        redis.incr(f"feedback:count:{feedback.feedback_type}")
-
-        # 📊 FeedbackAnalyzer에 피드백 기록
-        # 대화 기록에서 메시지 가져오기
-        if conversation_manager:
-            try:
-                # Get all messages and find the specific message by ID
-                messages = conversation_manager.get_messages(feedback.conversation_id)
-                message = None
-                question = None
-
-                for idx, msg in enumerate(messages):
-                    if msg.get("id") == feedback.message_id:
-                        message = msg
-                        # 이전 사용자 질문 가져오기
-                        if idx > 0:
-                            prev_msg = messages[idx - 1]
-                            if prev_msg.get("role") == "user":
-                                question = prev_msg.get("content")
-                        break
-
-                if message and message.get("role") == "assistant":
-                    # 메타데이터에서 컨텍스트와 신뢰도 정보 추출
-                    metadata = message.get("metadata", {})
-                    context = metadata.get("context", [])
-
-                    # FeedbackAnalyzer에 기록
-                    feedback_analyzer.record_feedback(
-                        feedback_type=feedback.feedback_type,
-                        answer=message.get("content", ""),
-                        context=context,
-                        confidence=metadata.get("confidence"),
-                        question=question,
-                        metadata={
-                            "conversation_id": feedback.conversation_id,
-                            "message_id": feedback.message_id,
-                            "sources": metadata.get("sources", [])
-                        }
-                    )
-                    logger.success(f"✅ FeedbackAnalyzer 기록 완료")
-            except Exception as analyzer_error:
-                logger.warning(f"⚠️ FeedbackAnalyzer 기록 실패 (무시됨): {analyzer_error}")
-
-        logger.info(f"👍👎 Feedback saved: {feedback.feedback_type} for message {feedback.message_id}")
-
-        return {
-            "success": True,
-            "message": "피드백이 성공적으로 저장되었습니다.",
-            "feedback_type": feedback.feedback_type
-        }
-
-    except Exception as e:
-        logger.error(f"❌ Feedback submission failed: {str(e)}")
-        raise HTTPException(status_code=500, detail="피드백 저장에 실패했습니다.")
-
-
-@app.get("/api/admin/feedback/stats", tags=["Feedback", "Admin"])
-async def get_feedback_stats(
-    request: Request,
-    user=Depends(require_admin)
-):
-    """
-    피드백 통계 조회 (관리자용)
-
-    전체 피드백 수, 긍정/부정 비율, 최근 피드백 등을 제공합니다.
-    """
-    try:
-        redis = request.app.state.cache_manager.redis
-
-        # 전체 피드백 카운트 조회
-        positive_count = int(redis.get("feedback:count:positive") or 0)
-        negative_count = int(redis.get("feedback:count:negative") or 0)
-        total_count = positive_count + negative_count
-
-        # 긍정 비율 계산
-        positive_ratio = (positive_count / total_count * 100) if total_count > 0 else 0
-
-        # 최근 7일 피드백 조회
-        week_ago = (datetime.utcnow().timestamp() - 7 * 24 * 60 * 60)
-        recent_positive = redis.zcount("feedback:stats:positive", week_ago, "+inf")
-        recent_negative = redis.zcount("feedback:stats:negative", week_ago, "+inf")
-
-        # 최근 피드백 목록 (최대 10개)
-        recent_feedback_keys = []
-        recent_positive_keys = redis.zrevrange("feedback:stats:positive", 0, 4) or []
-        recent_negative_keys = redis.zrevrange("feedback:stats:negative", 0, 4) or []
-        recent_feedback_keys.extend(recent_positive_keys)
-        recent_feedback_keys.extend(recent_negative_keys)
-
-        recent_feedbacks = []
-        for key in recent_feedback_keys:
-            feedback_data = redis.get(key)
-            if feedback_data:
-                recent_feedbacks.append(json.loads(feedback_data))
-
-        # 타임스탬프 기준으로 정렬
-        recent_feedbacks.sort(key=lambda x: x['timestamp'], reverse=True)
-        recent_feedbacks = recent_feedbacks[:10]
-
-        stats = {
-            "total_count": total_count,
-            "positive_count": positive_count,
-            "negative_count": negative_count,
-            "positive_ratio": round(positive_ratio, 2),
-            "recent_week": {
-                "positive": recent_positive,
-                "negative": recent_negative,
-                "total": recent_positive + recent_negative
-            },
-            "recent_feedbacks": recent_feedbacks
-        }
-
-        logger.info(f"📊 Feedback stats retrieved: {total_count} total feedbacks")
-
-        return stats
-
-    except Exception as e:
-        logger.error(f"❌ Failed to get feedback stats: {str(e)}")
-        raise HTTPException(status_code=500, detail="피드백 통계 조회에 실패했습니다.")
-
-
-@app.get("/api/feedback/analytics", tags=["Feedback", "Analytics"])
-async def get_feedback_analytics(
-    days: int = 7,
-    current_user: dict = Depends(get_current_active_user)
-):
-    """
-    피드백 분석 리포트 조회
-
-    Args:
-        days: 분석 기간 (일, 기본값: 7)
-
-    Returns:
-        분석 리포트 (만족도, 학습된 패턴, 권장사항 등)
-    """
-    try:
-        analytics = feedback_analyzer.get_analytics(days=days)
-        logger.info(f"📊 피드백 분석 리포트 조회: {days}일 기간")
-        return {
-            "success": True,
-            "data": analytics
-        }
-    except Exception as e:
-        safe_message = get_safe_error_message(e, "feedback analytics endpoint")
-        raise HTTPException(status_code=500, detail=safe_message)
-
-
-@app.get("/api/feedback/analyzer/stats", tags=["Feedback", "Analytics"])
-async def get_feedback_analyzer_stats(
-    current_user: dict = Depends(get_current_active_user)
-):
-    """
-    FeedbackAnalyzer 통계 조회
-
-    Returns:
-        전체 피드백 통계 및 학습된 패턴
-    """
-    try:
-        stats = feedback_analyzer.get_statistics()
-        logger.info(f"📊 FeedbackAnalyzer 통계 조회")
-        return {
-            "success": True,
-            "data": stats
-        }
-    except Exception as e:
-        safe_message = get_safe_error_message(e, "feedback analyzer stats endpoint")
-        raise HTTPException(status_code=500, detail=safe_message)
-
-
-@app.post("/api/feedback/analyzer/stats/reset", tags=["Feedback", "Analytics", "Admin"])
-async def reset_feedback_analyzer_stats(
-    current_user: dict = Depends(get_current_active_user)
-):
-    """
-    FeedbackAnalyzer 통계 초기화 (관리자용)
-
-    Returns:
-        초기화 성공 메시지
-    """
-    try:
-        feedback_analyzer.reset_statistics()
-        logger.success("✅ FeedbackAnalyzer 통계 초기화 완료")
-        return {
-            "success": True,
-            "message": "FeedbackAnalyzer 통계가 초기화되었습니다."
-        }
-    except Exception as e:
-        safe_message = get_safe_error_message(e, "reset feedback analyzer stats endpoint")
         raise HTTPException(status_code=500, detail=safe_message)
 
 
