@@ -1013,7 +1013,7 @@ async def cancel_reindex(
 
 
 # DELETE /api/reindex/progress
-@router.delete("/api/reindex/progress", tags=["Documents"])
+@router.delete("/reindex/progress", tags=["Documents"])
 async def clear_reindex_progress_api(
     request: Request,
     user: dict = Depends(require_admin)
@@ -1045,7 +1045,7 @@ async def clear_reindex_progress_api(
 
 
 # GET /api/documents/{filename}/chunks
-@router.get("/api/documents/{filename}/chunks", tags=["Documents"])
+@router.get("/documents/{filename}/chunks", tags=["Documents"])
 async def get_document_chunks(
     filename: str,
     current_user: dict = Depends(get_current_active_user)
@@ -1442,7 +1442,7 @@ async def upload_document(
 
 
 # DELETE /api/documents/{filename}
-@router.delete("/api/documents/{filename}", tags=["Documents"])
+@router.delete("/documents/{filename}", tags=["Documents"])
 async def delete_document(
     filename: str,
     current_user: dict = Depends(get_current_active_user)
@@ -1540,7 +1540,7 @@ async def delete_document(
 
 
 # GET /api/documents/{filename}/download-pdf
-@router.get("/api/documents/{filename}/download-pdf", tags=["Documents"])
+@router.get("/documents/{filename}/download-pdf", tags=["Documents"])
 async def download_document_as_pdf(
     filename: str,
     current_user: dict = Depends(get_current_active_user)
@@ -1631,7 +1631,7 @@ async def download_document_as_pdf(
 
 
 # GET /api/documents/{filename}/view
-@router.get("/api/documents/{filename}/view", tags=["Documents"])
+@router.get("/documents/{filename}/view", tags=["Documents"])
 async def view_document(
     filename: str,
     current_user: dict = Depends(get_current_active_user)
@@ -1708,7 +1708,7 @@ async def view_document(
 
 
 # GET /api/documents/{filename}/versions
-@router.get("/api/documents/{filename}/versions", tags=["Documents", "Versions"])
+@router.get("/documents/{filename}/versions", tags=["Documents", "Versions"])
 async def list_document_versions(
     filename: str,
     current_user: dict = Depends(get_current_active_user)
@@ -1745,7 +1745,7 @@ async def list_document_versions(
 
 
 # GET /api/documents/{filename}/versions/compare
-@router.get("/api/documents/{filename}/versions/compare", tags=["Documents", "Versions"])
+@router.get("/documents/{filename}/versions/compare", tags=["Documents", "Versions"])
 async def compare_document_versions(
     filename: str,
     version1: int,
@@ -1798,7 +1798,7 @@ async def compare_document_versions(
 
 
 # GET /api/documents/{filename}/versions/{version}
-@router.get("/api/documents/{filename}/versions/{version}", tags=["Documents", "Versions"])
+@router.get("/documents/{filename}/versions/{version}", tags=["Documents", "Versions"])
 async def get_document_version(
     filename: str,
     version: int,
@@ -1990,7 +1990,7 @@ async def restore_document_version(
 
 
 # DELETE /api/documents/{filename}/versions/{version}
-@router.delete("/api/documents/{filename}/versions/{version}", tags=["Documents", "Versions"])
+@router.delete("/documents/{filename}/versions/{version}", tags=["Documents", "Versions"])
 async def delete_document_version(
     filename: str,
     version: int,
