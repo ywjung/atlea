@@ -55,7 +55,7 @@ from .exceptions import (
 )
 
 # v2.2.0: Authentication router
-from .routers import auth, admin, organizations, documents, cache
+from .routers import auth, admin, organizations, documents, cache, conversations
 from .auth.middleware import get_current_active_user, require_admin
 
 # Load environment variables
@@ -960,6 +960,9 @@ app.include_router(documents.router)
 
 # Register cache router (Phase 1: Modularization - 4 endpoints)
 app.include_router(cache.router)
+
+# Register conversations router (Phase 1: Modularization - 7 endpoints)
+app.include_router(conversations.router)
 
 
 # WebSocket endpoint for real-time security alerts
@@ -2800,6 +2803,13 @@ async def startup_event():
             redis=vector_db.client
         )
         logger.info("✅ Cache router dependencies injected (4 endpoints)")
+
+        # Inject dependencies into conversations router (7 endpoints)
+        logger.info("💬 Injecting dependencies into conversations router...")
+        conversations.inject_dependencies(
+            conv_manager=conversation_manager
+        )
+        logger.info("✅ Conversations router dependencies injected (7 endpoints)")
 
         # Auto-migrate existing documents to version control
         logger.info("🔄 Running document version migration...")
@@ -5326,241 +5336,6 @@ async def sync_group_document_counts(
 # ============================================================================
 # Conversation History API Endpoints
 # ============================================================================
-
-@app.post("/api/conversations", tags=["Conversations"])
-async def create_conversation(
-    title: str = None,
-    current_user: dict = Depends(get_current_active_user)
-):
-    """
-    Create a new conversation session
-
-    Args:
-        title: Optional conversation title
-
-    Returns:
-        Session ID and metadata
-    """
-    try:
-        if not conversation_manager:
-            raise HTTPException(status_code=500, detail="Conversation manager not initialized")
-
-        session_id = conversation_manager.create_session(title=title)
-        session = conversation_manager.get_session(session_id)
-
-        return {
-            "session_id": session_id,
-            "session": session
-        }
-    except Exception as e:
-        logger.error(f"Failed to create conversation: {e}")
-        safe_message = get_safe_error_message(e, "create conversation endpoint")
-        raise HTTPException(status_code=500, detail=safe_message)
-
-
-@app.get("/api/conversations", tags=["Conversations"])
-async def list_conversations(
-    limit: int = 50,
-    offset: int = 0,
-    current_user: dict = Depends(get_current_active_user)
-):
-    """
-    List conversation sessions (sorted by most recent)
-
-    Args:
-        limit: Maximum number of sessions to return
-        offset: Number of sessions to skip
-
-    Returns:
-        List of conversation sessions
-    """
-    try:
-        if not conversation_manager:
-            raise HTTPException(status_code=500, detail="Conversation manager not initialized")
-
-        sessions = conversation_manager.list_sessions(limit=limit, offset=offset)
-        total_count = conversation_manager.get_session_count()
-
-        return {
-            "sessions": sessions,
-            "total_count": total_count,
-            "limit": limit,
-            "offset": offset
-        }
-    except Exception as e:
-        logger.error(f"Failed to list conversations: {e}")
-        safe_message = get_safe_error_message(e, "list conversations endpoint")
-        raise HTTPException(status_code=500, detail=safe_message)
-
-
-@app.get("/api/conversations/{session_id}", tags=["Conversations"])
-async def get_conversation(
-    session_id: str,
-    limit: int = None,
-    offset: int = 0,
-    current_user: dict = Depends(get_current_active_user)
-):
-    """
-    Get conversation session with messages
-
-    Args:
-        session_id: Conversation session ID
-        limit: Maximum number of messages to return (None = all)
-        offset: Number of messages to skip
-
-    Returns:
-        Session metadata and messages
-    """
-    try:
-        if not conversation_manager:
-            raise HTTPException(status_code=500, detail="Conversation manager not initialized")
-
-        session = conversation_manager.get_session(session_id)
-        if not session:
-            raise HTTPException(status_code=404, detail=f"Conversation {session_id} not found")
-
-        messages = conversation_manager.get_messages(session_id, limit=limit, offset=offset)
-
-        return {
-            "session": session,
-            "messages": messages,
-            "message_count": len(messages)
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to get conversation: {e}")
-        safe_message = get_safe_error_message(e, "get conversation endpoint")
-        raise HTTPException(status_code=500, detail=safe_message)
-
-
-@app.delete("/api/conversations/{session_id}", tags=["Conversations"])
-async def delete_conversation(
-    session_id: str,
-    current_user: dict = Depends(get_current_active_user)
-):
-    """
-    Delete a conversation session and all its messages
-
-    Args:
-        session_id: Conversation session ID
-
-    Returns:
-        Success message
-    """
-    try:
-        if not conversation_manager:
-            raise HTTPException(status_code=500, detail="Conversation manager not initialized")
-
-        success = conversation_manager.delete_session(session_id)
-
-        if not success:
-            raise HTTPException(status_code=404, detail=f"Conversation {session_id} not found")
-
-        return {
-            "status": "success",
-            "message": f"Conversation {session_id} deleted successfully"
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to delete conversation: {e}")
-        safe_message = get_safe_error_message(e, "delete conversation endpoint")
-        raise HTTPException(status_code=500, detail=safe_message)
-
-
-@app.delete("/api/conversations", tags=["Conversations"])
-async def delete_all_conversations(
-    current_user: dict = Depends(get_current_active_user)
-):
-    """
-    Delete all conversation sessions (use with caution)
-
-    Returns:
-        Success message with count of deleted sessions
-    """
-    try:
-        if not conversation_manager:
-            raise HTTPException(status_code=500, detail="Conversation manager not initialized")
-
-        deleted_count = conversation_manager.clear_all_sessions()
-
-        return {
-            "status": "success",
-            "message": f"Successfully deleted {deleted_count} conversations",
-            "deleted_count": deleted_count
-        }
-    except Exception as e:
-        logger.error(f"Failed to delete all conversations: {e}")
-        safe_message = get_safe_error_message(e, "delete all conversations endpoint")
-        raise HTTPException(status_code=500, detail=safe_message)
-
-
-@app.post("/api/conversations/{session_id}/bookmark", tags=["Conversations"])
-async def toggle_bookmark(
-    session_id: str,
-    current_user: dict = Depends(get_current_active_user)
-):
-    """
-    Toggle bookmark status for a conversation
-
-    Args:
-        session_id: Conversation session ID
-
-    Returns:
-        New bookmark status
-    """
-    try:
-        if not conversation_manager:
-            raise HTTPException(status_code=500, detail="Conversation manager not initialized")
-
-        is_bookmarked = conversation_manager.toggle_bookmark(session_id)
-
-        return {
-            "status": "success",
-            "session_id": session_id,
-            "is_bookmarked": is_bookmarked
-        }
-    except Exception as e:
-        logger.error(f"Failed to toggle bookmark: {e}")
-        safe_message = get_safe_error_message(e, "toggle bookmark endpoint")
-        raise HTTPException(status_code=500, detail=safe_message)
-
-
-@app.get("/api/conversations/bookmarked/list", tags=["Conversations"])
-async def get_bookmarked_conversations(
-    limit: int = 50,
-    offset: int = 0,
-    current_user: dict = Depends(get_current_active_user)
-):
-    """
-    Get list of bookmarked conversations
-
-    Args:
-        limit: Maximum number of conversations to return (default: 50)
-        offset: Number of conversations to skip (default: 0)
-
-    Returns:
-        List of bookmarked conversation sessions
-    """
-    try:
-        if not conversation_manager:
-            raise HTTPException(status_code=500, detail="Conversation manager not initialized")
-
-        sessions = conversation_manager.list_bookmarked_sessions(limit, offset)
-        total = conversation_manager.get_bookmarked_count()
-
-        return {
-            "status": "success",
-            "sessions": sessions,
-            "total": total,
-            "limit": limit,
-            "offset": offset
-        }
-    except Exception as e:
-        logger.error(f"Failed to get bookmarked conversations: {e}")
-        safe_message = get_safe_error_message(e, "get bookmarked conversations endpoint")
-        raise HTTPException(status_code=500, detail=safe_message)
 
 
 # ============================================================================
