@@ -55,7 +55,7 @@ from .exceptions import (
 )
 
 # v2.2.0: Authentication router
-from .routers import auth, admin, organizations, documents
+from .routers import auth, admin, organizations, documents, cache
 from .auth.middleware import get_current_active_user, require_admin
 
 # Load environment variables
@@ -955,8 +955,11 @@ app.include_router(admin.router)
 # Register organizations router
 app.include_router(organizations.router)
 
-# Register documents router (Phase 1: Modularization - 3 PoC endpoints)
+# Register documents router (Phase 1: Modularization - 19 endpoints)
 app.include_router(documents.router)
+
+# Register cache router (Phase 1: Modularization - 4 endpoints)
+app.include_router(cache.router)
 
 
 # WebSocket endpoint for real-time security alerts
@@ -2788,7 +2791,15 @@ async def startup_event():
             max_file_size_mb=MAX_FILE_SIZE_MB,
             reindex_evt=reindex_event
         )
-        logger.info("✅ Documents router dependencies injected (18 endpoints)")
+        logger.info("✅ Documents router dependencies injected (19 endpoints)")
+
+        # Inject dependencies into cache router (4 endpoints)
+        logger.info("💾 Injecting dependencies into cache router...")
+        cache.inject_dependencies(
+            cache_mgr=cache_manager,
+            redis=vector_db.client
+        )
+        logger.info("✅ Cache router dependencies injected (4 endpoints)")
 
         # Auto-migrate existing documents to version control
         logger.info("🔄 Running document version migration...")
@@ -4150,96 +4161,6 @@ async def update_user_preferences(
 # ============================================================================
 # Reindex Progress Helper Functions
 # ============================================================================
-
-@app.get("/api/cache/stats", tags=["Cache"])
-async def get_cache_stats(
-    current_user: dict = Depends(get_current_active_user)
-):
-    """
-    Get cache statistics (로그인 필요)
-    """
-    try:
-        if not cache_manager:
-            raise HTTPException(status_code=503, detail="Cache manager not initialized")
-
-        stats = cache_manager.get_cache_stats()
-        return stats
-    except Exception as e:
-        # Security: Use sanitized error message (prevents information disclosure)
-        safe_message = get_safe_error_message(e, "cache stats endpoint")
-        raise HTTPException(status_code=500, detail=safe_message)
-
-
-@app.post("/api/cache/clear", tags=["Cache"])
-async def clear_cache(
-    request: Request,
-    current_user: dict = Depends(get_current_active_user)
-):
-    """
-    Clear all cached responses (관리자 전용)
-    """
-    try:
-        # 관리자 권한 확인
-        require_admin(request, redis_client)
-
-        if not cache_manager:
-            raise HTTPException(status_code=503, detail="Cache manager not initialized")
-
-        count = cache_manager.clear_cache()
-        return {
-            "message": "Cache cleared successfully",
-            "entries_cleared": count
-        }
-    except Exception as e:
-        # Security: Use sanitized error message (prevents information disclosure)
-        safe_message = get_safe_error_message(e, "clear cache endpoint")
-        raise HTTPException(status_code=500, detail=safe_message)
-
-
-@app.get("/api/cache/enabled", tags=["Cache"])
-async def get_cache_enabled(
-    current_user: dict = Depends(get_current_active_user)
-):
-    """
-    Get cache enabled status
-    """
-    try:
-        if not cache_manager:
-            raise HTTPException(status_code=503, detail="Cache manager not initialized")
-
-        return {
-            "enabled": cache_manager.is_enabled()
-        }
-    except Exception as e:
-        safe_message = get_safe_error_message(e, "get cache enabled endpoint")
-        raise HTTPException(status_code=500, detail=safe_message)
-
-
-@app.post("/api/cache/enabled", tags=["Cache"])
-async def set_cache_enabled(
-    request: CacheEnabledRequest,
-    current_user: dict = Depends(get_current_active_user)
-):
-    """
-    Enable or disable cache
-    """
-    try:
-        if not cache_manager:
-            raise HTTPException(status_code=503, detail="Cache manager not initialized")
-
-        success = cache_manager.set_enabled(request.enabled)
-        if not success:
-            raise HTTPException(status_code=500, detail="Failed to set cache enabled state")
-
-        return {
-            "message": f"Cache {'enabled' if request.enabled else 'disabled'} successfully",
-            "enabled": request.enabled
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        safe_message = get_safe_error_message(e, "set cache enabled endpoint")
-        raise HTTPException(status_code=500, detail=safe_message)
 
 
 @app.get("/api/validation/stats", tags=["Quality", "Admin"])
