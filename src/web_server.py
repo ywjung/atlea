@@ -10,7 +10,7 @@ import hashlib
 import asyncio
 from pathlib import Path
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timedelta
 from fastapi import FastAPI, HTTPException, UploadFile, File, Request, Response, Depends, BackgroundTasks, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
@@ -55,7 +55,7 @@ from .exceptions import (
 )
 
 # v2.2.0: Authentication router
-from .routers import auth, admin, organizations
+from .routers import auth, admin, organizations, documents
 from .auth.middleware import get_current_active_user, require_admin
 
 # Load environment variables
@@ -955,6 +955,9 @@ app.include_router(admin.router)
 # Register organizations router
 app.include_router(organizations.router)
 
+# Register documents router (Phase 1: Modularization - 3 PoC endpoints)
+app.include_router(documents.router)
+
 
 # WebSocket endpoint for real-time security alerts
 @app.websocket("/ws/alerts")
@@ -1605,6 +1608,13 @@ class DocsSearchResponse(BaseModel):
     results: List[dict]
     query: str
     tech_stack: Optional[str] = None
+
+
+class HwpxConversionRequest(BaseModel):
+    """HWPX 변환 요청"""
+    content: str = Field(..., description="변환할 HTML 또는 Markdown 내용")
+    content_type: str = Field(default="html", description="내용 타입: 'html' 또는 'markdown'")
+    filename: Optional[str] = Field(default=None, description="출력 파일명 (선택사항)")
 
 
 # Lazy loading functions for LLM (only load when needed)
@@ -2418,6 +2428,48 @@ async def update_backup_schedule(
 
 # ==================== End of Redis Backup Management ====================
 
+# ==================== Audit Log Cleanup Scheduler ====================
+
+audit_cleanup_scheduler_task = None
+
+async def audit_cleanup_scheduler():
+    """감사 로그 정리 스케줄러 - 매일 새벽 3시에 90일 이상 된 로그 삭제"""
+    logger.info("🗑️ Audit log cleanup scheduler started")
+
+    while True:
+        try:
+            # 현재 시간
+            now = datetime.now()
+
+            # 다음 실행 시간 계산 (다음날 새벽 3시)
+            next_run = now.replace(hour=3, minute=0, second=0, microsecond=0)
+            if now >= next_run:
+                # 이미 지났으면 다음날
+                next_run += timedelta(days=1)
+
+            # 대기 시간 계산
+            wait_seconds = (next_run - now).total_seconds()
+            logger.info(f"📅 Next audit log cleanup scheduled at {next_run.strftime('%Y-%m-%d %H:%M:%S')} (in {wait_seconds/3600:.1f} hours)")
+
+            # 대기
+            await asyncio.sleep(wait_seconds)
+
+            # 정리 실행
+            if audit_logger:
+                logger.info("🗑️ Starting audit log cleanup...")
+                deleted_count = audit_logger.cleanup_old_logs()
+                logger.success(f"✅ Audit log cleanup completed: {deleted_count} logs deleted")
+            else:
+                logger.warning("⚠️ Audit logger not initialized, skipping cleanup")
+
+        except asyncio.CancelledError:
+            logger.info("🛑 Audit cleanup scheduler cancelled")
+            break
+        except Exception as e:
+            logger.error(f"❌ Audit cleanup scheduler error: {e}")
+            # 에러 발생 시 1시간 후 재시도
+            await asyncio.sleep(3600)
+
 # ==================== Backup Scheduler ====================
 
 backup_scheduler_task = None
@@ -2661,18 +2713,28 @@ async def startup_event():
         except Exception as e:
             logger.debug(f"Failed to check reindex state (non-critical): {e}")
 
+        # Set rate limit configuration in Redis from environment variable
+        try:
+            rate_limit_enabled = os.getenv("RATE_LIMIT_ENABLED", "false").lower()
+            vector_db.client.set("config:rate_limit_enabled", rate_limit_enabled)
+            logger.info(f"⚙️  Rate limiting: {rate_limit_enabled}")
+        except Exception as e:
+            logger.warning(f"Failed to set rate limit config in Redis: {e}")
+
         # Initialize cache manager with production settings
         logger.info("💾 Initializing cache manager...")
 
         # Production cache configuration
         cache_similarity_threshold = float(os.getenv("CACHE_SIMILARITY_THRESHOLD", 0.90))  # Lowered from 0.95 to 0.90
         cache_ttl = int(os.getenv("CACHE_TTL", 3600))  # Default 1 hour
+        memory_cache_size = int(os.getenv("MEMORY_CACHE_SIZE", 200))  # Increased from 50 to 200 for better hit rate
 
         cache_manager = CacheManager(
             redis_client=vector_db.client,
             embedding_model=embedding_model.model,
             similarity_threshold=cache_similarity_threshold,
-            cache_ttl=cache_ttl
+            cache_ttl=cache_ttl,
+            memory_cache_size=memory_cache_size
         )
 
         logger.info(f"Cache configured: similarity={cache_similarity_threshold}, TTL={cache_ttl}s")
@@ -2719,6 +2781,18 @@ async def startup_event():
             max_versions=max_versions
         )
         logger.info(f"Document version manager configured: max_versions={max_versions}")
+
+        # Inject dependencies into documents router
+        logger.info("📄 Injecting dependencies into documents router...")
+        documents.inject_dependencies(
+            vdb=vector_db,
+            doc_processor=None,  # DocumentProcessor is created per-request, not global
+            doc_version=document_version,
+            grp_manager=group_manager,
+            cache_mgr=cache_manager,
+            data_dir=DATA_DIR
+        )
+        logger.info("✅ Documents router dependencies injected")
 
         # Auto-migrate existing documents to version control
         logger.info("🔄 Running document version migration...")
@@ -2794,6 +2868,11 @@ async def startup_event():
         global backup_scheduler_task
         backup_scheduler_task = asyncio.create_task(backup_scheduler())
         logger.info("🕐 Backup scheduler initialized")
+
+        # Start audit log cleanup scheduler
+        global audit_cleanup_scheduler_task
+        audit_cleanup_scheduler_task = asyncio.create_task(audit_cleanup_scheduler())
+        logger.info("🗑️ Audit log cleanup scheduler initialized")
 
         # Initialize Hybrid RAG Orchestrator (will check Redis config at runtime)
         global hybrid_rag_orchestrator
@@ -3207,18 +3286,31 @@ async def index_pdfs(doc_tracker: DocumentTracker, target_index: Optional[str] =
             if not filename:
                 continue
 
+            # Count chunks for this file
+            file_chunks = [c for c in chunks if c.get("filename") == filename]
+            chunk_count = len(file_chunks)
+
             # Check if version already exists
             try:
                 existing_versions = document_version.list_versions(filename)
                 if existing_versions:
+                    # Update chunk_count for latest version
+                    latest_version = document_version.get_latest_version(filename)
+                    if latest_version:
+                        version_key = f"doc:version:{filename}:v{latest_version}"
+                        try:
+                            # Update chunk_count and indexed status in version metadata
+                            vector_db.client.hset(version_key, mapping={
+                                'chunk_count': chunk_count,
+                                'indexed': 'True'
+                            })
+                            logger.debug(f"Updated chunk_count={chunk_count} for {filename} v{latest_version}")
+                        except Exception as e:
+                            logger.warning(f"Failed to update chunk_count for {filename}: {e}")
                     version_skipped_count += 1
                     continue
             except Exception:
                 pass
-
-            # Count chunks for this file
-            file_chunks = [c for c in chunks if c.get("filename") == filename]
-            chunk_count = len(file_chunks)
 
             # Find the source file
             source_path = data_path / filename
@@ -3281,11 +3373,22 @@ async def index_pdfs(doc_tracker: DocumentTracker, target_index: Optional[str] =
 
 @app.get("/", response_class=HTMLResponse)
 async def root():
-    """Serve main page"""
+    """Serve main page with no-cache headers"""
     index_file = static_path / "index.html"
     if not index_file.exists():
         raise HTTPException(status_code=404, detail="index.html not found")
-    return index_file.read_text(encoding="utf-8")
+
+    content = index_file.read_text(encoding="utf-8")
+
+    # Always use no-cache for index.html to ensure users get latest version
+    return HTMLResponse(
+        content=content,
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0"
+        }
+    )
 
 
 @app.post("/api/query", response_model=QueryResponse, tags=["Query"])
@@ -3537,8 +3640,14 @@ async def query_stream(
     # Reindexing happens on a separate index, then swaps atomically
 
     try:
-        # Save user question to conversation history
-        if request.session_id and conversation_manager:
+        # Ensure session exists (create if needed)
+        if conversation_manager:
+            if not request.session_id or not conversation_manager.session_exists(request.session_id):
+                # Create new session if session_id is None or doesn't exist
+                request.session_id = conversation_manager.create_session()
+                logger.info(f"Created new session for user query: {request.session_id}")
+
+            # Save user question to conversation history
             conversation_manager.add_message(
                 session_id=request.session_id,
                 role="user",
@@ -3929,7 +4038,17 @@ async def query_stream(
 
             # Define background task for cache saves
             def save_to_caches():
-                # Save to semantic cache (similarity-based, 1-hour TTL)
+                # Determine content type based on source documents
+                content_type = 'default'
+                if result.get("sources"):
+                    # Check if sources contain regulation/policy documents (usually PDFs with specific keywords)
+                    sources_text = ' '.join(result["sources"]).lower()
+                    if any(keyword in sources_text for keyword in ['규정', '규칙', '지침', '정책', '방침', '절차']):
+                        content_type = 'static_docs'  # 24-hour cache for regulations
+                    elif any(keyword in sources_text for keyword in ['faq', '자주', '질문']):
+                        content_type = 'realtime'  # 5-minute cache for FAQs
+
+                # Save to semantic cache (similarity-based, dynamic TTL based on content type)
                 cache_manager.save_to_cache(
                     question=request.question,
                     response=complete_response,
@@ -3938,9 +4057,10 @@ async def query_stream(
                     cache_ttl=request.cache_ttl,
                     context=context_data["context"],
                     document_ids=request.document_ids,
-                    group_ids=request.group_ids
+                    group_ids=request.group_ids,
+                    content_type=content_type
                 )
-                logger.info(f"💾 [BG] Saved to semantic cache: '{request.question[:50]}...'")
+                logger.info(f"💾 [BG] Saved to semantic cache ({content_type}): '{request.question[:50]}...'")
 
                 # Save to query result cache (exact match, 5-min TTL)
                 cache_manager.set_query_result_cache(
@@ -4025,6 +4145,64 @@ async def cleanup_old_index_async(index_name: str):
         logger.error(f"Failed to cleanup old index {index_name}: {e}")
 
 
+async def rebuild_doc_group_mappings():
+    """
+    Rebuild doc:group:{filename} mappings from indexed document data
+
+    This ensures that all documents have proper group assignments after reindex.
+    Document data contains group_id, so we extract it and create the reverse mapping.
+    """
+    try:
+        # Get current index name
+        index_name = vector_db.active_index_name
+
+        # Scan all document chunks to get filename → group_id mappings
+        file_to_group = {}
+        cursor = 0
+
+        while True:
+            cursor, keys = vector_db.client.scan(cursor, match=f"doc:{index_name}:*", count=100)
+
+            for key in keys:
+                # Skip non-document keys
+                if any(x in key for x in [':hash:', ':group:', ':version:', ':counts:', ':files']):
+                    continue
+
+                # Get document data
+                doc_data = vector_db.client.hgetall(key)
+                if not doc_data:
+                    continue
+
+                filename = doc_data.get('filename')
+                group_id = doc_data.get('group_id')
+
+                if filename and group_id and filename not in file_to_group:
+                    file_to_group[filename] = group_id
+
+            if cursor == 0:
+                break
+
+        if not file_to_group:
+            logger.warning("⚠️  No documents found for group mapping rebuild")
+            return
+
+        logger.info(f"📊 Found {len(file_to_group)} unique documents")
+
+        # Rebuild doc:group mappings and group:docs sets
+        pipe = vector_db.client.pipeline()
+        for filename, group_id in file_to_group.items():
+            pipe.set(f"doc:group:{filename}", group_id)
+            pipe.sadd(f"group:docs:{group_id}", filename)
+
+        pipe.execute()
+
+        logger.success(f"✅ Rebuilt {len(file_to_group)} document group mappings")
+
+    except Exception as e:
+        logger.error(f"Failed to rebuild doc:group mappings: {e}")
+        # Don't raise - this shouldn't fail the entire reindex
+
+
 async def run_reindex_task():
     """Background task for reindexing with Blue-Green deployment (zero downtime)"""
     global is_reindexing, should_cancel_reindex, reindex_event
@@ -4097,6 +4275,9 @@ async def run_reindex_task():
 
         logger.info("🔄 Synchronizing group document counts...")
         group_manager.sync_document_counts()
+
+        logger.info("🔨 Rebuilding document group mappings...")
+        await rebuild_doc_group_mappings()
 
         # Schedule cleanup of old index (async, non-blocking)
         logger.info(f"🗑️ Scheduling cleanup of old index: {old_index_name}")
@@ -5440,6 +5621,131 @@ async def delete_document(
         raise HTTPException(status_code=500, detail=safe_message)
 
 
+@app.get("/api/documents/{filename}/download", tags=["Documents"])
+async def download_document(
+    filename: str,
+    current_user: dict = Depends(get_current_active_user)
+):
+    """
+    Download original document file
+
+    Args:
+        filename: Document filename
+
+    Returns:
+        FileResponse with the original document
+    """
+    try:
+        from fastapi.responses import FileResponse
+
+        # Security: Validate and sanitize filename
+        safe_filename = validate_filename(filename)
+
+        data_path = Path(DATA_DIR)
+        file_path = data_path / safe_filename
+
+        # Check if file exists
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail=f"File '{safe_filename}' not found")
+
+        # Return file for download
+        return FileResponse(
+            path=str(file_path),
+            filename=safe_filename,
+            media_type='application/octet-stream'
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        safe_message = get_safe_error_message(e, "download endpoint")
+        raise HTTPException(status_code=500, detail=safe_message)
+
+
+@app.get("/api/documents/{filename}/download-pdf", tags=["Documents"])
+async def download_document_as_pdf(
+    filename: str,
+    current_user: dict = Depends(get_current_active_user)
+):
+    """
+    Download document converted to PDF format
+
+    Args:
+        filename: Document filename
+
+    Returns:
+        FileResponse with PDF file (original if PDF, converted otherwise)
+    """
+    try:
+        from fastapi.responses import FileResponse
+        import subprocess
+        import tempfile
+
+        # Security: Validate and sanitize filename
+        safe_filename = validate_filename(filename)
+
+        data_path = Path(DATA_DIR)
+        file_path = data_path / safe_filename
+
+        # Check if file exists
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail=f"File '{safe_filename}' not found")
+
+        # If already PDF, return as is
+        if safe_filename.lower().endswith('.pdf'):
+            return FileResponse(
+                path=str(file_path),
+                filename=safe_filename,
+                media_type='application/pdf'
+            )
+
+        # For non-PDF files, use document-service for conversion
+        try:
+            # Check if document-service is available
+            import httpx
+
+            # Call document-service conversion API
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                # Read file content
+                with open(file_path, 'rb') as f:
+                    files = {'file': (safe_filename, f, 'application/octet-stream')}
+
+                    # Try to convert using document-service
+                    response = await client.post(
+                        'http://document-service:8081/api/convert/to-pdf',
+                        files=files
+                    )
+
+                    if response.status_code == 200:
+                        # Save converted PDF to temp file
+                        pdf_filename = safe_filename.rsplit('.', 1)[0] + '.pdf'
+                        temp_pdf = tempfile.NamedTemporaryFile(delete=False, suffix='.pdf')
+                        temp_pdf.write(response.content)
+                        temp_pdf.close()
+
+                        return FileResponse(
+                            path=temp_pdf.name,
+                            filename=pdf_filename,
+                            media_type='application/pdf',
+                            background=BackgroundTasks().add_task(lambda: Path(temp_pdf.name).unlink())
+                        )
+        except Exception as e:
+            logger.warning(f"PDF conversion failed: {e}")
+            # Fall through to return original file
+
+        # If conversion not available, return original file
+        raise HTTPException(
+            status_code=400,
+            detail=f"PDF conversion not available for {safe_filename}. Only original file can be downloaded."
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        safe_message = get_safe_error_message(e, "download-pdf endpoint")
+        raise HTTPException(status_code=500, detail=safe_message)
+
+
 # ============================================================================
 # v2.3.0: Document Version Management API Endpoints
 # ============================================================================
@@ -6126,6 +6432,44 @@ async def get_public_system_prompt(
         }
 
 
+@app.get("/api/system/metrics", tags=["System"])
+async def get_system_metrics(
+    request: Request,
+    current_user: dict = Depends(get_current_active_user)
+):
+    """시스템 메트릭 조회 (관리자 및 로그인한 사용자)
+
+    시스템 전체의 성능 및 상태 메트릭을 조회합니다:
+    - Redis 메모리 사용량 및 통계
+    - 캐시 히트율 및 검색 통계
+    - 슬로우 쿼리 성능 통계
+
+    Args:
+        current_user: 현재 로그인한 사용자 정보
+
+    Returns:
+        시스템 메트릭 정보
+    """
+    try:
+        metrics_collector = request.app.state.metrics_collector
+
+        if not metrics_collector:
+            raise HTTPException(status_code=500, detail="Metrics collector not available")
+
+        # 시스템 메트릭 조회
+        metrics = metrics_collector.get_system_metrics()
+
+        return {
+            "success": True,
+            "metrics": metrics,
+            "timestamp": datetime.now().isoformat()
+        }
+
+    except Exception as e:
+        logger.error(f"❌ Failed to get system metrics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/models", tags=["Settings"])
 async def list_available_models(
     current_user: dict = Depends(get_current_active_user)
@@ -6517,6 +6861,107 @@ async def search_docs(
         raise HTTPException(
             status_code=500,
             detail=f"공식 문서 검색 중 오류가 발생했습니다: {str(e)}"
+        )
+
+
+@app.post("/api/convert/hwpx", tags=["Conversion"])
+async def convert_to_hwpx(
+    request: HwpxConversionRequest,
+    current_user: dict = Depends(get_current_active_user)
+):
+    """
+    HTML/Markdown을 HWPX 형식으로 변환
+
+    - 인증 필요 (로그인한 사용자만)
+    - Java document-service에 프록시 요청
+    - HWPX 파일을 바이너리로 반환
+    """
+    try:
+        import httpx
+
+        logger.info(f"📄 HWPX 변환 요청: content_type={request.content_type}, 길이={len(request.content)}")
+
+        # Java 서비스 URL
+        java_service_url = os.getenv("DOCUMENT_SERVICE_URL", "http://localhost:8081")
+
+        # 엔드포인트 선택
+        if request.content_type == "markdown":
+            endpoint = f"{java_service_url}/api/conversion/markdown-to-hwpx"
+            payload = {
+                "markdownContent": request.content,
+                "filename": request.filename
+            }
+        else:  # html
+            endpoint = f"{java_service_url}/api/conversion/html-to-hwpx"
+            payload = {
+                "htmlContent": request.content,
+                "filename": request.filename
+            }
+
+        # Java 서비스에 요청
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                endpoint,
+                json=payload,
+                headers={"Content-Type": "application/json"}
+            )
+
+            if response.status_code != 200:
+                error_detail = response.text
+                logger.error(f"❌ Java 서비스 오류: {response.status_code} - {error_detail}")
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=f"HWPX 변환 실패: {error_detail}"
+                )
+
+            # 파일명 추출 (Content-Disposition 헤더에서)
+            content_disposition = response.headers.get("content-disposition", "")
+            filename = request.filename or "document.hwpx"
+            if "filename=" in content_disposition:
+                # filename*=UTF-8''encoded_name 형식 처리
+                import urllib.parse
+                parts = content_disposition.split("filename=")
+                if len(parts) > 1:
+                    filename_part = parts[1].strip('"').strip("'")
+                    try:
+                        filename = urllib.parse.unquote(filename_part)
+                    except:
+                        pass
+
+            if not filename.endswith(".hwpx"):
+                filename += ".hwpx"
+
+            logger.success(f"✅ HWPX 변환 완료: {filename}, {len(response.content)} bytes")
+
+            # HWPX 파일 반환
+            return Response(
+                content=response.content,
+                media_type="application/octet-stream",
+                headers={
+                    "Content-Disposition": f'attachment; filename="{filename}"',
+                    "Content-Length": str(len(response.content))
+                }
+            )
+
+    except httpx.TimeoutException:
+        logger.error("❌ Java 서비스 타임아웃")
+        raise HTTPException(
+            status_code=504,
+            detail="HWPX 변환 서비스 응답 시간 초과"
+        )
+    except httpx.ConnectError:
+        logger.error("❌ Java 서비스 연결 실패")
+        raise HTTPException(
+            status_code=503,
+            detail="HWPX 변환 서비스에 연결할 수 없습니다. 서비스가 실행 중인지 확인하세요."
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ HWPX 변환 실패: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"HWPX 변환 중 오류가 발생했습니다: {str(e)}"
         )
 
 
