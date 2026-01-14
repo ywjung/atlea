@@ -55,7 +55,7 @@ from .exceptions import (
 )
 
 # v2.2.0: Authentication router
-from .routers import auth, admin, organizations, documents, cache, conversations, feedback
+from .routers import auth, admin, organizations, documents, cache, conversations, feedback, settings
 from .auth.middleware import get_current_active_user, require_admin
 
 # Load environment variables
@@ -967,6 +967,9 @@ app.include_router(conversations.router)
 # Register feedback router (Phase 1: Modularization - 5 endpoints)
 app.include_router(feedback.router)
 
+# Register settings router (Phase 1: Modularization - 5 endpoints)
+app.include_router(settings.router)
+
 
 # WebSocket endpoint for real-time security alerts
 @app.websocket("/ws/alerts")
@@ -1544,15 +1547,6 @@ class EmbeddingChangeRequest(BaseModel):
 
 class CacheEnabledRequest(BaseModel):
     enabled: bool
-
-
-class UserPreferences(BaseModel):
-    """사용자 설정"""
-    search_scope: Optional[str] = "all"  # "all", "selected_documents", "selected_groups"
-    selected_document_ids: Optional[List[str]] = []
-    selected_group_ids: Optional[List[str]] = []
-    active_filter_tab: Optional[str] = "documents"  # "documents" or "groups"
-    group_filter_mode: Optional[str] = "all"  # "all" or "selected"
 
 
 class PromptsUpdateRequest(BaseModel):
@@ -2809,6 +2803,13 @@ async def startup_event():
         )
         logger.info("✅ Feedback router dependencies injected (5 endpoints)")
 
+        # Inject dependencies into settings router (5 endpoints)
+        logger.info("⚙️ Injecting dependencies into settings router...")
+        settings.inject_dependencies(
+            cache_mgr=cache_manager
+        )
+        logger.info("✅ Settings router dependencies injected (5 endpoints)")
+
         # Auto-migrate existing documents to version control
         logger.info("🔄 Running document version migration...")
         try:
@@ -3852,89 +3853,6 @@ async def query_stream(
     except Exception as e:
         # Security: Use sanitized error message (prevents information disclosure)
         safe_message = get_safe_error_message(e, "streaming query endpoint")
-        raise HTTPException(status_code=500, detail=safe_message)
-
-
-@app.get("/api/user/preferences", tags=["User", "Preferences"])
-async def get_user_preferences(request: Request, current_user: dict = Depends(get_current_active_user)):
-    """
-    사용자 설정 조회
-
-    Returns:
-        사용자의 검색 범위 설정 등
-    """
-    try:
-        redis = request.app.state.cache_manager.redis
-        username = current_user.get("username")
-
-        # Redis에서 사용자 설정 조회
-        preferences_key = f"user:preferences:{username}"
-        preferences_data = redis.get(preferences_key)
-
-        if preferences_data:
-            preferences = json.loads(preferences_data)
-        else:
-            # 기본값 반환
-            preferences = {
-                "search_scope": "all",
-                "selected_document_ids": [],
-                "selected_group_ids": [],
-                "active_filter_tab": "documents",
-                "group_filter_mode": "all"
-            }
-
-        logger.info(f"📋 사용자 설정 조회: {username}")
-        return {
-            "success": True,
-            "data": preferences
-        }
-
-    except Exception as e:
-        safe_message = get_safe_error_message(e, "get user preferences endpoint")
-        raise HTTPException(status_code=500, detail=safe_message)
-
-
-@app.put("/api/user/preferences", tags=["User", "Preferences"])
-async def update_user_preferences(
-    request: Request,
-    preferences: UserPreferences,
-    current_user: dict = Depends(get_current_active_user)
-):
-    """
-    사용자 설정 저장
-
-    Args:
-        preferences: 저장할 사용자 설정
-
-    Returns:
-        저장 성공 메시지
-    """
-    try:
-        redis = request.app.state.cache_manager.redis
-        username = current_user.get("username")
-
-        # Redis에 사용자 설정 저장 (TTL: 1년)
-        preferences_key = f"user:preferences:{username}"
-        preferences_data = preferences.dict()
-
-        redis.setex(
-            preferences_key,
-            365 * 24 * 60 * 60,  # 1 year
-            json.dumps(preferences_data)
-        )
-
-        logger.success(f"✅ 사용자 설정 저장 완료: {username}")
-        logger.debug(f"   - 검색 범위: {preferences.search_scope}")
-        logger.debug(f"   - 선택된 문서: {len(preferences.selected_document_ids or [])}개")
-        logger.debug(f"   - 선택된 그룹: {len(preferences.selected_group_ids or [])}개")
-
-        return {
-            "success": True,
-            "message": "설정이 저장되었습니다."
-        }
-
-    except Exception as e:
-        safe_message = get_safe_error_message(e, "update user preferences endpoint")
         raise HTTPException(status_code=500, detail=safe_message)
 
 
@@ -5486,123 +5404,6 @@ system_memory_percent {memory.percent}
 #     except Exception as e:
 #         logger.error(f"Failed to get security logs: {e}")
 #         raise HTTPException(status_code=500, detail="Failed to retrieve security logs")
-
-
-@app.get("/api/settings", tags=["Settings"])
-async def get_settings(
-    request: Request,
-    current_user: dict = Depends(get_current_active_user)
-):
-    """시스템 설정 조회 (모든 인증된 사용자)
-
-    Returns:
-        시스템 설정 (자동 로그아웃 타임아웃 등)
-    """
-    try:
-        # 사용자 인증 확인
-        from .auth.utils import get_current_user_from_request
-        from .services import SettingsService
-
-        redis_client = request.app.state.cache_manager.redis
-        get_current_user_from_request(request, redis_client)
-
-        # 설정 조회
-        settings_service = SettingsService(redis_client)
-        settings = settings_service.get_settings_dict()
-
-        return {"settings": settings}
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to get settings: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve settings")
-
-
-@app.get("/api/admin/settings", tags=["Admin"])
-async def get_admin_settings(request: Request):
-    """시스템 설정 조회 (관리자 전용)
-
-    Returns:
-        시스템 설정 (자동 로그아웃 타임아웃 등)
-    """
-    try:
-        # 관리자 권한 확인
-        from .auth.utils import require_admin
-        from .services import SettingsService
-
-        redis_client = request.app.state.cache_manager.redis
-        require_admin(request, redis_client)
-
-        # 설정 조회
-        settings_service = SettingsService(redis_client)
-        settings = settings_service.get_settings_dict()
-
-        return {"settings": settings}
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to get settings: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve settings")
-
-
-@app.put("/api/admin/settings", tags=["Admin"])
-async def update_admin_settings(request: Request):
-    """시스템 설정 업데이트 (관리자 전용)
-
-    Request body:
-        {
-            "inactivity_timeout": 30,  # 분 단위
-            "warning_time": 5,         # 분 단위
-            "check_interval": 1        # 분 단위
-        }
-
-    Returns:
-        업데이트된 설정
-    """
-    try:
-        # 관리자 권한 확인
-        from .auth.utils import require_admin, extract_token_from_request, verify_token
-        from .services import SettingsService
-        from .auth.models import SystemSettings
-        from pydantic import ValidationError
-
-        redis_client = request.app.state.cache_manager.redis
-        require_admin(request, redis_client)
-
-        # Request body 파싱 및 검증
-        body = await request.json()
-
-        try:
-            new_settings = SystemSettings(**body)
-        except ValidationError as e:
-            # Pydantic 검증 에러를 HTTP 400으로 변환
-            error_messages = "; ".join([f"{err['loc'][0]}: {err['msg']}" for err in e.errors()])
-            raise HTTPException(status_code=400, detail=error_messages)
-
-        # 설정 업데이트
-        settings_service = SettingsService(redis_client)
-        try:
-            updated_settings = settings_service.update_settings(new_settings)
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-
-        # 로깅
-        token = extract_token_from_request(request)
-        user_data = verify_token(token)
-        logger.info(f"System settings updated by user {user_data['user_id']}: {updated_settings.model_dump()}")
-
-        return {
-            "settings": updated_settings.model_dump(),
-            "message": "Settings updated successfully"
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to update settings: {e}")
-        raise HTTPException(status_code=500, detail="Failed to update settings")
 
 
 @app.post("/api/admin/system-prompt", tags=["Admin"])
