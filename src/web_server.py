@@ -56,6 +56,7 @@ from .exceptions import (
 
 # v2.2.0: Authentication router
 from .routers import auth, admin, organizations, documents, cache, conversations, feedback, settings, groups, audit, models
+from .routers import metrics as metrics_router
 from .auth.middleware import get_current_active_user, require_admin
 
 # Load environment variables
@@ -978,6 +979,9 @@ app.include_router(audit.router)
 
 # Register models router (Phase 1: Modularization - 3 endpoints)
 app.include_router(models.router)
+
+# Register metrics router (Phase 1: Modularization - 4 endpoints)
+app.include_router(metrics_router.router)
 
 
 # WebSocket endpoint for real-time security alerts
@@ -2928,6 +2932,13 @@ async def startup_event():
             reload_callback=model_reload_callback
         )
         logger.info("✅ Models router dependencies injected (3 endpoints)")
+
+        # Inject dependencies into metrics router (4 endpoints)
+        logger.info("📊 Injecting dependencies into metrics router...")
+        metrics_router.inject_dependencies(
+            cache_mgr=cache_manager
+        )
+        logger.info("✅ Metrics router dependencies injected (4 endpoints)")
 
         # Auto-migrate existing documents to version control
         logger.info("🔄 Running document version migration...")
@@ -5730,172 +5741,6 @@ async def update_prompts(data: PromptsUpdateRequest, request: Request):
         logger.error(f"Failed to update model config: {e}")
         raise HTTPException(status_code=500, detail="Failed to update model configuration")
 
-
-# ============================================================
-# Metrics & Performance Monitoring APIs (Admin Only)
-# ============================================================
-
-@app.get("/api/admin/metrics/summary", tags=["Admin", "Metrics"])
-async def get_metrics_summary(
-    current_user: dict = Depends(get_current_active_user),
-    request: Request = None
-):
-    """
-    성능 메트릭 종합 요약 조회 (관리자 전용)
-
-    Returns:
-        {
-            'global': 전체 통계,
-            'today': 오늘 통계,
-            'recent_24h': 최근 24시간 통계,
-            'trend': 트렌드 분석,
-            'daily': 일별 통계 (최근 7일),
-            'hourly': 시간별 통계 (최근 24시간)
-        }
-    """
-    try:
-        # 관리자 권한 확인
-        from .auth.utils import require_admin
-        redis_client = request.app.state.cache_manager.redis
-        require_admin(request, redis_client)
-
-        # 메트릭 수집기 초기화
-        metrics = MetricsCollector(redis_client)
-
-        # 종합 요약 조회
-        summary = metrics.get_summary()
-
-        return {
-            'success': True,
-            'data': summary
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to get metrics summary: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve metrics summary")
-
-
-@app.get("/api/admin/metrics/recent", tags=["Admin", "Metrics"])
-async def get_recent_searches(
-    limit: int = 100,
-    current_user: dict = Depends(get_current_active_user),
-    request: Request = None
-):
-    """
-    최근 검색 기록 조회 (관리자 전용)
-
-    Args:
-        limit: 조회할 개수 (기본 100, 최대 1000)
-
-    Returns:
-        최근 검색 메트릭 리스트
-    """
-    try:
-        # 관리자 권한 확인
-        from .auth.utils import require_admin
-        redis_client = request.app.state.cache_manager.redis
-        require_admin(request, redis_client)
-
-        # Limit 검증
-        limit = min(limit, 1000)
-
-        # 메트릭 수집기 초기화
-        metrics = MetricsCollector(redis_client)
-
-        # 최근 검색 조회
-        recent_searches = metrics.get_recent_searches(limit=limit)
-
-        return {
-            'success': True,
-            'data': recent_searches,
-            'count': len(recent_searches)
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to get recent searches: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve recent searches")
-
-
-@app.get("/api/admin/metrics/source-performance", tags=["Admin", "Metrics"])
-async def get_source_performance(
-    current_user: dict = Depends(get_current_active_user),
-    request: Request = None
-):
-    """
-    소스별 성능 비교 (관리자 전용)
-
-    Returns:
-        {
-            'local': {'count': int, 'avg_time': float, 'avg_results': float},
-            'web': {'count': int, 'avg_time': float, 'avg_results': float},
-            'docs': {'count': int, 'avg_time': float, 'avg_results': float}
-        }
-    """
-    try:
-        # 관리자 권한 확인
-        from .auth.utils import require_admin
-        redis_client = request.app.state.cache_manager.redis
-        require_admin(request, redis_client)
-
-        # 메트릭 수집기 초기화
-        metrics = MetricsCollector(redis_client)
-
-        # 소스별 성능 조회
-        source_perf = metrics.get_source_performance()
-
-        return {
-            'success': True,
-            'data': source_perf
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to get source performance: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve source performance")
-
-
-@app.delete("/api/admin/metrics/cleanup", tags=["Admin", "Metrics"])
-async def cleanup_old_metrics(
-    days: int = 30,
-    current_user: dict = Depends(get_current_active_user),
-    request: Request = None
-):
-    """
-    오래된 메트릭 데이터 삭제 (관리자 전용)
-
-    Args:
-        days: 보관 기간 (일) - 기본 30일
-
-    Returns:
-        성공 메시지
-    """
-    try:
-        # 관리자 권한 확인
-        from .auth.utils import require_admin
-        redis_client = request.app.state.cache_manager.redis
-        require_admin(request, redis_client)
-
-        # 메트릭 수집기 초기화
-        metrics = MetricsCollector(redis_client)
-
-        # 오래된 데이터 삭제
-        metrics.clear_old_data(days=days)
-
-        return {
-            'success': True,
-            'message': f'{days}일 이전 메트릭 데이터가 삭제되었습니다'
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to cleanup old metrics: {e}")
-        raise HTTPException(status_code=500, detail="Failed to cleanup old metrics")
 
 
 if __name__ == "__main__":
