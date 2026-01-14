@@ -55,7 +55,7 @@ from .exceptions import (
 )
 
 # v2.2.0: Authentication router
-from .routers import auth, admin, organizations, documents, cache, conversations, feedback, settings, groups, audit
+from .routers import auth, admin, organizations, documents, cache, conversations, feedback, settings, groups, audit, models
 from .auth.middleware import get_current_active_user, require_admin
 
 # Load environment variables
@@ -975,6 +975,9 @@ app.include_router(groups.router)
 
 # Register audit router (Phase 1: Modularization - 4 endpoints)
 app.include_router(audit.router)
+
+# Register models router (Phase 1: Modularization - 3 endpoints)
+app.include_router(models.router)
 
 
 # WebSocket endpoint for real-time security alerts
@@ -2830,6 +2833,101 @@ async def startup_event():
             cache_mgr=cache_manager
         )
         logger.info("✅ Audit router dependencies injected (4 endpoints)")
+
+        # Define model reload callback for models router
+        def model_reload_callback(backend: str, llm_model: str = None, embedding_model_name: str = None):
+            """Callback to reload models when configuration changes"""
+            global llm, rag_system, embedding_model, vector_db, LLM_MODEL, EMBEDDING_MODEL
+
+            llm_changed = False
+            embedding_changed = False
+            use_ollama = backend == "ollama"
+
+            # LLM 모델 즉시 적용
+            if llm_model:
+                try:
+                    if use_ollama:
+                        # Ollama: 환경변수에서 읽음
+                        llm = LLM(model_dir=MODEL_DIR)
+                    else:
+                        # Local: 직접 모델명 전달
+                        LLM_MODEL = llm_model
+                        llm = LLM(model_name=LLM_MODEL, model_dir=MODEL_DIR)
+
+                    # RAG 시스템 재초기화
+                    rag_system = RAGSystem(
+                        vector_db=vector_db,
+                        llm=llm,
+                        top_k=5
+                    )
+                    llm_changed = True
+                    logger.success(f"✅ LLM model changed to: {llm_model}")
+                except Exception as e:
+                    logger.error(f"Failed to reload LLM: {e}")
+
+            # 임베딩 모델 즉시 적용
+            if embedding_model_name:
+                try:
+                    if use_ollama:
+                        # Ollama: 환경변수에서 읽음
+                        from embeddings_ollama import OllamaEmbedding
+                        embedding_model = OllamaEmbedding(model_dir=MODEL_DIR)
+                    else:
+                        # Local: 직접 모델명 전달
+                        EMBEDDING_MODEL = embedding_model_name
+                        embedding_model = EmbeddingModel(
+                            model_name=EMBEDDING_MODEL,
+                            model_dir=MODEL_DIR
+                        )
+
+                    # Vector DB 재초기화
+                    vector_db = VectorDB(
+                        host=REDIS_HOST,
+                        port=REDIS_PORT,
+                        embedding_dim=embedding_model.get_embedding_dim()
+                    )
+
+                    # RAG 시스템에 새 vector_db 적용
+                    if rag_system:
+                        rag_system = RAGSystem(
+                            vector_db=vector_db,
+                            llm=llm,
+                            top_k=5
+                        )
+
+                    embedding_changed = True
+                    logger.success(f"✅ Embedding model changed to: {embedding_model_name}")
+                    logger.warning("⚠️ 기존 문서들을 새로운 임베딩 모델로 재색인해야 합니다")
+                except Exception as e:
+                    logger.error(f"Failed to reload embedding model: {e}")
+
+            # 응답 메시지 구성
+            response = {
+                "llm_changed": llm_changed,
+                "embedding_changed": embedding_changed,
+                "restart_required": False
+            }
+
+            if llm_changed and embedding_changed:
+                response["message"] = "LLM 및 임베딩 모델이 즉시 적용되었습니다."
+                response["warning"] = "임베딩 모델 변경으로 인해 문서 재색인이 필요합니다."
+            elif llm_changed:
+                response["message"] = "LLM 모델이 즉시 적용되었습니다."
+            elif embedding_changed:
+                response["message"] = "임베딩 모델이 즉시 적용되었습니다."
+                response["warning"] = "임베딩 모델 변경으로 인해 기존 문서를 모두 재색인해야 합니다."
+            else:
+                response["message"] = "설정이 저장되었습니다."
+
+            return response
+
+        # Inject dependencies into models router (3 endpoints)
+        logger.info("🤖 Injecting dependencies into models router...")
+        models.inject_dependencies(
+            cache_mgr=cache_manager,
+            reload_callback=model_reload_callback
+        )
+        logger.info("✅ Models router dependencies injected (3 endpoints)")
 
         # Auto-migrate existing documents to version control
         logger.info("🔄 Running document version migration...")
@@ -5628,295 +5726,6 @@ async def update_prompts(data: PromptsUpdateRequest, request: Request):
         raise HTTPException(status_code=500, detail="Failed to update prompts")
 
 
-# ============================================================================
-# Model Management API
-# ============================================================================
-
-@app.get("/api/admin/models/backend", tags=["Admin", "Models"])
-async def get_model_backend(request: Request):
-    """현재 모델 백엔드 설정 조회 (관리자 전용)
-
-    Returns:
-        현재 사용 중인 백엔드 (ollama/local)와 모델 설정
-    """
-    try:
-        # 관리자 권한 확인
-        from .auth.utils import require_admin
-        redis_client = request.app.state.cache_manager.redis
-        require_admin(request, redis_client)
-
-        use_ollama = os.getenv("USE_OLLAMA", "false").lower() == "true"
-        backend = "ollama" if use_ollama else "local"
-
-        config = {
-            "backend": backend,
-            "ollama": {
-                "base_url": os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
-                "llm_model": os.getenv("OLLAMA_LLM_MODEL", ""),
-                "embedding_model": os.getenv("OLLAMA_EMBEDDING_MODEL", "")
-            },
-            "local": {
-                "llm_model": os.getenv("LLM_MODEL", "mlx-community/Qwen3-30B-A3B-4bit"),
-                "embedding_model": os.getenv("EMBEDDING_MODEL", "nlpai-lab/KURE-v1")
-            }
-        }
-
-        return config
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to get model backend: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve model backend")
-
-
-@app.get("/api/admin/models/list", tags=["Admin", "Models"])
-async def get_model_list(request: Request, backend: str = "ollama"):
-    """모델 목록 조회 (관리자 전용)
-
-    Args:
-        backend: ollama 또는 local
-
-    Returns:
-        사용 가능한 모델 목록
-    """
-    try:
-        # 관리자 권한 확인
-        from .auth.utils import require_admin
-        redis_client = request.app.state.cache_manager.redis
-        require_admin(request, redis_client)
-
-        if backend == "ollama":
-            # Ollama 모델 목록 가져오기
-            import httpx
-            base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-
-            try:
-                response = httpx.get(f"{base_url}/api/tags", timeout=10.0)
-                response.raise_for_status()
-                data = response.json()
-
-                models = data.get("models", [])
-
-                # LLM과 임베딩 모델 분류
-                llm_models = []
-                embedding_models = []
-
-                for model in models:
-                    model_name = model.get("name", "")
-                    size = model.get("size", 0)
-                    size_gb = size / (1024**3) if size else 0
-
-                    model_info = {
-                        "name": model_name,
-                        "size": f"{size_gb:.2f} GB",
-                        "modified_at": model.get("modified_at", "")
-                    }
-
-                    # 임베딩 모델 판별 (이름에 embed, kure, bge 등이 포함된 경우)
-                    if any(keyword in model_name.lower() for keyword in ["embed", "kure", "bge", "e5", "gte"]):
-                        embedding_models.append(model_info)
-                    else:
-                        llm_models.append(model_info)
-
-                return {
-                    "llm_models": llm_models,
-                    "embedding_models": embedding_models
-                }
-
-            except httpx.HTTPError as e:
-                logger.error(f"Failed to connect to Ollama: {e}")
-                raise HTTPException(status_code=503, detail="Ollama 서버에 연결할 수 없습니다")
-
-        elif backend == "local":
-            # 로컬 모델은 하드코딩된 목록 반환 (실제로는 model 디렉토리에서 읽을 수 있음)
-            return {
-                "llm_models": [
-                    {"name": "mlx-community/Qwen3-30B-A3B-4bit", "size": "7.5 GB", "description": "MLX 최적화 Qwen 모델"}
-                ],
-                "embedding_models": [
-                    {"name": "nlpai-lab/KURE-v1", "size": "1.2 GB", "description": "한국어 임베딩 모델"}
-                ]
-            }
-        else:
-            raise HTTPException(status_code=400, detail="Invalid backend type")
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to get model list: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve model list")
-
-
-@app.post("/api/admin/models/config", tags=["Admin", "Models"])
-async def update_model_config(request: Request):
-    """모델 설정 업데이트 (관리자 전용)
-
-    Request body:
-        {
-            "backend": "ollama" | "local",
-            "llm_model": "model_name",
-            "embedding_model": "model_name"
-        }
-    """
-    global llm, rag_system, embedding_model, vector_db, LLM_MODEL, EMBEDDING_MODEL
-
-    try:
-        # 관리자 권한 확인
-        from .auth.utils import require_admin
-        redis_client = request.app.state.cache_manager.redis
-        require_admin(request, redis_client)
-
-        data = await request.json()
-        backend = data.get("backend")
-        llm_model = data.get("llm_model")
-        embedding_model_name = data.get("embedding_model")
-
-        if not backend or backend not in ["ollama", "local"]:
-            raise HTTPException(status_code=400, detail="Invalid backend")
-
-        # .env 파일 업데이트
-        env_path = Path(".env")
-        env_lines = []
-
-        if env_path.exists():
-            with open(env_path, 'r', encoding='utf-8') as f:
-                env_lines = f.readlines()
-
-        # 기존 설정 업데이트
-        updated = {
-            "USE_OLLAMA": None,
-            "OLLAMA_LLM_MODEL": None,
-            "OLLAMA_EMBEDDING_MODEL": None,
-            "LLM_MODEL": None,
-            "EMBEDDING_MODEL": None
-        }
-
-        for i, line in enumerate(env_lines):
-            for key in updated.keys():
-                if line.startswith(f"{key}="):
-                    updated[key] = i
-                    break
-
-        # 새로운 설정 준비
-        new_values = {
-            "USE_OLLAMA": "true" if backend == "ollama" else "false"
-        }
-
-        if backend == "ollama":
-            if llm_model:
-                new_values["OLLAMA_LLM_MODEL"] = llm_model
-            if embedding_model_name:
-                new_values["OLLAMA_EMBEDDING_MODEL"] = embedding_model_name
-        else:
-            if llm_model:
-                new_values["LLM_MODEL"] = llm_model
-            if embedding_model_name:
-                new_values["EMBEDDING_MODEL"] = embedding_model_name
-
-        # 환경 변수 업데이트 (메모리에도 즉시 반영)
-        for key, value in new_values.items():
-            os.environ[key] = value
-            line = f"{key}={value}\n"
-            if updated[key] is not None:
-                env_lines[updated[key]] = line
-            else:
-                env_lines.append(line)
-
-        # .env 파일 저장
-        with open(env_path, 'w', encoding='utf-8') as f:
-            f.writelines(env_lines)
-
-        logger.info(f"Model configuration updated: backend={backend}, llm={llm_model}, embedding={embedding_model_name}")
-
-        # 모델 즉시 적용
-        llm_changed = False
-        embedding_changed = False
-        use_ollama = backend == "ollama"
-
-        # LLM 모델 즉시 적용
-        if llm_model:
-            try:
-                if use_ollama:
-                    # Ollama: 환경변수에서 읽음
-                    llm = LLM(model_dir=MODEL_DIR)
-                else:
-                    # Local: 직접 모델명 전달
-                    LLM_MODEL = llm_model
-                    llm = LLM(model_name=LLM_MODEL, model_dir=MODEL_DIR)
-
-                # RAG 시스템 재초기화
-                rag_system = RAGSystem(
-                    vector_db=vector_db,
-                    llm=llm,
-                    top_k=5
-                )
-                llm_changed = True
-                logger.success(f"✅ LLM model changed to: {llm_model}")
-            except Exception as e:
-                logger.error(f"Failed to reload LLM: {e}")
-                # LLM 로드 실패해도 설정은 저장됨 (다음 재시작에 적용)
-
-        # 임베딩 모델 즉시 적용
-        if embedding_model_name:
-            try:
-                # global declaration already at function start (line 4747)
-                if use_ollama:
-                    # Ollama: 환경변수에서 읽음
-                    from .embeddings_ollama import OllamaEmbedding
-                    embedding_model = OllamaEmbedding(model_dir=MODEL_DIR)
-                else:
-                    # Local: 직접 모델명 전달
-                    EMBEDDING_MODEL = embedding_model_name
-                    embedding_model = EmbeddingModel(
-                        model_name=EMBEDDING_MODEL,
-                        model_dir=MODEL_DIR
-                    )
-
-                # Vector DB 재초기화
-                vector_db = VectorDB(
-                    host=REDIS_HOST,
-                    port=REDIS_PORT,
-                    embedding_dim=embedding_model.get_embedding_dim()
-                )
-
-                # RAG 시스템에 새 vector_db 적용
-                if rag_system:
-                    rag_system = RAGSystem(
-                        vector_db=vector_db,
-                        llm=llm,
-                        top_k=5
-                    )
-
-                embedding_changed = True
-                logger.success(f"✅ Embedding model changed to: {embedding_model_name}")
-                logger.warning("⚠️ 기존 문서들을 새로운 임베딩 모델로 재색인해야 합니다")
-            except Exception as e:
-                logger.error(f"Failed to reload embedding model: {e}")
-                # 임베딩 로드 실패해도 설정은 저장됨 (다음 재시작에 적용)
-
-        # 응답 메시지 구성
-        response = {
-            "llm_changed": llm_changed,
-            "embedding_changed": embedding_changed,
-            "restart_required": False  # 모든 모델이 즉시 적용되므로 재시작 불필요
-        }
-
-        if llm_changed and embedding_changed:
-            response["message"] = "LLM 및 임베딩 모델이 즉시 적용되었습니다."
-            response["warning"] = "임베딩 모델 변경으로 인해 문서 재색인이 필요합니다."
-        elif llm_changed:
-            response["message"] = "LLM 모델이 즉시 적용되었습니다."
-        elif embedding_changed:
-            response["message"] = "임베딩 모델이 즉시 적용되었습니다."
-            response["warning"] = "임베딩 모델 변경으로 인해 기존 문서를 모두 재색인해야 합니다."
-        else:
-            response["message"] = "설정이 저장되었습니다."
-
-        return response
-
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"Failed to update model config: {e}")
         raise HTTPException(status_code=500, detail="Failed to update model configuration")
