@@ -103,19 +103,16 @@ async def get_metrics_summary(request: Request):
         from ..metrics_collector import MetricsCollector
         metrics = MetricsCollector(redis_client)
 
-        # 메트릭 수집
-        global_metrics = metrics.get_global_metrics()
-        today_metrics = metrics.get_today_metrics()
-        recent_metrics = metrics.get_recent_metrics(hours=24)
-        trend_data = metrics.get_metric_trends(days=7)
+        # 메트릭 수집 - get_summary()가 모든 통계를 제공
+        summary = metrics.get_summary()
         daily_stats = metrics.get_daily_stats(days=30)
         hourly_stats = metrics.get_hourly_stats()
 
         return {
-            "global": global_metrics,
-            "today": today_metrics,
-            "recent_24h": recent_metrics,
-            "trend": trend_data,
+            "global": summary.get("global", {}),
+            "today": summary.get("today", {}),
+            "recent_24h": summary.get("recent_24h", {}),
+            "trend": summary.get("trend", {}),
             "daily": daily_stats,
             "hourly": hourly_stats
         }
