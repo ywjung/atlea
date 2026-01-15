@@ -11196,12 +11196,12 @@
                 const data = await Auth.apiCall('/api/admin/hybrid-rag');
 
                 // 토글 상태 업데이트
-                document.getElementById('hybridRagToggle').checked = data.config.enabled;
-                document.getElementById('webSearchToggle').checked = data.config.web_search;
-                document.getElementById('docSearchToggle').checked = data.config.doc_search;
+                document.getElementById('hybridRagToggle').checked = data.enabled;
+                document.getElementById('webSearchToggle').checked = data.web_search_enabled;
+                document.getElementById('docSearchToggle').checked = data.doc_search_enabled;
 
                 // Search mode 라디오 버튼 업데이트
-                const searchMode = data.config.search_mode || 'smart';
+                const searchMode = data.search_mode || 'smart';
                 if (searchMode === 'smart') {
                     document.getElementById('searchModeSmart').checked = true;
                 } else {
@@ -11209,7 +11209,7 @@
                 }
 
                 // 상태 표시 업데이트
-                updateHybridRagStatus(data.config.enabled);
+                updateHybridRagStatus(data.enabled);
 
                 // API 키 로드
                 await loadTavilyApiKey();
@@ -11217,7 +11217,7 @@
 
                 // 옵션 영역 표시/숨김
                 document.getElementById('hybridRagOptions').style.display =
-                    data.config.enabled ? 'block' : 'none';
+                    data.enabled ? 'block' : 'none';
 
                 devLog('하이브리드 RAG 설정 로드 완료:', data);
             } catch (error) {
@@ -11646,12 +11646,12 @@
                 });
 
                 // 상태 업데이트
-                updateHybridRagStatus(data.config.enabled);
+                updateHybridRagStatus(data.enabled);
                 showHybridRagSuccess(data.message);
 
                 // 옵션 영역 표시/숨김
                 document.getElementById('hybridRagOptions').style.display =
-                    data.config.enabled ? 'block' : 'none';
+                    data.enabled ? 'block' : 'none';
 
                 // 3초 후 메시지 숨김
                 setTimeout(() => hideHybridRagMessages(), 3000);
