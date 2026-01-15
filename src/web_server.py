@@ -71,7 +71,7 @@ from .routers import auth, admin, organizations, documents, cache, conversations
 from .routers import metrics as metrics_router
 from .auth.middleware import get_current_active_user, require_admin
 from .middleware.exception_handlers import register_exception_handlers
-from .services import question_generation, scheduler_service
+from .services import question_generation, scheduler_service, reindex_service
 
 # Load environment variables
 load_dotenv()
@@ -403,8 +403,8 @@ cache_manager: Optional[CacheManager] = None
 conversation_manager: Optional[ConversationManager] = None
 document_version: Optional[DocumentVersion] = None  # v2.3.0: Document version management
 audit_logger: Optional[AuditLogger] = None  # v2.4.0: Audit logging
-# suggested_questions_pool moved to question_generation service (Phase 3: Modularization)
-reindex_event: Optional[asyncio.Event] = None  # Event to signal reindex completion (shared with documents router)
+# suggested_questions_pool moved to question_generation service (Phase 3.1: Modularization)
+# reindex_event moved to reindex_service (Phase 3.3: Modularization)
 
 # Status endpoint cache (to avoid rescanning on every request)
 status_cache = {
@@ -595,7 +595,7 @@ audit_cleanup_scheduler_task = None
 @app.on_event("startup")
 async def startup_event():
     """Initialize models and database on startup (fast startup with lazy loading)"""
-    global embedding_model, vector_db, cache_manager, group_manager, conversation_manager, document_version, audit_logger, reindex_event, backup_scheduler_task, audit_cleanup_scheduler_task, hybrid_rag_orchestrator
+    global embedding_model, vector_db, cache_manager, group_manager, conversation_manager, document_version, audit_logger, backup_scheduler_task, audit_cleanup_scheduler_task, hybrid_rag_orchestrator
 
     # Configure file logging (development mode) - only once
     environment = os.getenv("ENVIRONMENT", "development")
@@ -618,9 +618,11 @@ async def startup_event():
     try:
         logger.info("🚀 Starting application initialization (fast mode)...")
 
-        # Initialize reindex event
-        reindex_event = asyncio.Event()
-        reindex_event.set()  # Initially set (not reindexing)
+        # Initialize reindex service (Phase 3.3: Modularization)
+        logger.info("🔄 Injecting dependencies into reindex_service...")
+        reindex_service.inject_dependencies(vector_db_instance=vector_db)
+        reindex_service.initialize_reindex_event()
+        logger.info("✅ Reindex service initialized")
 
         # Initialize embedding model (required for search)
         logger.info("📚 Loading embedding model...")
@@ -659,30 +661,8 @@ async def startup_event():
 
         logger.info(f"Redis configured: max_connections={redis_max_connections}, timeout={redis_socket_timeout}s")
 
-        # Clean up stale reindexing state from previous abnormal shutdown
-        try:
-            progress_data = vector_db.client.hgetall("reindex:progress")
-            if progress_data:
-                in_progress = progress_data.get(b'in_progress', b'false').decode() == 'true'
-                step = progress_data.get(b'step', b'').decode()
-                elapsed_seconds = int(progress_data.get(b'elapsed_seconds', 0))
-
-                # Clear if: (1) error state, or (2) stuck for >1 hour
-                should_clear = (
-                    in_progress and (
-                        '오류' in step or
-                        'error' in step.lower() or
-                        elapsed_seconds > 3600  # 1 hour
-                    )
-                )
-
-                if should_clear:
-                    vector_db.client.delete("reindex:progress")
-                    logger.warning(f"🧹 Cleared stale reindex state (step: {step}, elapsed: {elapsed_seconds}s)")
-                elif in_progress:
-                    logger.info(f"ℹ️  Found active reindex state (step: {step}, elapsed: {elapsed_seconds}s)")
-        except Exception as e:
-            logger.debug(f"Failed to check reindex state (non-critical): {e}")
+        # Clean up stale reindexing state from previous abnormal shutdown (Phase 3.3: Using reindex_service)
+        reindex_service.cleanup_stale_reindex_state()
 
         # Set rate limit configuration in Redis from environment variable
         try:
@@ -767,7 +747,7 @@ async def startup_event():
             chunk_overlap=CHUNK_OVERLAP,
             max_file_size=MAX_FILE_SIZE,
             max_file_size_mb=MAX_FILE_SIZE_MB,
-            reindex_evt=reindex_event
+            reindex_evt=reindex_service.get_reindex_event()  # Phase 3.3: From reindex_service
         )
         logger.info("✅ Documents router dependencies injected (19 endpoints)")
 
@@ -1199,9 +1179,8 @@ async def status():
         # System is ready if documents are indexed (LLM loads on first use)
         is_ready = (chunk_count > 0) or (rag_system is not None)
 
-        # Check if reindexing is in progress by checking if event is cleared
-        # (reindex_event is shared with documents router)
-        is_reindexing = reindex_event and not reindex_event.is_set()
+        # Check if reindexing is in progress (Phase 3.3: Using reindex_service)
+        is_reindexing = reindex_service.is_reindexing()
 
         # Determine status: reindexing > ready > initializing
         if is_reindexing:
