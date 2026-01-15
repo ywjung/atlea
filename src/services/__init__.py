@@ -1,8 +1,6 @@
-"""Services module
-
-Business logic layer for the application.
 """
+Services Package
 
-from .settings_service import SettingsService
-
-__all__ = ['SettingsService']
+Contains business logic and background services:
+- question_generation: Question generation from documents
+"""
