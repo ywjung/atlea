@@ -248,7 +248,7 @@
                 sessionsDiv.innerHTML = data.sessions.map(session => {
                     const createdAt = new Date(session.created_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
                     const expiresAt = new Date(session.expires_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
-                    const isCurrent = session.session_id === sessionStorage.getItem('current_session_id');
+                    const isCurrent = session.session_id === Auth.getSessionId();
 
                     return `
                         <div class="session-item ${isCurrent ? 'current' : ''}">
