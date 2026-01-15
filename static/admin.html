@@ -11193,7 +11193,7 @@
          */
         async function loadHybridRagConfig() {
             try {
-                const data = await Auth.apiCall('/api/admin/hybrid-rag/config');
+                const data = await Auth.apiCall('/api/admin/hybrid-rag');
 
                 // 토글 상태 업데이트
                 document.getElementById('hybridRagToggle').checked = data.config.enabled;
@@ -11606,7 +11606,7 @@
             const searchMode = document.querySelector('input[name="searchMode"]:checked').value;
 
             try {
-                const data = await Auth.apiCall('/api/admin/hybrid-rag/config', {
+                const data = await Auth.apiCall('/api/admin/hybrid-rag', {
                     method: 'PUT',
                     body: JSON.stringify({
                         enabled: document.getElementById('hybridRagToggle').checked,
@@ -11635,7 +11635,7 @@
             try {
                 const searchMode = document.querySelector('input[name="searchMode"]:checked')?.value || 'smart';
 
-                const data = await Auth.apiCall('/api/admin/hybrid-rag/config', {
+                const data = await Auth.apiCall('/api/admin/hybrid-rag', {
                     method: 'PUT',
                     body: JSON.stringify({
                         enabled: enabled,
@@ -11674,7 +11674,7 @@
             try {
                 const searchMode = document.querySelector('input[name="searchMode"]:checked')?.value || 'smart';
 
-                const data = await Auth.apiCall('/api/admin/hybrid-rag/config', {
+                const data = await Auth.apiCall('/api/admin/hybrid-rag', {
                     method: 'PUT',
                     body: JSON.stringify({
                         enabled: document.getElementById('hybridRagToggle').checked,
@@ -11704,7 +11704,7 @@
             try {
                 const searchMode = document.querySelector('input[name="searchMode"]:checked')?.value || 'smart';
 
-                const data = await Auth.apiCall('/api/admin/hybrid-rag/config', {
+                const data = await Auth.apiCall('/api/admin/hybrid-rag', {
                     method: 'PUT',
                     body: JSON.stringify({
                         enabled: document.getElementById('hybridRagToggle').checked,
