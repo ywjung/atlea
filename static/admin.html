@@ -6779,7 +6779,7 @@
         async function loadRecentSearches() {
             try {
                 const data = await Auth.apiCall('/api/admin/metrics/recent?limit=20');
-                const searches = data.data || [];
+                const searches = data.searches || [];
 
                 const tbody = document.getElementById('recent-searches-tbody');
 
