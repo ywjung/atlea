@@ -20,6 +20,9 @@ import re
 import inspect
 import time
 
+# Import auth dependency directly
+from ..auth.middleware import get_current_active_user as auth_get_current_active_user
+
 # Configure logger
 logger = logging.getLogger(__name__)
 
@@ -184,7 +187,7 @@ class FollowUpRequest(BaseModel):
 @router.post("/api/query", response_model=QueryResponse, tags=["Query"])
 async def query(
     request: QueryRequest,
-    current_user: dict = Depends(lambda: get_current_active_user)
+    current_user: dict = Depends(auth_get_current_active_user)
 ):
     """
     Query endpoint for chatbot (로그인 필요)
@@ -421,7 +424,7 @@ async def query(
 async def query_stream(
     request: QueryRequest,
     background_tasks: BackgroundTasks,
-    current_user: dict = Depends(lambda: get_current_active_user)
+    current_user: dict = Depends(auth_get_current_active_user)
 ):
     """
     Streaming query endpoint for chatbot (로그인 필요)
@@ -920,7 +923,7 @@ async def query_stream(
 @router.post("/api/follow-up-questions", tags=["Query"])
 async def generate_follow_up_questions(
     request: FollowUpRequest,
-    current_user: dict = Depends(lambda: get_current_active_user)
+    current_user: dict = Depends(auth_get_current_active_user)
 ):
     """
     Generate smart follow-up questions (로그인 필요)
