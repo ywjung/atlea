@@ -198,13 +198,14 @@ class AuthService:
         self.redis.zremrangebyrank("login_history:all", 0, -10001)
 
     async def authenticate_user(
-        self, credentials: UserLogin, ip_address: Optional[str] = None
+        self, credentials: UserLogin, ip_address: Optional[str] = None, user_agent: Optional[str] = None
     ) -> dict:
         """사용자 인증
 
         Args:
             credentials: 로그인 자격 증명
             ip_address: IP 주소
+            user_agent: 사용자 에이전트
 
         Returns:
             사용자 정보 및 토큰
@@ -372,7 +373,8 @@ class AuthService:
             user_id=user_id,
             created_at=datetime.utcnow(),
             expires_at=datetime.utcnow() + timedelta(days=30),
-            ip_address=ip_address
+            ip_address=ip_address,
+            user_agent=user_agent
         )
 
         # Redis에 세션 저장

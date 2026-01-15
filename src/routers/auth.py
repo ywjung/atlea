@@ -267,15 +267,15 @@ async def login(
                     detail=error_msg or "CAPTCHA 검증에 실패했습니다"
                 )
 
-        result = await auth_service.authenticate_user(credentials, ip_address)
+        # User-Agent 추출
+        user_agent = request.headers.get("User-Agent")
+
+        result = await auth_service.authenticate_user(credentials, ip_address, user_agent)
 
         # 로그인 성공 감사 로그 기록
         audit_logger = getattr(request.app.state, "audit_logger", None)
         if audit_logger:
             from ..audit import AuditAction
-
-            # User-Agent 추출
-            user_agent = request.headers.get("User-Agent")
 
             # 응답 시간 계산
             duration_ms = round((time.time() - start_time) * 1000, 2)
