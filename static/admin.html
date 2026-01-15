@@ -6694,9 +6694,9 @@
                 ]);
 
                 // 전체 통계
-                const global = summary.data.global || {};
-                const today = summary.data.today || {};
-                const trend = summary.data.trend || {};
+                const global = summary.global || {};
+                const today = summary.today || {};
+                const trend = summary.trend || {};
 
                 // 핵심 메트릭 업데이트
                 document.getElementById('metric-total-searches').textContent =
@@ -6731,7 +6731,7 @@
                 }
 
                 // 소스별 성능 업데이트
-                const sources = sourcePerf.data || {};
+                const sources = sourcePerf || {};
 
                 // 로컬
                 const local = sources.local || {};
