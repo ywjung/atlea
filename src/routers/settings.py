@@ -55,6 +55,14 @@ class UserPreferences(BaseModel):
     group_filter_mode: Optional[str] = "all"  # "all" or "selected"
 
 
+class HybridRAGStatusResponse(BaseModel):
+    """하이브리드 RAG 상태 응답"""
+    success: bool = True
+    enabled: bool
+    web_search_enabled: bool = False
+    doc_search_enabled: bool = False
+
+
 # ============================================================================
 # Helper Functions
 # ============================================================================
@@ -384,3 +392,43 @@ async def update_admin_settings(request: Request):
     except Exception as e:
         logger.error(f"Failed to update settings: {e}")
         raise HTTPException(status_code=500, detail="Failed to update settings")
+
+
+# ============================================================================
+# Hybrid RAG Status API Endpoints
+# ============================================================================
+
+@router.get("/hybrid-rag/status", response_model=HybridRAGStatusResponse, tags=["Hybrid RAG"])
+async def get_hybrid_rag_status(
+    request: Request,
+    current_user: dict = Depends(get_current_active_user)
+):
+    """
+    하이브리드 RAG 상태 조회 (인증된 사용자)
+
+    Returns:
+        현재 하이브리드 RAG 활성화 상태
+    """
+    try:
+        cache_manager = request.app.state.cache_manager
+
+        # Redis에서 설정 가져오기
+        enabled = cache_manager.redis.get("config:hybrid_rag_enabled")
+        web_search_enabled = cache_manager.redis.get("config:hybrid_rag_web_search")
+        doc_search_enabled = cache_manager.redis.get("config:hybrid_rag_doc_search")
+
+        # 기본값 설정
+        enabled = enabled.decode() == "true" if enabled else False
+        web_search_enabled = web_search_enabled.decode() == "true" if web_search_enabled else False
+        doc_search_enabled = doc_search_enabled.decode() == "true" if doc_search_enabled else False
+
+        return HybridRAGStatusResponse(
+            success=True,
+            enabled=enabled,
+            web_search_enabled=web_search_enabled,
+            doc_search_enabled=doc_search_enabled
+        )
+
+    except Exception as e:
+        logger.error(f"하이브리드 RAG 상태 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get hybrid RAG status")
