@@ -190,15 +190,13 @@ async def get_source_performance(request: Request):
         from ..metrics_collector import MetricsCollector
         metrics = MetricsCollector(redis_client)
 
-        # 소스별 성능 통계
-        local_stats = metrics.get_source_stats("local")
-        web_stats = metrics.get_source_stats("web")
-        docs_stats = metrics.get_source_stats("docs")
+        # 소스별 성능 통계 - get_source_performance()가 모든 소스 통계를 반환
+        source_performance = metrics.get_source_performance()
 
         return {
-            "local": local_stats,
-            "web": web_stats,
-            "docs": docs_stats
+            "local": source_performance.get("local", {}),
+            "web": source_performance.get("web", {}),
+            "docs": source_performance.get("docs", {})
         }
 
     except HTTPException:
