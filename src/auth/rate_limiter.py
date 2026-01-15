@@ -211,20 +211,20 @@ class RateLimiter:
 class RateLimitConfig:
     """Rate Limit 설정"""
 
-    # 로그인 엔드포인트: 10분에 3회 (Brute Force 공격 방지 강화)
-    LOGIN_MAX_REQUESTS = 3
-    LOGIN_WINDOW_SECONDS = 600  # 10분
+    # 로그인 엔드포인트: 5분에 10회 (개발 환경 고려)
+    LOGIN_MAX_REQUESTS = 10
+    LOGIN_WINDOW_SECONDS = 300  # 5분
 
-    # 회원가입 엔드포인트: 2시간에 3회 (자동 가입 방지 강화)
-    REGISTER_MAX_REQUESTS = 3
-    REGISTER_WINDOW_SECONDS = 7200  # 2시간
+    # 회원가입 엔드포인트: 1시간에 5회 (자동 가입 방지)
+    REGISTER_MAX_REQUESTS = 5
+    REGISTER_WINDOW_SECONDS = 3600  # 1시간
 
     # 일반 API: 1분에 60회
     API_MAX_REQUESTS = 60
     API_WINDOW_SECONDS = 60  # 1분
 
-    # 비밀번호 재설정 요청: 1시간에 3회
-    PASSWORD_RESET_MAX_REQUESTS = 3
+    # 비밀번호 재설정 요청: 1시간에 5회
+    PASSWORD_RESET_MAX_REQUESTS = 5
     PASSWORD_RESET_WINDOW_SECONDS = 3600  # 1시간
 
 

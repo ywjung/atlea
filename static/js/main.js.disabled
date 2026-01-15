@@ -1,0 +1,282 @@
+/**
+ * Main Application Entry Point
+ * Initializes all modules and sets up the application
+ */
+
+// Configure marked.js
+marked.setOptions({
+    highlight: function(code, lang) {
+        if (lang && hljs.getLanguage(lang)) {
+            return hljs.highlight(code, { language: lang }).value;
+        }
+        return hljs.highlightAuto(code).value;
+    },
+    breaks: true,
+    gfm: true
+});
+
+// Debug mode control
+const DEBUG_MODE = false;
+const devLog = (...args) => DEBUG_MODE && console.log(...args);
+const devWarn = (...args) => DEBUG_MODE && console.warn(...args);
+
+// Global managers (will be initialized in init())
+let chatManager;
+let documentManager;
+let versionManager;
+let settingsManager;
+let historyManager;
+let themeManager;
+let groupManager;
+
+// Feature modules
+let errorHandler;
+let streamingVisualizer;
+let questionAutoComplete;
+let followUpQuestions;
+
+/**
+ * Initialize the application
+ */
+async function init() {
+    console.log('🚀 Initializing application...');
+
+    try {
+        // Initialize theme first (for immediate visual feedback)
+        themeManager = new ThemeManager();
+
+        // Initialize core managers
+        chatManager = new ChatManager();
+        documentManager = new DocumentManager();
+        versionManager = new VersionManager();
+        settingsManager = new SettingsManager();
+        historyManager = new HistoryManager();
+
+        // Initialize feature modules
+        errorHandler = new ErrorHandler();
+        streamingVisualizer = new StreamingVisualizer();
+        followUpQuestions = new FollowUpQuestions();
+
+        // Setup global event listeners
+        setupGlobalEventListeners();
+
+        // Setup keyboard shortcuts
+        setupKeyboardShortcuts();
+
+        // Initialize group management (if available)
+        if (typeof GroupManager !== 'undefined') {
+            initGroupManagement();
+        }
+
+        // Initialize version management
+        if (typeof initVersionManagement === 'function') {
+            initVersionManagement();
+        }
+
+        // Initialize admin dashboard (if user has access)
+        if (Auth.isAdmin()) {
+            initAdminDashboard();
+        }
+
+        // Load initial data
+        await loadInitialData();
+
+        // Check system status
+        await chatManager.checkStatus();
+
+        console.log('✅ Application initialized successfully');
+
+    } catch (error) {
+        console.error('❌ Failed to initialize application:', error);
+        showToast('애플리케이션 초기화에 실패했습니다.', 'error');
+    }
+}
+
+/**
+ * Setup global event listeners
+ */
+function setupGlobalEventListeners() {
+    // Handle authentication redirects
+    if (!Auth.requireAuth()) {
+        return;
+    }
+
+    // Display user info
+    displayUserInfo();
+
+    // Setup profile dropdown
+    setupProfileDropdown();
+
+    // Setup beforeunload warning
+    window.addEventListener('beforeunload', (e) => {
+        if (chatManager?.isLoading && !window.allowNavigation) {
+            e.preventDefault();
+            e.returnValue = '';
+        }
+    });
+}
+
+/**
+ * Setup keyboard shortcuts
+ */
+function setupKeyboardShortcuts() {
+    document.addEventListener('keydown', (e) => {
+        // F1 - Toggle help modal
+        if (e.key === 'F1') {
+            e.preventDefault();
+            toggleHelpModal();
+            return;
+        }
+
+        // Ctrl/Cmd + K - New chat
+        if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+            e.preventDefault();
+            if (confirm('새 대화를 시작하시겠습니까? 현재 대화는 저장됩니다.')) {
+                chatManager?.clearChat();
+            }
+        }
+
+        // Ctrl/Cmd + / - Open settings
+        if ((e.ctrlKey || e.metaKey) && e.key === '/') {
+            e.preventDefault();
+            if (settingsManager?.settingsPanel?.classList.contains('active')) {
+                settingsManager.close();
+            } else {
+                settingsManager?.open();
+            }
+        }
+
+        // Ctrl/Cmd + E - Export history
+        if ((e.ctrlKey || e.metaKey) && e.key === 'e') {
+            e.preventDefault();
+            exportHistory();
+        }
+    });
+}
+
+/**
+ * Load initial data
+ */
+async function loadInitialData() {
+    try {
+        // Load conversation history
+        await historyManager?.loadConversations();
+
+        // Load current session if exists
+        const savedSessionId = sessionStorage.getItem('current_session_id');
+        if (savedSessionId) {
+            await historyManager?.loadConversation(savedSessionId);
+        }
+
+        // Load suggested questions
+        await loadSuggestedQuestions();
+
+    } catch (error) {
+        console.error('Failed to load initial data:', error);
+    }
+}
+
+/**
+ * Display user information
+ */
+function displayUserInfo() {
+    const user = Auth.getUser();
+    if (!user) return;
+
+    const userEmailEl = document.getElementById('userEmail');
+    const userNameEl = document.getElementById('userName');
+    const adminMenuItem = document.getElementById('adminMenuItem');
+
+    if (userEmailEl) userEmailEl.textContent = user.email;
+    if (userNameEl) userNameEl.textContent = user.username || user.email;
+
+    // Show admin menu item if user is admin
+    if (adminMenuItem && user.role === 'admin') {
+        adminMenuItem.style.display = 'flex';
+    }
+}
+
+/**
+ * Setup profile dropdown
+ */
+function setupProfileDropdown() {
+    const profileBtn = document.getElementById('profileBtn');
+    const profileDropdown = document.getElementById('profileDropdown');
+
+    if (!profileBtn || !profileDropdown) return;
+
+    profileBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        profileDropdown.classList.toggle('show');
+    });
+
+    // Close dropdown when clicking outside
+    document.addEventListener('click', () => {
+        profileDropdown.classList.remove('show');
+    });
+}
+
+/**
+ * Toggle help modal
+ */
+function toggleHelpModal() {
+    const helpModal = document.getElementById('helpModal');
+    if (!helpModal) return;
+
+    if (helpModal.classList.contains('active')) {
+        helpModal.classList.remove('active');
+        modalManager.pop(helpModal);
+    } else {
+        helpModal.classList.add('active');
+        modalManager.push(helpModal, 'help');
+    }
+}
+
+/**
+ * Load suggested questions
+ */
+async function loadSuggestedQuestions() {
+    try {
+        const response = await fetch('/api/suggested-questions');
+        if (response.ok) {
+            const data = await response.json();
+            renderSuggestedQuestions(data.questions);
+        }
+    } catch (error) {
+        console.error('Failed to load suggested questions:', error);
+    }
+}
+
+/**
+ * Render suggested questions
+ */
+function renderSuggestedQuestions(questions) {
+    const container = document.getElementById('suggestedQuestions');
+    if (!container || !questions || questions.length === 0) return;
+
+    container.innerHTML = questions.map(q => `
+        <button class="suggested-question" onclick="chatManager.sendSuggestedQuestion('${q.replace(/'/g, "\\'")}')">
+            ${q}
+        </button>
+    `).join('');
+}
+
+// Initialize when DOM is ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+} else {
+    init();
+}
+
+// Export for debugging
+if (DEBUG_MODE) {
+    window.app = {
+        chatManager,
+        documentManager,
+        versionManager,
+        settingsManager,
+        historyManager,
+        themeManager,
+        modalManager
+    };
+}

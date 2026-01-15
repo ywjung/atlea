@@ -38,7 +38,7 @@ PDF RAG 챗봇에 HWP(한글 문서) 파일 처리 기능이 통합되었습니�
 
 ### 1. Java HWP Service (Spring Boot)
 
-**위치**: `hwp-service/`
+**위치**: `document-service/`
 
 **기능**:
 - HWP 파일에서 텍스트 추출
@@ -88,7 +88,7 @@ PDF RAG 챗봇에 HWP(한글 문서) 파일 처리 기능이 통합되었습니�
 docker-compose up -d
 
 # 로그 확인
-docker-compose logs -f hwp-service
+docker-compose logs -f document-service
 
 # 상태 확인
 docker-compose ps
@@ -99,13 +99,13 @@ docker-compose ps
 **Java HWP Service 빌드 및 실행:**
 
 ```bash
-cd hwp-service
+cd document-service
 
 # Maven 빌드
 mvn clean package
 
 # 실행
-java -jar target/hwp-service-1.0.0.jar
+java -jar target/document-service-1.0.0.jar
 
 # 또는 Maven으로 직접 실행
 mvn spring-boot:run
@@ -200,10 +200,10 @@ curl http://localhost:8081/api/hwp/health
 lsof -i :8081
 
 # Docker로 실행 중이라면
-docker-compose logs hwp-service
+docker-compose logs document-service
 
 # 수동 실행으로 에러 확인
-cd hwp-service
+cd document-service
 mvn spring-boot:run
 ```
 
@@ -236,16 +236,16 @@ mvn clean install
 
 ### Docker 빌드 실패
 
-**증상**: hwp-service 컨테이너 빌드 오류
+**증상**: document-service 컨테이너 빌드 오류
 
 **해결책**:
 ```bash
 # 캐시 없이 재빌드
-docker-compose build --no-cache hwp-service
+docker-compose build --no-cache document-service
 
 # 개별 빌드 및 로그 확인
-cd hwp-service
-docker build -t hwp-service:latest .
+cd document-service
+docker build -t document-service:latest .
 ```
 
 ## 성능 최적화
@@ -255,7 +255,7 @@ docker build -t hwp-service:latest .
 `docker-compose.yml`에서 Java 메모리 조정:
 
 ```yaml
-hwp-service:
+document-service:
   environment:
     - JAVA_OPTS=-Xmx1024m -Xms512m  # 1GB 최대, 512MB 초기
 ```
@@ -276,7 +276,7 @@ HWP Service는 Spring Boot의 기본 스레드 풀 사용:
 ### Java Service 수정
 
 ```bash
-cd hwp-service
+cd document-service
 
 # 코드 수정 후 재빌드
 mvn clean package
@@ -294,7 +294,7 @@ mvn spring-boot:run
 
 ### 새로운 엔드포인트 추가
 
-1. Java: `hwp-service/src/main/java/com/chatbot/hwp/controller/HwpController.java`
+1. Java: `document-service/src/main/java/com/chatbot/hwp/controller/HwpController.java`
 2. Python: `src/hwp_processor.py`에 새 메서드 추가
 
 ## 기술 스택

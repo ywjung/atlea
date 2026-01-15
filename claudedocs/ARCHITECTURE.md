@@ -44,7 +44,7 @@ PDF/HWP 문서 기반 질의응답(Q&A) 시스템으로, Retrieval-Augmented Gen
 
 ### Backend
 - **프레임워크**: FastAPI 0.104+
-- **임베딩 모델**: jinaai/jina-embeddings-v3 (1024차원, 다국어 지원)
+- **임베딩 모델**: nlpai-lab/KURE-v1 (1024차원, 한국어 특화)
 - **LLM**: mlx-community/Qwen3-30B-A3B-4bit (MLX 최적화)
 - **벡터 데이터베이스**: Redis Stack with RediSearch
 - **문서 처리**:
@@ -300,12 +300,12 @@ cache:stats:cache_hits       # 캐시 히트 카운터
 **역할**: 텍스트를 벡터로 변환
 
 **모델 정보**:
-- **모델**: jinaai/jina-embeddings-v3
+- **모델**: nlpai-lab/KURE-v1
 - **차원**: 1024
-- **최대 시퀀스**: 8192 토큰
-- **언어**: 다국어 지원 (한국어 포함)
+- **최대 시퀀스**: 512 토큰
+- **언어**: 한국어 특화 (Korean Universal Representation Embeddings)
 - **하드웨어**: Apple MPS (Metal Performance Shaders)
-- **특징**: 최신 v3 모델, 긴 컨텍스트 지원
+- **특징**: 한국어 의미 검색에 최적화된 임베딩
 
 **주요 메서드**:
 ```python
@@ -1353,7 +1353,7 @@ BATCH_SIZE = 16  # 기본 32에서 감소
 - O(1) 질문 자동완성
 - 비동기 질문 생성 (서버 시작 95% 단축)
 - 세션 관리 및 오류 처리 개선
-- Jina Embeddings v3로 업그레이드
+- KURE-v1 (Korean Universal Representation Embeddings)로 업그레이드
 
 **작성자**: Claude Code
 **문서 경로**: `claudedocs/ARCHITECTURE.md`

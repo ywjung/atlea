@@ -666,3 +666,67 @@ DEFAULT_TOOLS_ONLY_PROMPT = """당신은 실시간 웹 검색 및 공식 문서 
 
 위 원칙을 철저히 준수하여 외부 소스만을 활용한 정확하고 최신의 답변을 제공하세요.
 """
+
+
+# ============================================================================
+# Prompt Selection Helper
+# ============================================================================
+
+def get_system_prompt_for_mode(redis_client, search_mode: str, sources_used: list = None) -> str:
+    """
+    검색 모드에 따라 적절한 시스템 프롬프트 반환
+
+    Args:
+        redis_client: Redis 클라이언트
+        search_mode: 검색 모드 ('smart', 'local-only', 'web-enhanced', 'comprehensive', 'tools-only')
+        sources_used: 실제 사용된 소스 리스트 (['local', 'web', 'docs'])
+
+    Returns:
+        적절한 시스템 프롬프트
+    """
+    # 소스 기반으로 프롬프트 타입 결정
+    prompt_type = None
+
+    if sources_used:
+        # 실제 사용된 소스 기반 판단
+        has_local = 'local' in sources_used
+        has_external = 'web' in sources_used or 'docs' in sources_used
+
+        if has_external and not has_local:
+            # 외부 도구만 사용
+            prompt_type = 'tools_only'
+        elif has_external and has_local:
+            # 로컬 + 외부 도구 (하이브리드)
+            prompt_type = 'hybrid'
+        else:
+            # 로컬만 사용
+            prompt_type = 'basic'
+    else:
+        # search_mode 기반 판단
+        if search_mode == 'tools-only':
+            prompt_type = 'tools_only'
+        elif search_mode in ['web-enhanced', 'comprehensive']:
+            prompt_type = 'hybrid'
+        else:
+            # 'smart', 'local-only' 등
+            prompt_type = 'basic'
+
+    # 프롬프트 타입에 따라 가져오기
+    if prompt_type == 'tools_only':
+        prompt = redis_client.get(PROMPT_KEY_TOOLS_ONLY)
+        if not prompt:
+            prompt = DEFAULT_TOOLS_ONLY_PROMPT
+    elif prompt_type == 'hybrid':
+        prompt = redis_client.get(PROMPT_KEY_HYBRID)
+        if not prompt:
+            prompt = DEFAULT_HYBRID_PROMPT
+    else:
+        prompt = redis_client.get(PROMPT_KEY_BASIC)
+        if not prompt:
+            prompt = DEFAULT_BASIC_PROMPT
+
+    # bytes to str 변환
+    if isinstance(prompt, bytes):
+        prompt = prompt.decode('utf-8')
+
+    return prompt

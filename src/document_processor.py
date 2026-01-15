@@ -347,7 +347,7 @@ class DocumentProcessor:
     def process_directory(self, directory_path: str, patterns: List[str] = None) -> List[Dict]:
         """
         Process all document files in directory
-        Supports: PDF, HWP, HWPX, DOC, DOCX, XLS, XLSX, PPT, PPTX
+        Supports: PDF, HWP, HWPX, DOC, DOCX, XLS, XLSX, PPT, PPTX, TXT
 
         Args:
             directory_path: Path to directory
@@ -363,7 +363,8 @@ class DocumentProcessor:
                 "*.hwp", "*.hwpx",
                 "*.doc", "*.docx",
                 "*.xls", "*.xlsx",
-                "*.ppt", "*.pptx"
+                "*.ppt", "*.pptx",
+                "*.txt"
             ]
 
         directory = Path(directory_path)

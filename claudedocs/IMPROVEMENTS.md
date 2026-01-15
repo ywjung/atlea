@@ -119,7 +119,7 @@
 
 - **Backend**: FastAPI (Python 3.10+)
   - MLX (Apple Silicon GPU 가속)
-  - Sentence Transformers (Jina Embeddings v3)
+  - Sentence Transformers (KURE-v1 - Korean Universal Representation Embeddings)
   - PyPDF (PDF 처리)
   - olefile (HWP 처리)
   - LangChain (텍스트 청킹)
@@ -129,7 +129,7 @@
   - Connection Pooling (20 연결)
 
 - **LLM**: Qwen3-30B-A3B-4bit (MLX 최적화)
-- **임베딩**: jinaai/jina-embeddings-v3
+- **임베딩**: nlpai-lab/KURE-v1
 
 ---
 

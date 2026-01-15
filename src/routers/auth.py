@@ -12,7 +12,7 @@ import secrets
 from loguru import logger
 from ..auth.models import (
     UserCreate, UserLogin, LoginResponse, TokenPair,
-    PasswordReset, PasswordResetConfirm, ProfileUpdate, PasswordChange, Session,
+    PasswordReset, PasswordResetConfirm, PasswordResetOTP, ProfileUpdate, PasswordChange, Session,
     WebhookCreate, WebhookUpdate, Webhook, WebhookEvent, WebhookTestRequest, WebhookDelivery
 )
 from ..auth.service import AuthService
@@ -57,9 +57,97 @@ async def invalidate_dashboard_cache(redis):
         logger.error(f"Failed to invalidate dashboard cache: {e}")
 
 
+async def send_password_reset_email(email_service, to_email: str, reset_token: str) -> bool:
+    """비밀번호 재설정 이메일 발송
+
+    Args:
+        email_service: EmailService 인스턴스
+        to_email: 수신자 이메일
+        reset_token: 비밀번호 재설정 토큰
+
+    Returns:
+        발송 성공 여부
+    """
+    try:
+        # 비밀번호 재설정 링크 생성
+        # 프로덕션에서는 실제 도메인으로 변경 필요
+        reset_link = f"http://localhost:8000/static/reset-password.html?token={reset_token}"
+
+        subject = "비밀번호 재설정 안내"
+        html_body = f"""
+        <html>
+        <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; border-radius: 10px; text-align: center;">
+                <h1 style="color: white; margin: 0;">🔐 비밀번호 재설정</h1>
+            </div>
+
+            <div style="background: #f8f9fa; padding: 30px; border-radius: 10px; margin-top: 20px;">
+                <p style="font-size: 16px; color: #333;">비밀번호 재설정을 요청하셨습니다.</p>
+                <p style="font-size: 16px; color: #333;">아래 버튼을 클릭하여 새로운 비밀번호를 설정하세요:</p>
+
+                <div style="text-align: center; margin: 30px 0;">
+                    <a href="{reset_link}"
+                       style="display: inline-block; padding: 15px 40px; background: #667eea; color: white;
+                              text-decoration: none; border-radius: 8px; font-size: 16px; font-weight: bold;">
+                        비밀번호 재설정하기
+                    </a>
+                </div>
+
+                <p style="font-size: 14px; color: #666;">
+                    또는 아래 링크를 복사하여 브라우저에 붙여넣으세요:
+                </p>
+                <div style="background: white; padding: 15px; border-radius: 8px; word-break: break-all; font-family: monospace; font-size: 12px; color: #666;">
+                    {reset_link}
+                </div>
+
+                <p style="font-size: 14px; color: #666; margin-top: 20px;">
+                    ⏰ 이 링크는 <strong>1시간 동안</strong> 유효합니다.
+                </p>
+
+                <p style="font-size: 14px; color: #666;">
+                    ⚠️ 본인이 요청하지 않았다면 이 이메일을 무시하세요.
+                </p>
+            </div>
+
+            <div style="margin-top: 20px; text-align: center; color: #999; font-size: 12px;">
+                <p>이 이메일은 자동으로 발송되었습니다. 회신하지 마세요.</p>
+            </div>
+        </body>
+        </html>
+        """
+
+        return email_service._send_email(to_email, subject, html_body)
+
+    except Exception as e:
+        logger.error(f"비밀번호 재설정 이메일 발송 실패: {e}")
+        return False
+
+
 class RefreshTokenRequest(BaseModel):
     """토큰 갱신 요청"""
     refresh_token: str
+
+
+@router.get("/totp/status")
+async def get_totp_status(request: Request):
+    """
+    2FA 활성화 여부 확인 (공개 API)
+
+    로그인 페이지에서 2FA 입력 필드 표시 여부를 결정하기 위해 사용
+
+    Returns:
+        {"enabled": bool}
+    """
+    try:
+        from ..auth.totp import TOTPService
+        redis = request.app.state.cache_manager.redis
+        totp_service = TOTPService(redis)
+
+        return {"enabled": totp_service.is_enabled()}
+    except Exception as e:
+        logger.error(f"2FA 상태 조회 실패: {e}")
+        # 에러 시 false 반환 (안전한 기본값)
+        return {"enabled": False}
 
 
 @router.post("/register", response_model=dict, status_code=status.HTTP_201_CREATED)
@@ -94,14 +182,13 @@ async def register(
     auth_service = AuthService(request.app.state.cache_manager.redis)
     redis = request.app.state.cache_manager.redis
 
-    # CAPTCHA 검증
-    from ..auth.captcha import CaptchaService
-    captcha_service = CaptchaService(redis)
-    if captcha_service.is_enabled():
-        success, error_msg = await captcha_service.verify_token(
-            token=user_data.captcha_token or "",
-            remote_ip=request.client.host if request.client else None,
-            action="register"
+    # CAPTCHA 검증 (회원가입)
+    from ..auth.captcha import SimpleCaptchaService
+    captcha_service = SimpleCaptchaService(redis)
+    if captcha_service.is_enabled("register"):
+        success, error_msg = await captcha_service.verify_captcha(
+            captcha_id=user_data.captcha_id or "",
+            user_answer=user_data.captcha_answer or ""
         )
         if not success:
             raise HTTPException(
@@ -163,14 +250,16 @@ async def login(
         # IP 주소 추출
         ip_address = request.client.host if request.client else None
 
-        # CAPTCHA 검증
-        from ..auth.captcha import CaptchaService
-        captcha_service = CaptchaService(redis)
-        if captcha_service.is_enabled():
-            success, error_msg = await captcha_service.verify_token(
-                token=credentials.captcha_token or "",
-                remote_ip=ip_address,
-                action="login"
+        # 디버깅: 받은 자격증명 로깅 (비밀번호는 길이만)
+        logger.debug(f"🔍 Login attempt - email: {credentials.email}, password_length: {len(credentials.password)}, ip: {ip_address}")
+
+        # CAPTCHA 검증 (로그인)
+        from ..auth.captcha import SimpleCaptchaService
+        captcha_service = SimpleCaptchaService(redis)
+        if captcha_service.is_enabled("login"):
+            success, error_msg = await captcha_service.verify_captcha(
+                captcha_id=credentials.captcha_id or "",
+                user_answer=credentials.captcha_answer or ""
             )
             if not success:
                 raise HTTPException(
@@ -209,7 +298,8 @@ async def login(
 
         return LoginResponse(
             user=result["user"],
-            tokens=TokenPair(**result["tokens"])
+            tokens=TokenPair(**result["tokens"]),
+            session_id=result["session_id"]
         )
 
     except ValueError as e:
@@ -382,7 +472,7 @@ async def request_password_reset(
         request: FastAPI Request
 
     Returns:
-        재설정 토큰 (실제 환경에서는 이메일로 전송)
+        재설정 토큰 (이메일로 전송) 또는 토큰 직접 반환
 
     Raises:
         HTTPException: 사용자를 찾을 수 없을 때 400
@@ -393,10 +483,40 @@ async def request_password_reset(
     try:
         reset_token = await auth_service.request_password_reset(reset_request.email)
 
-        return {
-            "message": "비밀번호 재설정 토큰이 발급되었습니다",
-            "reset_token": reset_token  # 실제 환경에서는 이메일로 전송
-        }
+        # SMTP 설정 확인 및 이메일 전송
+        from ..email_service import get_email_service
+
+        redis = request.app.state.cache_manager.redis
+        email_service = get_email_service(redis)
+
+        if email_service.is_configured():
+            # 이메일 발송
+            success = await send_password_reset_email(
+                email_service,
+                reset_request.email,
+                reset_token
+            )
+
+            if success:
+                return {
+                    "message": "비밀번호 재설정 링크가 이메일로 전송되었습니다",
+                    "email_sent": True
+                }
+            else:
+                # 이메일 전송 실패 시 토큰 반환 (폴백)
+                logger.warning(f"Failed to send password reset email to {reset_request.email}, returning token")
+                return {
+                    "message": "이메일 전송에 실패했습니다. 아래 토큰을 사용하세요",
+                    "reset_token": reset_token,
+                    "email_sent": False
+                }
+        else:
+            # SMTP 미설정 시 토큰 반환
+            return {
+                "message": "비밀번호 재설정 토큰이 발급되었습니다",
+                "reset_token": reset_token,
+                "email_sent": False
+            }
 
     except ValueError as e:
         raise HTTPException(
@@ -439,6 +559,282 @@ async def confirm_password_reset(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=str(e)
+        )
+
+
+
+@router.post("/reset-password-with-otp")
+async def reset_password_with_otp(
+    reset_data: PasswordResetOTP,
+    request: Request
+):
+    """OTP 기반 비밀번호 재설정 (토큰 없이 직접 실행 - 하위 호환성)
+
+    Args:
+        reset_data: 이메일, OTP 코드, 새 비밀번호
+        request: FastAPI Request
+
+    Returns:
+        성공 메시지
+
+    Raises:
+        HTTPException: OTP 검증 실패 또는 사용자 찾기 실패 시
+    """
+    from ..auth.totp import TOTPService
+    from ..auth.utils import hash_password
+
+    redis = request.app.state.cache_manager.redis
+    totp_service = TOTPService(redis)
+
+    try:
+        # 1. 이메일로 사용자 찾기
+        user_id = redis.get(f"user:email:{reset_data.email}")
+        if not user_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="사용자를 찾을 수 없습니다"
+            )
+
+        user_id = user_id.decode() if isinstance(user_id, bytes) else user_id
+
+        # 사용자 데이터 조회
+        user_data = redis.hgetall(f"user:{user_id}")
+        if not user_data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="사용자를 찾을 수 없습니다"
+            )
+
+        # bytes를 문자열로 변환
+        user = {
+            k.decode() if isinstance(k, bytes) else k:
+            v.decode() if isinstance(v, bytes) else v
+            for k, v in user_data.items()
+        }
+
+        # 2. 사용자에게 OTP가 설정되어 있는지 확인
+        if not user.get("totp_secret"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="해당 계정에 OTP가 설정되지 않았습니다"
+            )
+
+        # 3. OTP 코드 검증
+        is_valid = totp_service.verify_token(user["totp_secret"], reset_data.otp_code)
+        if not is_valid:
+            logger.warning(f"Invalid OTP attempt for user: {reset_data.email}")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="OTP 코드가 일치하지 않습니다"
+            )
+
+        # 4. 비밀번호 해싱 및 업데이트
+        password_hash_value = hash_password(reset_data.new_password)
+        redis.hset(f"user:{user_id}", "password_hash", password_hash_value)
+
+        logger.info(f"Password reset successful via OTP for user: {reset_data.email}")
+
+        return {
+            "success": True,
+            "message": "비밀번호가 성공적으로 재설정되었습니다"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"OTP password reset error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"비밀번호 재설정 중 오류가 발생했습니다: {str(e)}"
+        )
+
+
+
+@router.post("/verify-otp-for-reset")
+async def verify_otp_for_reset(
+    request: Request,
+    verify_data: dict
+):
+    """비밀번호 재설정을 위한 OTP 검증 (비밀번호 변경 없이 검증만)
+
+    Args:
+        request: FastAPI Request
+        verify_data: JSON body with email and otp_code
+
+    Returns:
+        검증 성공 시 임시 토큰 반환
+
+    Raises:
+        HTTPException: OTP 검증 실패 시
+    """
+    from ..auth.totp import TOTPService
+
+    # Extract data from JSON body
+    email = verify_data.get("email")
+    otp_code = verify_data.get("otp_code")
+
+    if not email or not otp_code:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="이메일과 OTP 코드는 필수입니다"
+        )
+
+    redis = request.app.state.cache_manager.redis
+    totp_service = TOTPService(redis)
+
+    try:
+        # 1. 이메일로 사용자 찾기
+        user_id = redis.get(f"user:email:{email}")
+        if not user_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="사용자를 찾을 수 없습니다"
+            )
+
+        user_id = user_id.decode() if isinstance(user_id, bytes) else user_id
+
+        # 사용자 데이터 조회
+        user_data = redis.hgetall(f"user:{user_id}")
+        if not user_data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="사용자를 찾을 수 없습니다"
+            )
+
+        # bytes를 문자열로 변환
+        user = {
+            k.decode() if isinstance(k, bytes) else k:
+            v.decode() if isinstance(v, bytes) else v
+            for k, v in user_data.items()
+        }
+
+        # 2. 사용자에게 OTP가 설정되어 있는지 확인
+        if not user.get("totp_secret"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="해당 계정에 OTP가 설정되지 않았습니다"
+            )
+
+        # 3. OTP 코드 검증
+        is_valid = totp_service.verify_token(user["totp_secret"], otp_code)
+        if not is_valid:
+            logger.warning(f"Invalid OTP attempt for password reset: {email}")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="OTP 코드가 일치하지 않습니다"
+            )
+
+        # 4. 검증 성공 - 임시 토큰 생성 (5분 유효)
+        reset_token = secrets.token_urlsafe(32)
+        redis.setex(
+            f"otp_reset_token:{reset_token}",
+            300,  # 5분
+            email
+        )
+
+        logger.info(f"OTP verified for password reset: {email}")
+
+        return {
+            "success": True,
+            "message": "OTP 검증 성공",
+            "reset_token": reset_token,
+            "email": email
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"OTP verification error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"OTP 검증 중 오류가 발생했습니다: {str(e)}"
+        )
+
+
+
+@router.post("/confirm-password-reset-otp")
+async def confirm_password_reset_otp(
+    request: Request,
+    reset_data: dict
+):
+    """OTP 검증 후 비밀번호 재설정 (토큰 기반)
+
+    Args:
+        request: FastAPI Request
+        reset_data: JSON body with reset_token and new_password
+
+    Returns:
+        성공 메시지
+
+    Raises:
+        HTTPException: 토큰 검증 실패 또는 비밀번호 업데이트 실패 시
+    """
+    from ..auth.models import validate_password_strength
+    from ..auth.utils import hash_password
+
+    # Extract data from JSON body
+    reset_token = reset_data.get("reset_token")
+    new_password = reset_data.get("new_password")
+
+    if not reset_token or not new_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="재설정 토큰과 새 비밀번호는 필수입니다"
+        )
+
+    redis = request.app.state.cache_manager.redis
+
+    try:
+        # 1. 토큰으로 이메일 조회
+        email = redis.get(f"otp_reset_token:{reset_token}")
+        if not email:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="유효하지 않거나 만료된 토큰입니다"
+            )
+
+        email = email.decode() if isinstance(email, bytes) else email
+
+        # 2. 비밀번호 강도 검증
+        try:
+            validate_password_strength(new_password)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(e)
+            )
+
+        # 3. 사용자 찾기
+        user_id = redis.get(f"user:email:{email}")
+        if not user_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="사용자를 찾을 수 없습니다"
+            )
+
+        user_id = user_id.decode() if isinstance(user_id, bytes) else user_id
+
+        # 4. 비밀번호 해싱 및 업데이트
+        password_hash = hash_password(new_password)
+        redis.hset(f"user:{user_id}", "password_hash", password_hash)
+
+        # 5. 토큰 삭제 (일회용)
+        redis.delete(f"otp_reset_token:{reset_token}")
+
+        logger.info(f"Password reset successful via OTP token for user: {email}")
+
+        return {
+            "success": True,
+            "message": "비밀번호가 성공적으로 재설정되었습니다"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"OTP token password reset error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"비밀번호 재설정 중 오류가 발생했습니다: {str(e)}"
         )
 
 
@@ -580,6 +976,33 @@ async def revoke_session(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=str(e)
         )
+
+
+@router.delete("/sessions")
+async def revoke_all_sessions(
+    request: Request,
+    current_user: dict = Depends(get_current_active_user)
+):
+    """사용자의 모든 세션 무효화
+
+    Args:
+        request: FastAPI Request
+        current_user: 현재 인증된 사용자
+
+    Returns:
+        무효화된 세션 수
+    """
+
+    auth_service = AuthService(request.app.state.cache_manager.redis)
+
+    count = await auth_service.revoke_all_sessions(
+        user_id=current_user["user_id"]
+    )
+
+    return {
+        "message": f"모든 세션이 무효화되었습니다 ({count}개)",
+        "revoked_count": count
+    }
 
 
 # ============= Admin Endpoints =============
@@ -871,6 +1294,43 @@ async def get_security_logs_admin(
     return result
 
 
+@router.get("/admin/login-history")
+async def get_login_history_admin(
+    request: Request,
+    user_id: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 50,
+    status: Optional[str] = None,
+    start_time: Optional[str] = None,
+    end_time: Optional[str] = None,
+    admin_user: dict = Depends(require_admin)
+):
+    """로그인 히스토리 조회 (관리자용)
+
+    Args:
+        request: FastAPI Request
+        user_id: 사용자 ID (선택, None이면 전체 조회)
+        page: 페이지 번호
+        page_size: 페이지당 레코드 수
+        status: 로그인 상태 필터 (success/failed/blocked)
+        start_time: 시작 시간 (ISO 8601 형식, 기본: 7일 전)
+        end_time: 종료 시간 (ISO 8601 형식, 기본: 현재)
+        admin_user: 관리자 사용자
+
+    Returns:
+        로그인 히스토리 목록
+    """
+    auth_service = AuthService(request.app.state.cache_manager.redis)
+    result = await auth_service.get_login_history(
+        user_id=user_id,
+        page=page,
+        page_size=page_size,
+        status=status,
+        start_time=start_time,
+        end_time=end_time
+    )
+    return result
+
 
 # ============================================================================
 # 웹훅 관리 API
@@ -1078,4 +1538,55 @@ async def get_webhook_deliveries(
         limit=limit
     )
     return deliveries
+
+
+# ============= CAPTCHA Generation =============
+
+@router.get("/captcha/generate")
+async def generate_captcha(request: Request, action: str = "login"):
+    """CAPTCHA 생성
+
+    내부망용 이미지 기반 수학 문제 CAPTCHA를 생성합니다.
+
+    Args:
+        action: 'login' 또는 'register'
+
+    Returns:
+        {
+            "captcha_id": str,   # CAPTCHA 고유 ID
+            "image": str,        # Base64 인코딩된 이미지 (data:image/png;base64,...)
+            "enabled": bool      # CAPTCHA 활성화 여부
+        }
+    """
+    try:
+        from ..auth.captcha import SimpleCaptchaService
+
+        redis = request.app.state.cache_manager.redis
+        captcha_service = SimpleCaptchaService(redis)
+
+        # CAPTCHA 비활성화 시 빈 응답
+        if not captcha_service.is_enabled(action):
+            return {
+                "captcha_id": "",
+                "image": "",
+                "enabled": False
+            }
+
+        # CAPTCHA 생성
+        captcha = captcha_service.generate_captcha()
+
+        return {
+            "captcha_id": captcha["captcha_id"],
+            "image": captcha["image"],
+            "enabled": True
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to generate CAPTCHA: {e}")
+        # 에러 시에도 CAPTCHA 비활성화로 처리 (fail-open)
+        return {
+            "captcha_id": "",
+            "image": "",
+            "enabled": False
+        }
 

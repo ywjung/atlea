@@ -22,7 +22,7 @@ class ModelManager:
         Get local path to model, downloading if necessary
 
         Args:
-            model_name: HuggingFace model name (e.g., 'jinaai/jina-embeddings-v3')
+            model_name: HuggingFace model name (e.g., 'nlpai-lab/KURE-v1')
             download: Whether to download if not found locally
 
         Returns:

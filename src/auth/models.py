@@ -16,7 +16,8 @@ class UserCreate(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=8)
     username: str = Field(..., min_length=2, max_length=50)
-    captcha_token: Optional[str] = None
+    captcha_id: Optional[str] = None
+    captcha_answer: Optional[str] = None
 
     @field_validator('password')
     @classmethod
@@ -37,7 +38,9 @@ class UserLogin(BaseModel):
     """로그인 요청"""
     email: EmailStr
     password: str
-    captcha_token: Optional[str] = None
+    captcha_id: Optional[str] = None
+    captcha_answer: Optional[str] = None
+    totp_token: Optional[str] = None  # 2FA 코드 (6자리)
 
 
 class User(BaseModel):
@@ -54,9 +57,15 @@ class User(BaseModel):
     created_at: datetime
     last_login: Optional[datetime] = None
     is_active: bool = True
-    role: str = "user"  # user, admin
+    role: str = "user"  # user, admin (system-level role)
+
+    # Organization fields
+    org_id: str = "default"  # Organization ID (required)
+    org_role: str = "user"  # user, org_admin (organization-level role)
+
     failed_login_attempts: int = 0
     locked_until: Optional[datetime] = None
+    totp_secret: Optional[str] = None  # TOTP Secret Key (Base32)
 
 
 class TokenPair(BaseModel):
@@ -70,6 +79,7 @@ class LoginResponse(BaseModel):
     """로그인 응답"""
     user: User
     tokens: TokenPair
+    session_id: str  # 현재 세션 ID (세션 무효화 감지용)
 
 
 class Session(BaseModel):
@@ -103,6 +113,29 @@ class PasswordResetConfirm(BaseModel):
     def validate_new_password(cls, v: str) -> str:
         """비밀번호 강도 검증"""
         return validate_password_strength(v)
+
+
+class PasswordResetOTP(BaseModel):
+    """OTP 기반 비밀번호 재설정"""
+    email: str
+    otp_code: str = Field(..., min_length=6, max_length=6)
+    new_password: str = Field(..., min_length=8)
+
+    @field_validator('new_password')
+    @classmethod
+    def validate_new_password(cls, v: str) -> str:
+        """비밀번호 강도 검증"""
+        return validate_password_strength(v)
+
+    @field_validator('otp_code')
+    @classmethod
+    def validate_otp_code(cls, v: str) -> str:
+        """OTP 코드는 6자리 숫자여야 함"""
+        if not v.isdigit():
+            raise ValueError("OTP 코드는 숫자만 입력 가능합니다")
+        if len(v) != 6:
+            raise ValueError("OTP 코드는 6자리여야 합니다")
+        return v
 
 
 class ProfileUpdate(BaseModel):

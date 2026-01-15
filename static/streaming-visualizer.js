@@ -13,7 +13,7 @@ class StreamingVisualizer {
     }
 
     /**
-     * Show typing indicator while waiting for first token
+     * Show simple typing indicator
      * @param {HTMLElement} container - Container to append indicator
      * @returns {HTMLElement} - The indicator element
      */
@@ -21,15 +21,19 @@ class StreamingVisualizer {
         this.startTime = Date.now();
         this.tokenCount = 0;
 
+        // Show simple, clean loading UI
         const indicator = document.createElement('div');
-        indicator.className = 'streaming-indicator typing-indicator';
+        indicator.className = 'streaming-indicator simple-indicator';
+        indicator.id = 'streamingProgress';
         indicator.innerHTML = `
-            <div class="typing-dots">
-                <span></span>
-                <span></span>
-                <span></span>
+            <div class="simple-indicator-content">
+                <div class="macos-dots">
+                    <span class="dot dot-red"></span>
+                    <span class="dot dot-yellow"></span>
+                    <span class="dot dot-green"></span>
+                </div>
+                <span class="simple-text">답변 생성 중...</span>
             </div>
-            <span class="status-text">답변 생성 중...</span>
         `;
 
         container.appendChild(indicator);
@@ -43,41 +47,8 @@ class StreamingVisualizer {
      * @param {HTMLElement} container - Container element
      */
     showStreamingProgress(container) {
-        // Remove typing indicator
-        if (this.currentIndicator) {
-            this.currentIndicator.remove();
-        }
-
-        // Create streaming progress indicator
-        const indicator = document.createElement('div');
-        indicator.className = 'streaming-indicator progress-indicator';
-        indicator.id = 'streamingProgress';
-        indicator.innerHTML = `
-            <div class="progress-content">
-                <div class="progress-info">
-                    <span class="progress-icon">✍️</span>
-                    <div class="progress-details">
-                        <span class="progress-text">실시간 생성 중<span class="loading-dots"><span></span><span></span><span></span></span></span>
-                        <div class="progress-stats">
-                            <span class="token-count" id="tokenCount">0</span> 토큰 생성됨
-                            <span class="separator">•</span>
-                            <span class="elapsed-time" id="elapsedTime">0.0s</span>
-                        </div>
-                    </div>
-                </div>
-                <div class="progress-bar-container">
-                    <div class="progress-bar" id="progressBar"></div>
-                </div>
-            </div>
-        `;
-
-        container.appendChild(indicator);
-        this.currentIndicator = indicator;
-
-        // Start updating stats
-        this.startStatsUpdate();
-
-        return indicator;
+        // Keep the same simple UI, no need to change
+        return this.currentIndicator;
     }
 
     /**
@@ -123,7 +94,7 @@ class StreamingVisualizer {
             const elapsedTimeEl = document.getElementById('elapsedTime');
             if (elapsedTimeEl && this.startTime) {
                 const elapsed = (Date.now() - this.startTime) / 1000;
-                elapsedTimeEl.textContent = `${elapsed.toFixed(1)}s`;
+                elapsedTimeEl.textContent = elapsed.toFixed(1);
             }
         }, 100); // Update every 100ms
     }
@@ -144,30 +115,12 @@ class StreamingVisualizer {
      * @param {number} totalTime - Total time in seconds
      */
     showCompletion(finalTokenCount, totalTime) {
-        this.stopStatsUpdate();
-
         if (this.currentIndicator) {
-            // Update to completion state
-            const progressBar = document.getElementById('progressBar');
-            if (progressBar) {
-                progressBar.style.width = '100%';
-                progressBar.style.background = 'linear-gradient(90deg, #4CAF50 0%, #66BB6A 100%)';
-            }
-
-            // Show final stats briefly
-            const tokenCountEl = document.getElementById('tokenCount');
-            const elapsedTimeEl = document.getElementById('elapsedTime');
-
-            if (tokenCountEl) tokenCountEl.textContent = finalTokenCount;
-            if (elapsedTimeEl) elapsedTimeEl.textContent = `${totalTime.toFixed(1)}s`;
-
-            // Add completion class for animation
-            this.currentIndicator.classList.add('completed');
-
-            // Remove after animation
+            // Simply fade out and remove
+            this.currentIndicator.style.opacity = '0';
             setTimeout(() => {
                 this.hide();
-            }, 1500);
+            }, 300);
         }
     }
 

@@ -1,0 +1,1713 @@
+<!DOCTYPE html>
+<!-- CACHE BUSTER: 2025-12-28-12-45-DOCUMENT-COUNT -->
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>문서 RAG 챗봇 v2025.12.28</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <!-- Early theme initialization to prevent flash -->
+    <script>
+        (function() {
+            try {
+                const savedTheme = localStorage.getItem('theme') || 'light';
+                // Validate theme value
+                const theme = (savedTheme === 'dark' || savedTheme === 'light') ? savedTheme : 'light';
+                document.documentElement.setAttribute('data-theme', theme);
+            } catch (error) {
+                // Fallback to light theme if localStorage is not available
+                document.documentElement.setAttribute('data-theme', 'light');
+            }
+        })();
+    </script>
+    <link rel="stylesheet" href="/static/style.css?v=1767114101">
+    <link rel="stylesheet" href="/static/error-styles.css?v=34">
+    <link rel="stylesheet" href="/static/streaming-styles.css?v=34">
+    <link rel="stylesheet" href="/static/autocomplete-styles.css?v=34">
+    <link rel="stylesheet" href="/static/follow-up-styles.css">
+
+    <!-- CRITICAL: Force progress bar styles (bypass cache) -->
+    <style>
+        .progress-bar-wrapper {
+            display: flex !important;
+            flex-direction: column !important;
+            gap: 2rem !important;
+            position: relative !important;
+            z-index: 1 !important;
+        }
+
+        .progress-bar-container {
+            position: relative !important;
+            z-index: 10 !important;
+        }
+
+        .progress-bar {
+            width: 100% !important;
+            height: 100px !important;
+            background: #cbd5e1 !important;
+            border-radius: 12px !important;
+            overflow: hidden !important;
+            position: relative !important;
+            box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.15) !important;
+            border: 3px solid #94a3b8 !important;
+            z-index: 10 !important;
+        }
+
+        .progress-bar-fill {
+            height: 100% !important;
+            min-width: 10% !important;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 50%, #f093fb 100%) !important;
+            background-size: 200% 100% !important;
+            border-radius: 12px !important;
+            transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1) !important;
+            position: relative !important;
+            overflow: visible !important;
+            box-shadow: 0 4px 16px rgba(102, 126, 234, 0.5) !important;
+            animation: gradientShift 3s ease infinite !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            z-index: 20 !important;
+        }
+
+        .progress-bar-text {
+            position: relative !important;
+            z-index: 30 !important;
+            font-size: 3rem !important;
+            font-weight: 800 !important;
+            color: white !important;
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.4) !important;
+            letter-spacing: 2px !important;
+            white-space: nowrap !important;
+            display: block !important;
+            visibility: visible !important;
+            opacity: 1 !important;
+        }
+
+        .progress-stats {
+            display: flex !important;
+            justify-content: center !important;
+            gap: 1.5rem !important;
+            position: relative !important;
+            z-index: 5 !important;
+            margin-top: 2rem !important;
+        }
+
+        @keyframes gradientShift {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+
+        /* Fix modal overflow to prevent progress bar clipping */
+        .reindex-progress-modal {
+            overflow: visible !important;
+            max-height: none !important;
+            min-height: fit-content !important;
+        }
+
+        .reindex-progress-content {
+            overflow: visible !important;
+            padding: 2.5rem !important;
+        }
+
+        .progress-card {
+            overflow: visible !important;
+        }
+
+        /* Force progress bar dimensions with ID selectors (highest specificity) */
+        #reindexProgressModal {
+            overflow: visible !important;
+        }
+
+        #reindexProgressModal .modal-content {
+            overflow: visible !important;
+            max-height: none !important;
+            height: auto !important;
+        }
+
+        #reindexProgressModal .progress-bar {
+            height: 100px !important;
+            min-height: 100px !important;
+        }
+
+        #reindexProgressModal .progress-bar-fill {
+            height: 100px !important;
+            min-height: 100px !important;
+        }
+
+        #reindexProgressPercent {
+            font-size: 3rem !important;
+            line-height: 1 !important;
+        }
+    </style>
+
+    <!-- Marked.js for Markdown rendering - v12.0.2 (2025) -->
+    <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+    <!-- Highlight.js for code syntax highlighting - v11.10.0 (2024) -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/highlight.min.js"></script>
+    <!-- KaTeX for math rendering - v0.16.11 (2024) -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <!-- KaTeX mhchem extension for chemistry - v0.16.11 (2024) -->
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/mhchem.min.js"></script>
+    <!-- Mermaid.js for diagrams - v10.9.0 (2024) -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.0/dist/mermaid.min.js"></script>
+    <!-- abcjs for music notation - v6.4.0 (2024) -->
+    <script src="https://cdn.jsdelivr.net/npm/abcjs@6.4.0/dist/abcjs-basic-min.js"></script>
+    <!-- Chart.js for charts and graphs - v4.4.1 (2024) -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <!-- Authentication -->
+    <script src="/static/auth.js?v=2025-12-28-FIX-REDIRECT-LOOP"></script>
+    <style>
+        /* 사용자 메뉴 - 드롭다운 스타일 */
+        .user-menu {
+            position: relative;
+        }
+
+        .user-info-display {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 24px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            border: 1px solid transparent;
+        }
+
+        .user-info-display:hover {
+            background: rgba(255, 255, 255, 0.15);
+            border-color: rgba(255, 255, 255, 0.2);
+        }
+
+        .user-avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            font-size: 14px;
+            flex-shrink: 0;
+        }
+
+        .user-details {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            max-width: 120px;
+        }
+
+        .user-name {
+            font-weight: 600;
+            font-size: 13px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .user-role {
+            font-size: 11px;
+            opacity: 0.7;
+        }
+
+        .dropdown-icon {
+            width: 16px;
+            height: 16px;
+            margin-left: 4px;
+            transition: transform 0.2s ease;
+        }
+
+        .user-menu.active .dropdown-icon {
+            transform: rotate(180deg);
+        }
+
+        /* 드롭다운 메뉴 */
+        .user-dropdown {
+            position: absolute;
+            top: calc(100% + 8px);
+            right: 0;
+            background: white;
+            border: 1px solid #e0e0e0;
+            border-radius: 12px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2), 0 0 0 1px rgba(0, 0, 0, 0.05);
+            min-width: 200px;
+            overflow: hidden;
+            opacity: 0;
+            transform: translateY(-10px);
+            transition: opacity 0.2s ease, transform 0.2s ease;
+            pointer-events: none;
+            z-index: 10000;
+            color: #333;
+        }
+
+        .user-dropdown.show {
+            opacity: 1;
+            transform: translateY(0);
+            pointer-events: all;
+        }
+
+        .dropdown-header {
+            padding: 12px 16px;
+            border-bottom: 1px solid #e5e7eb;
+            background: #f9fafb;
+        }
+
+        .dropdown-header-name {
+            font-weight: 600;
+            font-size: 14px;
+            margin-bottom: 2px;
+            color: #111827;
+        }
+
+        .dropdown-header-role {
+            font-size: 12px;
+            color: #6b7280;
+        }
+
+        .dropdown-item {
+            padding: 12px 16px;
+            cursor: pointer;
+            transition: background 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 14px;
+            color: #374151;
+            font-weight: 500;
+        }
+
+        .dropdown-item:hover {
+            background: #f3f4f6;
+        }
+
+        .dropdown-item svg {
+            width: 18px;
+            height: 18px;
+            stroke: #6b7280;
+        }
+
+        .dropdown-item.danger {
+            color: #dc2626;
+        }
+
+        .dropdown-item.danger:hover {
+            background: #fee2e2;
+        }
+
+        .dropdown-item.danger svg {
+            stroke: #dc2626;
+        }
+
+        .dropdown-divider {
+            height: 1px;
+            background: #e5e7eb;
+            margin: 4px 0;
+        }
+
+        /* 설정 메뉴 통합 */
+        .settings-menu {
+            position: relative;
+            margin-left: auto;
+        }
+
+        .settings-dropdown {
+            position: absolute;
+            top: calc(100% + 8px);
+            right: 0;
+            background: white;
+            border: 1px solid #e0e0e0;
+            border-radius: 12px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2), 0 0 0 1px rgba(0, 0, 0, 0.05);
+            min-width: 220px;
+            overflow: hidden;
+            opacity: 0;
+            transform: translateY(-10px);
+            transition: opacity 0.2s ease, transform 0.2s ease;
+            pointer-events: none;
+            z-index: 10000;
+            color: #333;
+        }
+
+        .settings-dropdown.show {
+            opacity: 1;
+            transform: translateY(0);
+            pointer-events: all;
+        }
+
+        .settings-item {
+            padding: 12px 16px;
+            cursor: pointer;
+            transition: background 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 14px;
+            color: #374151;
+            font-weight: 500;
+        }
+
+        .settings-item:hover {
+            background: #f3f4f6;
+        }
+
+        .settings-item-content {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .settings-item svg {
+            width: 18px;
+            height: 18px;
+            stroke: #6b7280;
+        }
+
+        /* 테마 토글 스위치 */
+        .theme-switch {
+            width: 44px;
+            height: 24px;
+            background: rgba(103, 126, 234, 0.2);
+            border-radius: 12px;
+            position: relative;
+            cursor: pointer;
+            transition: background 0.3s ease;
+        }
+
+        .theme-switch.active {
+            background: #667eea;
+        }
+
+        .theme-switch-slider {
+            width: 18px;
+            height: 18px;
+            background: white;
+            border-radius: 50%;
+            position: absolute;
+            top: 3px;
+            left: 3px;
+            transition: transform 0.3s ease;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        }
+
+        .theme-switch.active .theme-switch-slider {
+            transform: translateX(20px);
+        }
+
+        .auth-btn.admin:hover {
+            background: #45a049;
+        }
+
+        .auth-btn.logout {
+            background: #f44336;
+            color: white;
+        }
+
+        .auth-btn.logout:hover {
+            background: #da190b;
+        }
+
+        /* 반응형 디자인 */
+        @media (max-width: 768px) {
+            .user-details {
+                display: none;
+            }
+
+            .user-info-display {
+                padding: 6px;
+            }
+
+            .dropdown-icon {
+                display: none;
+            }
+
+            .user-dropdown,
+            .settings-dropdown {
+                right: auto;
+                left: 50%;
+                transform: translateX(-50%) translateY(-10px);
+            }
+
+            .user-dropdown.show,
+            .settings-dropdown.show {
+                transform: translateX(-50%) translateY(0);
+            }
+
+            .status-bar {
+                gap: var(--space-sm);
+            }
+
+            .doc-count {
+                font-size: 0.75rem;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .status {
+                font-size: 0.75rem;
+                padding: var(--space-xs);
+            }
+
+            .user-avatar {
+                width: 28px;
+                height: 28px;
+                font-size: 12px;
+            }
+
+            .dropdown-header-name,
+            .dropdown-item,
+            .settings-item {
+                font-size: 13px;
+            }
+        }
+
+        /* 다크 모드 드롭다운 스타일 */
+        [data-theme="dark"] .user-dropdown,
+        [data-theme="dark"] .settings-dropdown {
+            background: #1f2937;
+            border-color: #374151;
+            color: #e5e7eb;
+        }
+
+        [data-theme="dark"] .dropdown-header {
+            background: #111827;
+            border-bottom-color: #374151;
+        }
+
+        [data-theme="dark"] .dropdown-header-name {
+            color: #f9fafb;
+        }
+
+        [data-theme="dark"] .dropdown-header-role {
+            color: #9ca3af;
+        }
+
+        [data-theme="dark"] .dropdown-item,
+        [data-theme="dark"] .settings-item {
+            color: #e5e7eb;
+        }
+
+        [data-theme="dark"] .dropdown-item:hover,
+        [data-theme="dark"] .settings-item:hover {
+            background: #374151;
+        }
+
+        [data-theme="dark"] .dropdown-item svg,
+        [data-theme="dark"] .settings-item svg {
+            stroke: #9ca3af;
+        }
+
+        [data-theme="dark"] .dropdown-item.danger {
+            color: #f87171;
+        }
+
+        [data-theme="dark"] .dropdown-item.danger:hover {
+            background: #7f1d1d;
+        }
+
+        [data-theme="dark"] .dropdown-item.danger svg {
+            stroke: #f87171;
+        }
+
+        [data-theme="dark"] .dropdown-divider {
+            background: #374151;
+        }
+
+        /* Admin Dashboard Styles */
+        .admin-filters {
+            padding: 20px;
+            background: var(--hover-bg);
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .filter-row {
+            display: flex;
+            gap: 16px;
+            align-items: flex-end;
+            flex-wrap: wrap;
+        }
+
+        .filter-group {
+            flex: 1;
+            min-width: 200px;
+        }
+
+        .filter-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+            color: var(--text-primary);
+        }
+
+        .filter-group select {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            background: var(--bg-color);
+            color: var(--text-primary);
+            font-size: 14px;
+        }
+
+        .logs-container {
+            max-height: 500px;
+            overflow-y: auto;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .logs-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .logs-table thead {
+            background: var(--hover-bg);
+            position: sticky;
+            top: 0;
+            z-index: 1;
+        }
+
+        .logs-table th {
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+            color: var(--text-primary);
+            border-bottom: 2px solid var(--border-color);
+        }
+
+        .logs-table td {
+            padding: 12px;
+            border-bottom: 1px solid var(--border-color);
+            color: var(--text-primary);
+        }
+
+        .logs-table tbody tr:hover {
+            background: var(--hover-bg);
+        }
+
+        .log-level {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .log-level.INFO {
+            background: #e0f2fe;
+            color: #0369a1;
+        }
+
+        .log-level.WARNING {
+            background: #fef3c7;
+            color: #d97706;
+        }
+
+        .log-level.ERROR {
+            background: #fee2e2;
+            color: #dc2626;
+        }
+
+        .log-level.CRITICAL {
+            background: #fce7f3;
+            color: #be123c;
+        }
+
+        .logs-pagination {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .pagination-btn {
+            padding: 8px 16px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            background: var(--bg-color);
+            color: var(--text-primary);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .pagination-btn:hover:not(:disabled) {
+            background: var(--hover-bg);
+            border-color: var(--primary-500);
+        }
+
+        .pagination-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        #logsPaginationInfo {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+
+        /* Dark theme for admin dashboard */
+        [data-theme="dark"] .log-level.INFO {
+            background: #0c4a6e;
+            color: #7dd3fc;
+        }
+
+        [data-theme="dark"] .log-level.WARNING {
+            background: #78350f;
+            color: #fbbf24;
+        }
+
+        [data-theme="dark"] .log-level.ERROR {
+            background: #7f1d1d;
+            color: #fca5a5;
+        }
+
+        [data-theme="dark"] .log-level.CRITICAL {
+            background: #831843;
+            color: #fda4af;
+        }
+    </style>
+</head>
+<body>
+    <script>
+        // 인증 확인 - 페이지 로드 시 즉시 실행
+        (function() {
+            if (!Auth.requireAuth()) {
+                throw new Error('Authentication required');
+            }
+        })();
+    </script>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <h1>📚 문서 RAG 챗봇</h1>
+            <div class="status-bar">
+                <button id="historyToggleBtn" class="history-toggle-btn" title="대화 히스토리">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
+                <span id="status" class="status">연결 중...</span>
+                <span id="doc-count" class="doc-count"></span>
+                <div class="settings-menu" id="settingsMenu">
+                    <button id="settingsBtn" class="settings-btn" onclick="toggleSettingsDropdown()" title="설정">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <circle cx="12" cy="12" r="3" stroke-width="2"/>
+                            <path d="M12 1v6m0 6v6M1 12h6m6 0h6" stroke-width="2" stroke-linecap="round"/>
+                            <path d="M4.22 4.22l4.24 4.24m7.08 0l4.24-4.24M4.22 19.78l4.24-4.24m7.08 0l4.24 4.24" stroke-width="2" stroke-linecap="round"/>
+                        </svg>
+                    </button>
+                    <div class="settings-dropdown" id="settingsDropdown">
+                        <div class="settings-item" onclick="toggleThemeFromMenu(event)">
+                            <div class="settings-item-content">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                    <circle cx="12" cy="12" r="5" stroke-width="2"/>
+                                    <line x1="12" y1="1" x2="12" y2="3" stroke-width="2"/>
+                                    <line x1="12" y1="21" x2="12" y2="23" stroke-width="2"/>
+                                    <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" stroke-width="2"/>
+                                    <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" stroke-width="2"/>
+                                    <line x1="1" y1="12" x2="3" y2="12" stroke-width="2"/>
+                                    <line x1="21" y1="12" x2="23" y2="12" stroke-width="2"/>
+                                    <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" stroke-width="2"/>
+                                    <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" stroke-width="2"/>
+                                </svg>
+                                다크 모드
+                            </div>
+                            <div class="theme-switch" id="themeSwitch">
+                                <div class="theme-switch-slider"></div>
+                            </div>
+                        </div>
+                        <div class="dropdown-divider"></div>
+                        <div class="settings-item" onclick="clearConversation()">
+                            <div class="settings-item-content">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                    <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                                </svg>
+                                대화 초기화
+                            </div>
+                        </div>
+                        <div class="settings-item" onclick="exportConversation()">
+                            <div class="settings-item-content">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                                </svg>
+                                대화 내보내기
+                            </div>
+                        </div>
+                        <div class="settings-item" onclick="importConversation()">
+                            <div class="settings-item-content">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                                </svg>
+                                대화 가져오기
+                            </div>
+                        </div>
+                        <div class="dropdown-divider"></div>
+                        <div class="settings-item" onclick="showHelpModal()">
+                            <div class="settings-item-content">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                    <circle cx="12" cy="12" r="10" stroke-width="2"/>
+                                    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" stroke-width="2" stroke-linecap="round"/>
+                                    <circle cx="12" cy="17" r="0.5" fill="currentColor" stroke="none"/>
+                                </svg>
+                                도움말
+                            </div>
+                        </div>
+                        <div class="dropdown-divider"></div>
+                        <div class="settings-item" onclick="openAdvancedSettings()">
+                            <div class="settings-item-content">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                    <path d="M12 15a3 3 0 100-6 3 3 0 000 6z" stroke-width="2"/>
+                                    <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z" stroke-width="2"/>
+                                </svg>
+                                고급 설정
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="user-menu" id="userMenu">
+                    <div class="user-info-display" onclick="toggleUserDropdown()">
+                        <div class="user-avatar" id="userAvatar">U</div>
+                        <div class="user-details">
+                            <span class="user-name" id="userName">사용자</span>
+                            <span class="user-role" id="userRole">일반</span>
+                        </div>
+                        <svg class="dropdown-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <path d="M6 9l6 6 6-6" stroke-width="2" stroke-linecap="round"/>
+                        </svg>
+                    </div>
+                    <div class="user-dropdown" id="userDropdown">
+                        <div class="dropdown-header">
+                            <div class="dropdown-header-name" id="dropdownName">사용자</div>
+                            <div class="dropdown-header-role" id="dropdownRole">일반</div>
+                        </div>
+                        <div class="dropdown-item" onclick="goToProfile(event)">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" stroke-width="2" stroke-linecap="round"/>
+                                <circle cx="12" cy="7" r="4" stroke-width="2"/>
+                            </svg>
+                            프로필 관리
+                        </div>
+                        <div class="dropdown-item" id="adminMenuItem" style="display: none;" onclick="goToAdminPage(event)">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                <path d="M12 15a3 3 0 100-6 3 3 0 000 6z" stroke-width="2"/>
+                                <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z" stroke-width="2"/>
+                            </svg>
+                            관리자 대시보드
+                        </div>
+                        <div class="dropdown-divider"></div>
+                        <div class="dropdown-item danger" onclick="handleLogout(event)">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                            </svg>
+                            로그아웃
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <!-- 숨겨진 버튼들 (기존 이벤트 핸들러 유지용) -->
+            <button id="helpBtn" style="display: none;"></button>
+            <button id="groupManageBtn" style="display: none;"></button>
+            <button id="themeToggle" style="display: none;"></button>
+        </header>
+
+        <!-- Conversation History Sidebar -->
+        <div class="conversation-sidebar" id="conversationSidebar">
+            <div class="sidebar-header">
+                <h3>대화 히스토리</h3>
+                <div class="sidebar-actions">
+                    <button id="deleteAllChatsBtn" class="delete-all-btn" title="전체 삭제">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </button>
+                    <button id="newChatBtn" class="new-chat-btn" title="새 대화">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <path d="M12 5v14M5 12h14" stroke-width="2" stroke-linecap="round"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+            <div class="conversation-list" id="conversationList">
+                <!-- Conversations will be loaded here -->
+                <div class="loading-conversations">
+                    <div class="spinner-small"></div>
+                    <span>대화 목록 로딩 중...</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Chat Wrapper (contains chat container and scroll button) -->
+        <div class="chat-wrapper">
+            <!-- Chat Container -->
+            <div class="chat-container" id="chatContainer">
+                <div class="welcome-message">
+                    <h2>안녕하세요! 👋</h2>
+                    <p>업로드된 문서 내용에 대해 무엇이든 질문해주세요.</p>
+                    <p class="hint">문서가 로딩되면 질문을 시작할 수 있습니다.</p>
+                </div>
+
+                <!-- Suggested Questions Section -->
+                <div class="suggested-questions" id="suggestedQuestions" style="display: none;">
+                    <div class="suggested-questions-header">
+                        <span class="suggested-icon">💡</span>
+                        <h3>이런 질문은 어떠세요?</h3>
+                        <button id="refreshSuggestionsBtn" class="refresh-suggestions-btn" title="새로운 질문 생성">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                <path d="M1 4v6h6M23 20v-6h-6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                                <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="suggested-questions-list" id="suggestedQuestionsList">
+                        <!-- Questions will be inserted here dynamically -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Scroll to Bottom Button (inside wrapper, outside scrollable container) -->
+            <button id="scrollToBottomBtn" class="scroll-to-bottom-btn" title="최하단으로 스크롤">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                    <path d="M7 13L12 18L17 13" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M7 7L12 12L17 7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+            </button>
+        </div>
+
+        <!-- Document Filter Section -->
+        <div class="document-filter" id="documentFilter">
+            <div class="filter-header">
+                <span class="filter-title">🔍 검색 범위</span>
+                <button id="toggleFilterBtn" class="toggle-filter-btn" title="문서 목록 펼치기/접기">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                        <path d="M8 4l-4 4h8l-4-4z"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="filter-content" id="filterContent">
+                <!-- Filter Tabs -->
+                <div class="filter-tabs">
+                    <button class="filter-tab active" data-tab="documents">문서별</button>
+                    <button class="filter-tab" data-tab="groups">그룹별</button>
+                </div>
+
+                <!-- Document Filter Panel -->
+                <div class="filter-panel" id="documentFilterPanel">
+                    <div class="filter-options">
+                        <label class="filter-option" title="모든 문서에서 검색합니다">
+                            <input type="radio" name="filterMode" value="all" checked>
+                            <span>전체 문서</span>
+                        </label>
+                        <label class="filter-option" title="체크한 문서에서만 검색합니다">
+                            <input type="radio" name="filterMode" value="selected">
+                            <span>선택한 문서만</span>
+                        </label>
+                    </div>
+                    <div class="document-list" id="filterDocumentList">
+                        <div class="loading-documents">문서 목록을 불러오는 중...</div>
+                    </div>
+                </div>
+
+                <!-- Group Filter Panel -->
+                <div class="filter-panel" id="groupFilterPanel" style="display: none;">
+                    <div class="filter-options">
+                        <label class="filter-option" title="모든 그룹에서 검색합니다">
+                            <input type="radio" name="groupFilterMode" value="all" checked>
+                            <span>전체 그룹</span>
+                        </label>
+                        <label class="filter-option" title="선택한 그룹에서만 검색합니다">
+                            <input type="radio" name="groupFilterMode" value="selected">
+                            <span>선택한 그룹만</span>
+                        </label>
+                    </div>
+                    <div class="group-filter-list" id="groupFilterList">
+                        <div class="loading-groups">그룹 목록을 불러오는 중...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Input Area -->
+        <div class="input-area">
+            <textarea
+                id="userInput"
+                placeholder="질문을 입력하세요... (Enter: 전송, Shift+Enter: 줄바꿈)"
+                rows="1"
+                title="문서에 대한 질문을 입력하세요"
+            ></textarea>
+            <button id="sendBtn" class="send-btn" disabled title="질문 전송 (Enter)">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                    <path d="M22 2L11 13M22 2L15 22L11 13M22 2L2 8L11 13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+            </button>
+        </div>
+
+        <!-- Controls -->
+        <div class="controls">
+            <button id="clearBtn" class="control-btn" title="현재 대화 내용을 모두 지웁니다">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="margin-right: 6px;">
+                    <polyline points="3 6 5 6 21 6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                대화 초기화
+            </button>
+            <button id="exportBtn" class="control-btn" title="대화 내용을 JSON 파일로 저장합니다">💾 대화 내보내기</button>
+            <button id="importBtn" class="control-btn" title="저장된 대화 내용을 불러옵니다">📂 대화 가져오기</button>
+        </div>
+    </div>
+
+    <!-- Admin Dashboard Modal -->
+    <div id="adminModal" class="modal">
+        <div class="modal-content" style="max-width: 1200px;">
+            <div class="modal-header">
+                <h2>🔒 보안 로그</h2>
+                <button class="modal-close" id="closeAdminModal">&times;</button>
+            </div>
+
+            <!-- Filters Section -->
+            <div class="admin-filters">
+                <div class="filter-row">
+                    <div class="filter-group">
+                        <label>레벨</label>
+                        <select id="logLevelFilter">
+                            <option value="">전체</option>
+                            <option value="INFO">INFO</option>
+                            <option value="WARNING">WARNING</option>
+                            <option value="ERROR">ERROR</option>
+                            <option value="CRITICAL">CRITICAL</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label>이벤트 타입</label>
+                        <select id="logEventTypeFilter">
+                            <option value="">전체</option>
+                            <option value="AUTH_LOGIN_SUCCESS">로그인 성공</option>
+                            <option value="AUTH_LOGIN_FAILED">로그인 실패</option>
+                            <option value="AUTH_LOGOUT">로그아웃</option>
+                            <option value="RATE_LIMIT_EXCEEDED">Rate Limit 초과</option>
+                            <option value="BRUTE_FORCE_ATTEMPT">Brute Force 시도</option>
+                            <option value="UNAUTHORIZED_ACCESS">무단 접근</option>
+                            <option value="TOKEN_ISSUED">토큰 발급</option>
+                            <option value="TOKEN_INVALID">유효하지 않은 토큰</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <button id="applyLogFilters" class="action-btn" style="margin-top: 20px;">
+                            🔍 필터 적용
+                        </button>
+                        <button id="refreshLogs" class="action-btn" style="margin-top: 20px; margin-left: 8px;">
+                            🔄 새로고침
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Logs Table -->
+            <div class="logs-container">
+                <table class="logs-table">
+                    <thead>
+                        <tr>
+                            <th>시간</th>
+                            <th>레벨</th>
+                            <th>이벤트</th>
+                            <th>사용자</th>
+                            <th>IP 주소</th>
+                            <th>메시지</th>
+                        </tr>
+                    </thead>
+                    <tbody id="logsTableBody">
+                        <tr>
+                            <td colspan="6" class="loading">로그를 불러오는 중...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Pagination -->
+            <div class="logs-pagination">
+                <button id="prevLogsPage" class="pagination-btn" disabled>이전</button>
+                <span id="logsPaginationInfo">페이지 1</span>
+                <button id="nextLogsPage" class="pagination-btn">다음</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings Overlay -->
+    <div id="settingsOverlay" class="settings-overlay"></div>
+
+    <!-- Settings Sidebar -->
+    <div id="settingsPanel" class="settings-panel">
+        <div class="settings-header">
+            <h2>⚙️ 설정</h2>
+            <button class="settings-close" id="closeSettingsBtn">&times;</button>
+        </div>
+
+        <div class="settings-content">
+            <!-- Search Settings -->
+            <div class="settings-section">
+                <h3>🔍 검색 설정</h3>
+
+                <div class="setting-item">
+                    <label for="topKSlider">
+                        <span class="setting-label">검색 문서 수 (top_k)</span>
+                        <span class="setting-value" id="topKValue">5</span>
+                    </label>
+                    <input type="range" id="topKSlider" min="1" max="10" value="5" step="1">
+                    <p class="setting-hint">질문당 검색할 관련 문서 청크 수</p>
+                </div>
+            </div>
+
+            <!-- Generation Settings -->
+            <div class="settings-section">
+                <h3>🤖 생성 설정</h3>
+
+                <div class="setting-item">
+                    <label for="temperatureSlider">
+                        <span class="setting-label">Temperature</span>
+                        <span class="setting-value" id="temperatureValue">0.7</span>
+                    </label>
+                    <input type="range" id="temperatureSlider" min="0" max="1" value="0.7" step="0.1">
+                    <p class="setting-hint">응답의 창의성 (0: 일관적, 1: 창의적)</p>
+                </div>
+
+                <div class="setting-item">
+                    <label for="maxTokensSlider">
+                        <span class="setting-label">최대 토큰 수</span>
+                        <span class="setting-value" id="maxTokensValue">2048</span>
+                    </label>
+                    <input type="range" id="maxTokensSlider" min="512" max="4096" value="2048" step="256">
+                    <p class="setting-hint">생성할 최대 응답 길이</p>
+                </div>
+
+                <div class="setting-item">
+                    <label>
+                        <span class="setting-label">LLM 모델</span>
+                    </label>
+                    <div id="llmModelDisplay" style="padding: 12px; background: #f9fafb; border-radius: 8px; font-family: 'Consolas', 'Monaco', monospace; font-size: 14px; color: #374151; border: 1px solid #e5e7eb;">
+                        로딩 중...
+                    </div>
+                    <p class="setting-hint">현재 적용된 언어 모델 (모델 변경은 관리자 페이지에서 가능)</p>
+                </div>
+
+                <div class="setting-item">
+                    <label>
+                        <span class="setting-label">Embedding 모델</span>
+                    </label>
+                    <div id="embeddingModelDisplay" style="padding: 12px; background: #f9fafb; border-radius: 8px; font-family: 'Consolas', 'Monaco', monospace; font-size: 14px; color: #374151; border: 1px solid #e5e7eb;">
+                        로딩 중...
+                    </div>
+                    <p class="setting-hint">현재 적용된 임베딩 모델 (모델 변경은 관리자 페이지에서 가능)</p>
+                </div>
+            </div>
+
+            <!-- Save Button -->
+            <div class="settings-footer">
+                <button id="saveSettingsBtn" class="save-btn" title="현재 설정을 저장합니다 (자동 저장됨)">
+                    💾 설정 저장
+                </button>
+                <button id="resetSettingsBtn" class="reset-btn" title="모든 설정을 기본값으로 되돌립니다">
+                    🔄 기본값 복원
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Help Modal -->
+    <div id="helpModal" class="modal">
+        <div class="modal-content help-modal-content">
+            <div class="modal-header">
+                <h2>📖 사용 가이드</h2>
+                <button class="modal-close" id="closeHelpModal">&times;</button>
+            </div>
+
+            <div class="help-content">
+                <!-- Getting Started -->
+                <section class="help-section">
+                    <h3>🚀 시작하기</h3>
+                    <p>이 챗봇은 업로드된 문서의 내용을 기반으로 질문에 답변합니다.</p>
+                    <ul>
+                        <li><strong>지원 형식:</strong> PDF, HWP, HWPX, DOC, DOCX, XLS, XLSX, PPT, PPTX, TXT (총 10가지)</li>
+                        <li>문서가 로딩되면 하단 입력창에 질문을 입력하세요</li>
+                        <li>Enter를 누르거나 전송 버튼을 클릭하여 질문을 보냅니다</li>
+                        <li>AI가 문서 내용을 분석하여 답변을 생성합니다</li>
+                    </ul>
+                </section>
+
+                <!-- Suggested Questions -->
+                <section class="help-section">
+                    <h3>💡 추천 질문 사용하기</h3>
+                    <p>페이지가 로딩되면 문서 기반 추천 질문이 자동으로 표시됩니다.</p>
+                    <ul>
+                        <li><strong>자동 생성:</strong> AI가 문서 내용을 분석하여 관련 질문을 추천합니다</li>
+                        <li><strong>클릭 한 번:</strong> 추천 질문을 클릭하면 자동으로 질문이 전송됩니다</li>
+                        <li><strong>자동 숨김:</strong> 첫 질문 후 추천 질문은 자동으로 숨겨집니다</li>
+                        <li><strong>시작점:</strong> 어떤 질문을 해야 할지 모를 때 유용합니다</li>
+                    </ul>
+                </section>
+
+                <!-- Context-Aware Conversation -->
+                <section class="help-section">
+                    <h3>🔄 스마트 대화 기능</h3>
+                    <p>이전 대화 내용을 기억하여 연속적인 질문이 가능합니다.</p>
+                    <ul>
+                        <li><strong>대화 기록:</strong> 모든 질문과 답변이 자동으로 저장됩니다</li>
+                        <li><strong>문맥 이해:</strong> "그것은 무엇인가요?", "더 자세히 설명해주세요" 같은 후속 질문 가능</li>
+                        <li><strong>대화 흐름:</strong> 이전 답변을 참조하여 더 정확한 답변 제공</li>
+                        <li><strong>세션 저장:</strong> 대화 내용이 브라우저에 자동으로 저장됩니다</li>
+                        <li><strong>자동 복원:</strong> 페이지 새로고침 시 이전 대화가 자동으로 복원됩니다</li>
+                    </ul>
+                </section>
+
+                <!-- Question Autocomplete -->
+                <section class="help-section">
+                    <h3>✨ 질문 자동완성</h3>
+                    <p>입력 중 추천 질문이 자동으로 제안됩니다.</p>
+                    <ul>
+                        <li><strong>자동 제안:</strong> 2글자 이상 입력 시 관련 질문 자동 표시</li>
+                        <li><strong>퍼지 매칭:</strong> 유사한 단어도 인식하여 질문 추천</li>
+                        <li><strong>키보드 네비게이션:</strong> ↑/↓ 화살표로 항목 이동, Enter로 선택</li>
+                        <li><strong>마우스 선택:</strong> 제안된 질문을 클릭하여 자동 입력</li>
+                        <li><strong>ESC 닫기:</strong> ESC 키로 자동완성 닫기</li>
+                    </ul>
+                </section>
+
+                <!-- Document Management -->
+                <section class="help-section">
+                    <h3>📁 문서 관리</h3>
+                    <p>헤더의 "문서 관리" 버튼으로 다양한 형식의 문서를 업로드하고 관리할 수 있습니다.</p>
+                    <ul>
+                        <li><strong>모달 열기:</strong> 헤더의 "문서 관리" 버튼 클릭</li>
+                        <li><strong>문서 업로드:</strong> 지원되는 문서 파일을 드래그 앤 드롭 또는 클릭하여 파일 선택</li>
+                        <li><strong>다양한 형식:</strong> PDF, HWP, HWPX, Word(DOC/DOCX), Excel(XLS/XLSX), PowerPoint(PPT/PPTX), TXT 모두 지원 (총 10가지)</li>
+                        <li><strong>업로드 진행:</strong> 파일 업로드 및 처리 진행 상황 표시</li>
+                        <li><strong>문서 목록:</strong> 업로드된 모든 문서 확인</li>
+                        <li><strong>문서 삭제:</strong> 각 문서의 삭제 버튼으로 문서 제거</li>
+                        <li><strong>목록 새로고침:</strong> 새로고침 버튼으로 문서 목록 갱신</li>
+                        <li><strong>최대 파일 크기:</strong> 50MB까지 업로드 가능</li>
+                    </ul>
+                </section>
+
+                <!-- Document Filter -->
+                <section class="help-section">
+                    <h3>🔍 문서 필터링</h3>
+                    <p>특정 문서만 선택하여 검색 범위를 좁힐 수 있습니다.</p>
+                    <ul>
+                        <li><strong>필터 열기:</strong> "문서 필터 ▼" 버튼을 클릭하여 문서 목록 확인</li>
+                        <li><strong>문서 선택:</strong> 체크박스를 사용하여 검색할 문서 선택</li>
+                        <li><strong>전체 선택:</strong> "전체 선택" 버튼으로 모든 문서 한 번에 선택</li>
+                        <li><strong>전체 해제:</strong> "전체 해제" 버튼으로 모든 선택 해제</li>
+                        <li><strong>적용:</strong> 선택한 문서만 검색 대상이 됩니다</li>
+                    </ul>
+                </section>
+
+                <!-- Answer Display -->
+                <section class="help-section">
+                    <h3>📝 답변 확인하기</h3>
+                    <p>AI가 생성한 답변과 참조 출처를 확인할 수 있습니다.</p>
+                    <ul>
+                        <li><strong>실시간 스트리밍:</strong> 답변이 생성되는 과정을 실시간으로 표시</li>
+                        <li><strong>진행 상황:</strong> 타이핑 인디케이터와 토큰 카운트로 진행률 확인</li>
+                        <li><strong>마크다운 지원:</strong> 코드 블록, 리스트, 표 등 다양한 서식 지원</li>
+                        <li><strong>출처 표시:</strong> 각 답변 하단에 참조한 문서 출처가 표시됩니다</li>
+                        <li><strong>출처 상세:</strong> 출처 박스를 클릭하면 원문 내용을 확인할 수 있습니다</li>
+                        <li><strong>관련도 점수:</strong> 각 출처의 관련성 점수가 표시됩니다</li>
+                    </ul>
+                </section>
+
+                <!-- Error Handling -->
+                <section class="help-section">
+                    <h3>⚠️ 에러 처리</h3>
+                    <p>오류 발생 시 친절한 메시지와 복구 옵션을 제공합니다.</p>
+                    <ul>
+                        <li><strong>친절한 메시지:</strong> 사용자가 이해하기 쉬운 에러 설명</li>
+                        <li><strong>다시 시도:</strong> "다시 시도" 버튼으로 즉시 재시도 가능</li>
+                        <li><strong>자동 복구:</strong> 일시적 네트워크 오류는 자동으로 재시도</li>
+                        <li><strong>에러 유형:</strong> 네트워크, 서버, 문서 처리 등 다양한 에러 대응</li>
+                        <li><strong>안내 메시지:</strong> 문제 해결을 위한 구체적인 조치 안내</li>
+                    </ul>
+                </section>
+
+                <!-- Cache Stats -->
+                <section class="help-section">
+                    <h3>💾 캐시 통계</h3>
+                    <p>자주 묻는 질문은 캐시에 저장되어 빠르게 답변합니다.</p>
+                    <ul>
+                        <li><strong>캐시 히트:</strong> 이전에 답변한 유사 질문은 즉시 응답</li>
+                        <li><strong>통계 확인:</strong> 하단의 캐시 통계에서 적중률 확인 가능</li>
+                        <li><strong>성능 향상:</strong> 캐시 사용으로 응답 속도가 크게 향상됩니다</li>
+                    </ul>
+                </section>
+
+                <!-- Settings -->
+                <section class="help-section">
+                    <h3>⚙️ 설정</h3>
+                    <p>우측 상단 설정 버튼으로 다양한 옵션을 조정할 수 있습니다.</p>
+                    <ul>
+                        <li><strong>검색 개수:</strong> 답변 생성 시 참조할 문서 개수 (1-10)</li>
+                        <li><strong>온도:</strong> 답변의 창의성 조절 (0.0-1.0)</li>
+                        <li><strong>최대 토큰:</strong> 답변 최대 길이 설정</li>
+                        <li><strong>자동 저장:</strong> 설정은 브라우저에 자동으로 저장됩니다</li>
+                    </ul>
+                </section>
+
+                <!-- API Documentation -->
+                <section class="help-section">
+                    <h3>🔌 API 문서 (개발자용)</h3>
+                    <p>다양한 문서 형식의 텍스트 추출 API 문서를 Swagger UI로 제공합니다.</p>
+                    <ul>
+                        <li><strong>Swagger UI:</strong> <a href="http://localhost:8081/swagger-ui.html" target="_blank">http://localhost:8081/swagger-ui.html</a></li>
+                        <li><strong>OpenAPI JSON:</strong> <a href="http://localhost:8081/api-docs" target="_blank">http://localhost:8081/api-docs</a></li>
+                        <li><strong>주요 엔드포인트:</strong>
+                            <ul>
+                                <li><code>POST /api/document/extract</code> - 모든 지원 형식의 문서 텍스트 추출</li>
+                                <li><code>POST /api/document/extract/base64</code> - Base64로 인코딩된 문서 처리</li>
+                                <li><code>GET /api/document/health</code> - 서비스 상태 확인</li>
+                            </ul>
+                        </li>
+                        <li><strong>지원 형식:</strong> PDF, HWP, HWPX, DOC, DOCX, XLS, XLSX, PPT, PPTX, TXT (총 10가지)</li>
+                        <li><strong>테스트:</strong> Swagger UI에서 직접 API를 테스트할 수 있습니다</li>
+                        <li><strong>응답 형식:</strong> JSON 형식으로 추출된 텍스트 및 메타데이터 제공</li>
+                    </ul>
+                </section>
+
+                <!-- Keyboard Shortcuts -->
+                <section class="help-section">
+                    <h3>⌨️ 키보드 단축키</h3>
+                    <ul>
+                        <li><kbd>Enter</kbd> - 질문 전송</li>
+                        <li><kbd>Shift + Enter</kbd> - 줄바꿈</li>
+                        <li><kbd>F1</kbd> - 도움말 열기/닫기</li>
+                        <li><kbd>Esc</kbd> - 열린 모달 닫기</li>
+                    </ul>
+                </section>
+
+                <!-- System Information -->
+                <section class="help-section">
+                    <h3>🔧 시스템 정보</h3>
+                    <p>현재 시스템에서 사용 중인 AI 모델 정보입니다.</p>
+                    <ul>
+                        <li><strong>임베딩 모델:</strong> KURE-v1 (Korean Universal Representation Embeddings)
+                            <ul>
+                                <li>1024차원 벡터로 한국어 의미 검색에 최적화</li>
+                                <li>문서를 벡터로 변환하여 의미적 유사도 계산</li>
+                            </ul>
+                        </li>
+                        <li><strong>LLM 모델:</strong> Qwen3-30B (4-bit 양자화)
+                            <ul>
+                                <li>고성능 다국어 대화형 AI 모델</li>
+                                <li>한국어 질의응답에 최적화된 30B 파라미터 모델</li>
+                                <li>약 20GB RAM 사용 (4-bit 양자화로 메모리 최적화)</li>
+                            </ul>
+                        </li>
+                        <li><strong>문서 처리:</strong> Document Service (Java Spring Boot)
+                            <ul>
+                                <li>다양한 문서 형식을 텍스트로 추출</li>
+                                <li>Apache POI, PDFBox 기반 고성능 처리</li>
+                            </ul>
+                        </li>
+                    </ul>
+                </section>
+
+                <!-- Tips -->
+                <section class="help-section">
+                    <h3>💡 사용 팁</h3>
+                    <ul>
+                        <li>구체적인 질문일수록 더 정확한 답변을 받을 수 있습니다</li>
+                        <li>이전 답변과 관련된 추가 질문을 자유롭게 하세요</li>
+                        <li>문서 필터를 사용하면 특정 문서에서만 검색할 수 있습니다</li>
+                        <li>테마 전환 버튼으로 다크/라이트 모드를 선택할 수 있습니다</li>
+                        <li>출처를 클릭하면 AI가 참조한 원문을 직접 확인할 수 있습니다</li>
+                    </ul>
+                </section>
+            </div>
+        </div>
+    </div>
+
+    <!-- Source Details Modal -->
+    <div id="sourceModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>📄 출처 상세 정보</h2>
+                <button class="modal-close" id="closeSourceModal">&times;</button>
+            </div>
+
+            <div class="source-details">
+                <div class="source-detail-header">
+                    <h3 id="sourceFilename"></h3>
+                    <div class="source-score">
+                        <span class="score-label">관련도:</span>
+                        <span class="score-value" id="sourceScore"></span>
+                    </div>
+                </div>
+
+                <div class="source-text-section">
+                    <h4>📝 참조된 내용</h4>
+                    <div class="source-text-content" id="sourceText"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Chunk Viewer Modal -->
+    <div id="chunkViewerModal" class="modal">
+        <div class="modal-content chunk-viewer-modal">
+            <div class="modal-header">
+                <h2>📄 문서 청크 보기</h2>
+                <button class="modal-close" id="closeChunkViewerModal">&times;</button>
+            </div>
+
+            <div class="chunk-viewer-content">
+                <div class="chunk-viewer-header">
+                    <h3 id="chunkViewerFilename"></h3>
+                    <div class="chunk-viewer-info">
+                        <span id="chunkViewerCount" class="chunk-count-badge"></span>
+                    </div>
+                </div>
+
+                <div id="chunkViewerList" class="chunk-list">
+                    <div class="loading">청크를 불러오는 중...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Version Comparison Modal -->
+    <div id="comparisonModal" class="modal">
+        <div class="modal-content comparison-modal">
+            <div class="modal-header">
+                <h2>🔄 버전 비교</h2>
+                <button class="modal-close" id="closeComparisonModal">&times;</button>
+            </div>
+
+
+    <!-- Version Comparison Modal -->
+    <div id="comparisonModal" class="modal">
+        <div class="modal-content comparison-modal">
+            <div class="modal-header">
+                <h2>🔄 버전 비교</h2>
+                <button class="modal-close" id="closeComparisonModal">&times;</button>
+            </div>
+
+            <div id="comparisonContent" class="comparison-content">
+                <div class="loading">비교 정보를 불러오는 중...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Reindex Progress Modal -->
+    <div id="reindexProgressModal" class="modal">
+        <div class="modal-content reindex-progress-modal">
+            <div class="modal-header">
+                <div class="modal-title-wrapper">
+                    <div class="modal-icon">🔄</div>
+                    <h2>문서 재색인 진행 중</h2>
+                </div>
+            </div>
+
+            <div class="reindex-progress-content" style="padding: 2rem;">
+                <div class="progress-card" style="display: flex; flex-direction: column; gap: 2rem;">
+
+                    <!-- Current Step -->
+                    <div style="text-align: center;">
+                        <h3 id="reindexProgressStep" style="font-size: 1.5rem; font-weight: 700; color: #1e293b; margin: 0;">준비 중...</h3>
+                    </div>
+
+                    <!-- Progress Bar Container -->
+                    <div style="width: 100%;">
+                        <!-- Background Track -->
+                        <div style="position: relative; width: 100%; height: 80px; background: #e2e8f0; border-radius: 12px; overflow: visible; box-shadow: inset 0 2px 6px rgba(0,0,0,0.1);">
+                            <!-- Progress Fill -->
+                            <div id="reindexProgressBar" style="position: absolute; top: 0; left: 0; height: 100%; background: linear-gradient(90deg, #667eea 0%, #764ba2 50%, #f093fb 100%); transition: width 0.3s ease; border-radius: 12px;"></div>
+
+                            <!-- Centered Percentage Text (over the bar) -->
+                            <div style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: none; z-index: 10;">
+                                <span id="reindexProgressPercent" style="color: #1e293b; font-size: 2.5rem; font-weight: 800; text-shadow: 0 0 10px rgba(255,255,255,0.8), 0 0 20px rgba(255,255,255,0.6); letter-spacing: 1px;">0%</span>
+                                <span id="reindexProgressTime" style="color: #475569; font-size: 1rem; font-weight: 600; margin-top: 0.25rem; text-shadow: 0 0 8px rgba(255,255,255,0.9);"></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Stats -->
+                    <div style="display: flex; justify-content: center; margin-top: 1rem;">
+                        <div style="background: white; padding: 1rem 2rem; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); border: 2px solid #e2e8f0;">
+                            <span style="font-size: 1.5rem; margin-right: 0.5rem;">📊</span>
+                            <span id="reindexProgressStats" style="font-size: 1.5rem; font-weight: 600; color: #334155;">0 / 0</span>
+                        </div>
+                    </div>
+
+                    <!-- Cancel Button -->
+                    <div style="display: flex; justify-content: center; margin-top: 1.5rem;">
+                        <button id="cancelReindexBtn" style="
+                            padding: 0.75rem 2rem;
+                            font-size: 1.125rem;
+                            font-weight: 600;
+                            color: white;
+                            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+                            border: none;
+                            border-radius: 12px;
+                            cursor: pointer;
+                            box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
+                            transition: all 0.2s ease;
+                        " onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 6px 16px rgba(239, 68, 68, 0.4)';" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 12px rgba(239, 68, 68, 0.3)';">
+                            🛑 재색인 중지
+                        </button>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Performance Utilities -->
+    <script src="/static/utils.js"></script>
+    <script src="/static/optimizations.js"></script>
+
+    <!-- Session Manager -->
+    <script src="/static/session-manager.js"></script>
+
+    <!-- Error Handler -->
+    <script src="/static/error-handler.js"></script>
+
+    <!-- Streaming Visualizer -->
+    <script src="/static/streaming-visualizer.js"></script>
+
+    <!-- Question AutoComplete -->
+    <script src="/static/autocomplete.js"></script>
+
+    <!-- Follow-up Questions -->
+    <script src="/static/follow-up-questions.js"></script>
+
+    <!-- Group Manager -->
+    <script src="/static/group-manager.js"></script>
+
+    <!-- Authentication Initialization -->
+    <script>
+        // 사용자 정보 표시
+        (function() {
+            const user = Auth.getUser();
+            if (user) {
+                // 아바타 - 이메일 첫 글자
+                const avatarInitial = (user.email || 'U')[0].toUpperCase();
+                document.getElementById('userAvatar').textContent = avatarInitial;
+
+                // 사용자 이름 및 역할 표시
+                const username = user.username || user.email;
+                const roleText = user.role === 'admin' ? '관리자' : '일반';
+
+                document.getElementById('userName').textContent = username;
+                document.getElementById('userRole').textContent = roleText;
+
+                // 드롭다운 헤더에도 업데이트
+                document.getElementById('dropdownName').textContent = username;
+                document.getElementById('dropdownRole').textContent = roleText;
+
+                // 관리자인 경우 관리 메뉴 항목 표시
+                if (user.role === 'admin') {
+                    document.getElementById('adminMenuItem').style.display = 'flex';
+                }
+            }
+        })();
+
+        // 사용자 드롭다운 토글
+        function toggleUserDropdown() {
+            const userMenu = document.getElementById('userMenu');
+            const dropdown = document.getElementById('userDropdown');
+
+            // 설정 메뉴 닫기
+            document.getElementById('settingsMenu').classList.remove('active');
+            document.getElementById('settingsDropdown').classList.remove('show');
+
+            userMenu.classList.toggle('active');
+            dropdown.classList.toggle('show');
+        }
+
+        // 설정 드롭다운 토글
+        function toggleSettingsDropdown() {
+            const settingsMenu = document.getElementById('settingsMenu');
+            const dropdown = document.getElementById('settingsDropdown');
+
+            // 사용자 메뉴 닫기
+            document.getElementById('userMenu').classList.remove('active');
+            document.getElementById('userDropdown').classList.remove('show');
+
+            settingsMenu.classList.toggle('active');
+            dropdown.classList.toggle('show');
+        }
+
+        // 테마 전환 (설정 메뉴에서)
+        function toggleThemeFromMenu(event) {
+            event.stopPropagation();
+            const themeSwitch = document.getElementById('themeSwitch');
+            const currentTheme = document.documentElement.getAttribute('data-theme');
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+
+            document.documentElement.setAttribute('data-theme', newTheme);
+            localStorage.setItem('theme', newTheme);
+
+            // 스위치 상태 업데이트
+            themeSwitch.classList.toggle('active', newTheme === 'dark');
+        }
+
+        // 도움말 표시
+        function showHelpModal() {
+            document.getElementById('helpBtn')?.click();
+        }
+
+        // 고급 설정 열기
+        function openAdvancedSettings() {
+            closeAllDropdowns();
+            if (typeof openSettingsPanel === 'function') {
+                openSettingsPanel();
+            }
+        }
+
+        // 대화 초기화
+        function clearConversation() {
+            closeAllDropdowns();
+            document.getElementById('clearBtn')?.click();
+        }
+
+        // 대화 내보내기
+        function exportConversation() {
+            closeAllDropdowns();
+            document.getElementById('exportBtn')?.click();
+        }
+
+        // 대화 가져오기
+        function importConversation() {
+            closeAllDropdowns();
+            document.getElementById('importBtn')?.click();
+        }
+
+        // 모든 드롭다운 닫기 헬퍼 함수
+        function closeAllDropdowns() {
+            const settingsMenu = document.getElementById('settingsMenu');
+            const settingsDropdown = document.getElementById('settingsDropdown');
+            const userMenu = document.getElementById('userMenu');
+            const userDropdown = document.getElementById('userDropdown');
+
+            if (settingsMenu && settingsDropdown) {
+                settingsMenu.classList.remove('active');
+                settingsDropdown.classList.remove('show');
+            }
+            if (userMenu && userDropdown) {
+                userMenu.classList.remove('active');
+                userDropdown.classList.remove('show');
+            }
+        }
+
+        // 드롭다운 외부 클릭 시 닫기
+        document.addEventListener('click', function(event) {
+            const userMenu = document.getElementById('userMenu');
+            const userDropdown = document.getElementById('userDropdown');
+            const settingsMenu = document.getElementById('settingsMenu');
+            const settingsDropdown = document.getElementById('settingsDropdown');
+
+            // 사용자 메뉴 외부 클릭 시 닫기
+            if (userMenu && userDropdown && !userMenu.contains(event.target)) {
+                userMenu.classList.remove('active');
+                userDropdown.classList.remove('show');
+            }
+
+            // 설정 메뉴 외부 클릭 시 닫기
+            if (settingsMenu && settingsDropdown && !settingsMenu.contains(event.target)) {
+                settingsMenu.classList.remove('active');
+                settingsDropdown.classList.remove('show');
+            }
+        });
+
+        // 페이지 로드 시 테마 스위치 상태 초기화
+        window.addEventListener('DOMContentLoaded', function() {
+            const currentTheme = document.documentElement.getAttribute('data-theme');
+            const themeSwitch = document.getElementById('themeSwitch');
+            if (themeSwitch && currentTheme === 'dark') {
+                themeSwitch.classList.add('active');
+            }
+        });
+
+        // 프로필 페이지로 이동
+        function goToProfile(event) {
+            if (event) event.stopPropagation();
+            // Allow navigation without beforeunload warning
+            window.allowNavigation = true;
+            window.location.href = '/static/profile.html';
+        }
+
+        // 관리자 전체 페이지로 이동 (모달이 아님)
+        function goToAdminPage(event) {
+            if (event) event.stopPropagation();
+            // Allow navigation without beforeunload warning
+            window.allowNavigation = true;
+            window.location.href = '/static/admin.html?v=' + Date.now();  // 캐시 방지
+        }
+
+        // 로그아웃 처리
+        async function handleLogout(event) {
+            if (event) event.stopPropagation();
+            if (confirm('로그아웃하시겠습니까?')) {
+                // Allow navigation without beforeunload warning
+                window.allowNavigation = true;
+                await Auth.logout();
+            }
+        }
+    </script>
+
+    <!-- Main Script -->
+    <script src="/static/script.js?v=55"></script>
+
+    <!-- Cache Buster Verification -->
+    <script>
+        console.log('%c🔄 PAGE LOADED: 2025-12-28-12-45-DOCUMENT-COUNT', 'background: #667eea; color: white; padding: 5px 10px; font-size: 14px; font-weight: bold;');
+
+        // Debug progress bar on page load
+        window.addEventListener('DOMContentLoaded', () => {
+            setTimeout(() => {
+                const progressBar = document.querySelector('#reindexProgressModal .progress-bar');
+                if (progressBar) {
+                    const computedStyle = window.getComputedStyle(progressBar);
+                    console.log('%c📊 Progress Bar Debug:', 'background: #f093fb; color: black; padding: 5px; font-weight: bold;');
+                    console.log('  Height (computed):', computedStyle.height);
+                    console.log('  Height (inline):', progressBar.style.height);
+                    console.log('  Overflow (computed):', computedStyle.overflow);
+                    console.log('  Element:', progressBar);
+
+                    const modal = document.querySelector('#reindexProgressModal .modal-content');
+                    if (modal) {
+                        const modalStyle = window.getComputedStyle(modal);
+                        console.log('%c🪟 Modal Debug:', 'background: #764ba2; color: white; padding: 5px; font-weight: bold;');
+                        console.log('  Overflow (computed):', modalStyle.overflow);
+                        console.log('  Max-height (computed):', modalStyle.maxHeight);
+                        console.log('  Element:', modal);
+                    }
+                }
+            }, 1000);
+        });
+    </script>
+
+    <!-- Modular structure (disabled until migration complete) -->
+    <!--
+    <script src="/static/js/core/modal-manager.js"></script>
+    <script src="/static/js/core/utils.js"></script>
+    <script src="/static/js/features/theme.js"></script>
+    <script src="/static/js/features/chat.js"></script>
+    <script src="/static/js/features/documents.js"></script>
+    <script src="/static/js/features/versions.js"></script>
+    <script src="/static/js/features/settings.js"></script>
+    <script src="/static/js/features/history.js"></script>
+    <script src="/static/js/main.js"></script>
+    -->
+</body>
+</html>

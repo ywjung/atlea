@@ -290,12 +290,15 @@ pip install torch torchvision torchaudio --index-url https://download.pytorch.or
 ```
 
 **문제**: GPU 메모리 부족
-```python
-# .env 파일 또는 설정에서 더 작은 모델 사용
-LLM_MODEL=Qwen/Qwen2.5-3B-Instruct
+```bash
+# 현재 사용 중: Qwen3 30B (~20GB RAM 필요)
+# 메모리 부족 시 경량 모델로 변경 (별도 다운로드 필요)
 
-# 또는 양자화 모델 사용
-LLM_MODEL=Qwen/Qwen2.5-7B-Instruct-GPTQ-Int4
+# 경량 옵션 (~2GB RAM)
+LLM_MODEL=mlx-community/Qwen2.5-3B-Instruct-4bit
+
+# 초경량 옵션 (~1.5GB RAM)
+LLM_MODEL=mlx-community/Qwen2.5-1.5B-Instruct-4bit
 ```
 
 ### 공통 문제

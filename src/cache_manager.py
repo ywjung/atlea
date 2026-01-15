@@ -6,7 +6,13 @@ import json
 import hashlib
 import numpy as np
 from typing import Optional, Dict, List, Tuple
+from functools import lru_cache
+from collections import OrderedDict
 from loguru import logger
+from datetime import datetime
+
+# Module load timestamp for debugging
+logger.warning(f"🔄 cache_manager.py loaded at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - Version: FIXED_OLLAMA_ENCODE")
 
 
 class CacheManager:
@@ -20,9 +26,17 @@ class CacheManager:
         self,
         redis_client,
         embedding_model,
-        similarity_threshold: float = 0.95,
-        cache_ttl: int = 3600  # 1 hour in seconds
+        similarity_threshold: float = 0.90,  # Lowered from 0.95 to 0.90 for better hit rate
+        cache_ttl: int = 3600,  # 1 hour in seconds (default for dynamic data)
+        memory_cache_size: int = 50  # Number of entries to keep in memory
     ):
+        # TTL configuration by content type (in seconds)
+        self.ttl_config = {
+            'static_docs': 24 * 3600,  # 24 hours for regulations, policies
+            'dynamic_data': 3600,       # 1 hour for frequently changing content
+            'realtime': 300,            # 5 minutes for time-sensitive data
+            'default': 3600             # Default: 1 hour
+        }
         """
         Initialize cache manager.
 
@@ -31,11 +45,16 @@ class CacheManager:
             embedding_model: Embedding model for question similarity
             similarity_threshold: Minimum similarity score to use cached response (0-1)
             cache_ttl: Time-to-live for cached responses in seconds
+            memory_cache_size: Maximum number of cache entries to keep in memory (LRU)
         """
         self.redis = redis_client
         self.embedding_model = embedding_model
         self.similarity_threshold = similarity_threshold
         self.cache_ttl = cache_ttl
+
+        # In-memory LRU cache for frequently accessed responses
+        self.memory_cache = OrderedDict()
+        self.memory_cache_size = memory_cache_size
 
         # Cache key prefix
         self.cache_prefix = "llm_cache"
@@ -44,16 +63,39 @@ class CacheManager:
         # Statistics tracking keys
         self.stats_queries_key = f"{self.cache_prefix}:stats:total_queries"
         self.stats_hits_key = f"{self.cache_prefix}:stats:cache_hits"
+        self.stats_memory_hits_key = f"{self.cache_prefix}:stats:memory_hits"
 
-        logger.info(f"CacheManager initialized (threshold={similarity_threshold}, TTL={cache_ttl}s)")
+        # Cache enabled state key
+        self.enabled_key = f"{self.cache_prefix}:enabled"
+
+        # Initialize enabled state from Redis (default: True)
+        try:
+            enabled_value = self.redis.get(self.enabled_key)
+            self.enabled = enabled_value != "0" if enabled_value else True
+            if enabled_value is None:
+                # Set default enabled state
+                self.redis.set(self.enabled_key, "1")
+        except Exception as e:
+            logger.warning(f"Failed to load cache enabled state: {e}, defaulting to enabled")
+            self.enabled = True
+
+        logger.info(f"CacheManager initialized (threshold={similarity_threshold}, TTL={cache_ttl}s, memory_cache={memory_cache_size}, enabled={self.enabled})")
 
     def _generate_embedding(self, text: str) -> np.ndarray:
         """Generate embedding vector for text."""
         try:
-            embedding = self.embedding_model.encode(text, convert_to_numpy=True)
-            return embedding
+            # OllamaEmbedding returns List[List[float]], need to convert to numpy
+            # FIXED: Removed convert_to_numpy parameter (not supported by OllamaEmbedding)
+            logger.debug("🔧 Using FIXED version: encode() without convert_to_numpy parameter")
+            embeddings = self.embedding_model.encode(text)
+            if embeddings and len(embeddings) > 0:
+                # Get first embedding (for single text input)
+                embedding = np.array(embeddings[0], dtype=np.float32)
+                return embedding
+            return None
         except Exception as e:
             logger.error(f"Failed to generate embedding: {e}")
+            logger.error(f"Error type: {type(e).__name__}, Module version: FIXED_OLLAMA_ENCODE")
             return None
 
     def _calculate_similarity(self, emb1: np.ndarray, emb2: np.ndarray) -> float:
@@ -94,6 +136,24 @@ class CacheManager:
         content = f"{question}|top_k={top_k}|docs={doc_filter}|groups={group_filter}"
         return hashlib.md5(content.encode()).hexdigest()
 
+    def _get_from_memory_cache(self, cache_key: str) -> Optional[Dict]:
+        """Get entry from memory cache (LRU)"""
+        if cache_key in self.memory_cache:
+            # Move to end (most recently used)
+            self.memory_cache.move_to_end(cache_key)
+            return self.memory_cache[cache_key]
+        return None
+
+    def _set_to_memory_cache(self, cache_key: str, data: Dict) -> None:
+        """Set entry in memory cache with LRU eviction"""
+        # Add to cache
+        self.memory_cache[cache_key] = data
+        self.memory_cache.move_to_end(cache_key)
+
+        # Evict oldest if size exceeded
+        if len(self.memory_cache) > self.memory_cache_size:
+            self.memory_cache.popitem(last=False)  # Remove oldest (first item)
+
     def get_cached_response(
         self,
         question: str,
@@ -116,6 +176,10 @@ class CacheManager:
             Cached response dict if found, None otherwise
             Dict contains: {"response": str, "sources": List[str], "similarity": float}
         """
+        # Check if cache is enabled
+        if not self.enabled:
+            return None
+
         # Use provided threshold or fall back to instance default
         threshold = similarity_threshold if similarity_threshold is not None else self.similarity_threshold
 
@@ -131,10 +195,31 @@ class CacheManager:
             if question_emb is None:
                 return None
 
+            # Check memory cache first (O(1) lookup)
+            question_hash = self._hash_question(question, top_k, document_ids, group_ids)
+            cache_key = self._get_cache_key(question_hash)
+            memory_cached = self._get_from_memory_cache(cache_key)
+
+            if memory_cached:
+                # Verify it's not expired and matches parameters
+                try:
+                    self.redis.incr(self.stats_memory_hits_key)
+                    self.redis.incr(self.stats_hits_key)
+                except Exception:
+                    pass
+
+                logger.info(f"Memory cache HIT! Question: '{question[:50]}...'")
+                return {
+                    "response": memory_cached["response"],
+                    "sources": memory_cached["sources"],
+                    "context": memory_cached.get("context", []),
+                    "similarity": 1.0,  # Exact match from memory
+                    "cached_question": memory_cached["question"]
+                }
+
             # Get all cached question hashes
             cached_hashes = self.redis.smembers(self.index_key)
             if not cached_hashes:
-                logger.debug("Cache is empty")
                 return None
 
             best_match = None
@@ -145,11 +230,19 @@ class CacheManager:
             MAX_CACHE_CHECK = 100  # Only check last 100 cached questions
             cached_hashes_list = list(cached_hashes)[:MAX_CACHE_CHECK]
 
-            # Check similarity with each cached question
+            # Use pipeline to fetch all cache entries at once (performance optimization)
+            pipe = self.redis.pipeline()
+            cache_keys = []
             for cached_hash in cached_hashes_list:
                 cache_key = self._get_cache_key(cached_hash.decode() if isinstance(cached_hash, bytes) else cached_hash)
-                cached_data_str = self.redis.get(cache_key)
+                cache_keys.append((cached_hash, cache_key))
+                pipe.get(cache_key)
 
+            # Execute pipeline and get all results at once
+            cached_results = pipe.execute()
+
+            # Process results
+            for (cached_hash, cache_key), cached_data_str in zip(cache_keys, cached_results):
                 if not cached_data_str:
                     # Cache entry expired, remove from index
                     self.redis.srem(self.index_key, cached_hash)
@@ -177,9 +270,6 @@ class CacheManager:
                 cached_emb = np.array(cached_data["embedding"])
                 similarity = self._calculate_similarity(question_emb, cached_emb)
 
-                logger.debug(
-                    f"Similarity with cached question '{cached_data['question'][:50]}...': {similarity:.4f}"
-                )
 
                 if similarity > best_similarity:
                     best_similarity = similarity
@@ -193,7 +283,6 @@ class CacheManager:
 
                     # Early exit: If we found near-perfect match, no need to check more
                     if best_similarity >= 0.9999:  # Essentially identical
-                        logger.debug(f"Found perfect match (similarity={best_similarity:.4f}), stopping early")
                         break
 
             # Return cached response if similarity is above threshold
@@ -210,7 +299,6 @@ class CacheManager:
                 )
                 return best_match
 
-            logger.debug(f"Cache MISS. Best similarity: {best_similarity:.4f}")
             return None
 
         except Exception as e:
@@ -226,7 +314,8 @@ class CacheManager:
         cache_ttl: Optional[int] = None,
         context: Optional[List[Dict]] = None,
         document_ids: Optional[List[str]] = None,
-        group_ids: Optional[List[str]] = None
+        group_ids: Optional[List[str]] = None,
+        content_type: str = 'default'
     ) -> bool:
         """
         Save question-response pair to cache.
@@ -236,16 +325,24 @@ class CacheManager:
             response: LLM response
             sources: List of source documents
             top_k: Number of documents retrieved
-            cache_ttl: Custom cache TTL in seconds (defaults to instance TTL)
+            cache_ttl: Custom cache TTL in seconds (overrides content_type)
             context: List of context documents with text, filename, score
             document_ids: Optional list of document IDs that were filtered
             group_ids: Optional list of group IDs that were filtered
+            content_type: Type of content ('static_docs', 'dynamic_data', 'realtime', 'default')
 
         Returns:
             True if saved successfully, False otherwise
         """
-        # Use provided TTL or fall back to instance default (convert minutes to seconds)
-        ttl_seconds = (cache_ttl * 60) if cache_ttl is not None else self.cache_ttl
+        # Check if cache is enabled
+        if not self.enabled:
+            return False
+
+        # Determine TTL based on priority: custom TTL > content_type > instance default
+        if cache_ttl is not None:
+            ttl_seconds = cache_ttl * 60  # Convert minutes to seconds
+        else:
+            ttl_seconds = self.ttl_config.get(content_type, self.cache_ttl)
         try:
             # Generate embedding for question
             question_emb = self._generate_embedding(question)
@@ -278,6 +375,9 @@ class CacheManager:
             # Add to index
             self.redis.sadd(self.index_key, question_hash)
 
+            # Also save to memory cache for faster access
+            self._set_to_memory_cache(cache_key, cache_data)
+
             logger.info(f"Saved to cache: '{question[:50]}...' (hash={question_hash})")
             return True
 
@@ -306,11 +406,15 @@ class CacheManager:
             # Clear index
             self.redis.delete(self.index_key)
 
+            # Clear memory cache
+            self.memory_cache.clear()
+
             # Reset statistics counters
             self.redis.delete(self.stats_queries_key)
             self.redis.delete(self.stats_hits_key)
+            self.redis.delete(self.stats_memory_hits_key)
 
-            logger.info(f"Cleared {count} cache entries and reset statistics")
+            logger.info(f"Cleared {count} cache entries, memory cache, and reset statistics")
             return count
 
         except Exception as e:
@@ -324,8 +428,11 @@ class CacheManager:
         Returns:
             Dict with cache stats: {
                 "total_entries": int,
+                "memory_cache_entries": int,
                 "total_queries": int,
                 "cache_hits": int,
+                "memory_cache_hits": int,
+                "hit_rate": float,
                 "similarity_threshold": float,
                 "cache_ttl": int
             }
@@ -343,14 +450,22 @@ class CacheManager:
             # Get query statistics
             total_queries = self.redis.get(self.stats_queries_key)
             cache_hits = self.redis.get(self.stats_hits_key)
+            memory_hits = self.redis.get(self.stats_memory_hits_key)
 
             total_queries = int(total_queries) if total_queries else 0
             cache_hits = int(cache_hits) if cache_hits else 0
+            memory_hits = int(memory_hits) if memory_hits else 0
+
+            # Calculate hit rate (return as ratio 0.0-1.0, not percentage)
+            hit_rate = (cache_hits / total_queries) if total_queries > 0 else 0.0
 
             return {
                 "total_entries": valid_count,
+                "memory_cache_entries": len(self.memory_cache),
                 "total_queries": total_queries,
                 "cache_hits": cache_hits,
+                "memory_cache_hits": memory_hits,
+                "hit_rate": round(hit_rate, 2),
                 "similarity_threshold": self.similarity_threshold,
                 "cache_ttl": self.cache_ttl
             }
@@ -358,8 +473,145 @@ class CacheManager:
             logger.error(f"Error getting cache stats: {e}")
             return {
                 "total_entries": 0,
+                "memory_cache_entries": 0,
                 "total_queries": 0,
                 "cache_hits": 0,
+                "memory_cache_hits": 0,
+                "hit_rate": 0.0,
                 "similarity_threshold": self.similarity_threshold,
                 "cache_ttl": self.cache_ttl
             }
+
+    def is_enabled(self) -> bool:
+        """
+        Check if cache is enabled.
+
+        Returns:
+            True if cache is enabled, False otherwise
+        """
+        return self.enabled
+
+    def set_enabled(self, enabled: bool) -> bool:
+        """
+        Enable or disable cache.
+
+        Args:
+            enabled: True to enable cache, False to disable
+
+        Returns:
+            True if successfully set, False otherwise
+        """
+        try:
+            self.enabled = enabled
+            self.redis.set(self.enabled_key, "1" if enabled else "0")
+            logger.info(f"Cache {'enabled' if enabled else 'disabled'}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to set cache enabled state: {e}")
+            return False
+
+    def get_embedding_cache(self, query_text: str) -> Optional[List[float]]:
+        """
+        Get cached embedding for query text.
+
+        Args:
+            query_text: Query text to get embedding for
+
+        Returns:
+            Cached embedding as list of floats, or None if not found
+        """
+        try:
+            cache_key = f"embedding:{hashlib.md5(query_text.encode()).hexdigest()}"
+            cached = self.redis.get(cache_key)
+            if cached:
+                return json.loads(cached)
+            return None
+        except Exception as e:
+            logger.error(f"Error getting embedding cache: {e}")
+            return None
+
+    def set_embedding_cache(self, query_text: str, embedding: List[float]) -> bool:
+        """
+        Save embedding to cache with 1-hour TTL.
+
+        Args:
+            query_text: Query text
+            embedding: Embedding vector as list of floats
+
+        Returns:
+            True if saved successfully, False otherwise
+        """
+        try:
+            cache_key = f"embedding:{hashlib.md5(query_text.encode()).hexdigest()}"
+            self.redis.setex(
+                cache_key,
+                3600,  # 1 hour TTL
+                json.dumps(embedding)
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Error saving embedding cache: {e}")
+            return False
+
+    def get_query_result_cache(self, query_text: str, group_ids: Optional[List[str]] = None) -> Optional[Dict]:
+        """
+        Get cached complete query result for exact query match.
+
+        This is different from semantic cache - it's for popular/repeated exact queries.
+        Uses 5-minute TTL for frequently asked questions.
+
+        Args:
+            query_text: Exact query text
+            group_ids: Optional list of group IDs for cache key
+
+        Returns:
+            Cached result dict with response, sources, context, or None if not found
+        """
+        try:
+            # Create cache key from query + groups
+            group_filter = "all" if not group_ids else "|".join(sorted(group_ids))
+            cache_key = f"qresult:{hashlib.md5((query_text + group_filter).encode()).hexdigest()}"
+
+            cached = self.redis.get(cache_key)
+            if cached:
+                logger.info(f"Query result cache HIT for: '{query_text[:50]}...'")
+                return json.loads(cached)
+
+            return None
+        except Exception as e:
+            logger.error(f"Error getting query result cache: {e}")
+            return None
+
+    def set_query_result_cache(
+        self,
+        query_text: str,
+        result: Dict,
+        group_ids: Optional[List[str]] = None,
+        ttl: int = 300  # 5 minutes default
+    ) -> bool:
+        """
+        Save complete query result to cache for exact query matches.
+
+        Args:
+            query_text: Query text
+            result: Complete result dict with response, sources, context
+            group_ids: Optional list of group IDs for cache key
+            ttl: Time-to-live in seconds (default: 300 = 5 minutes)
+
+        Returns:
+            True if saved successfully, False otherwise
+        """
+        try:
+            # Create cache key from query + groups
+            group_filter = "all" if not group_ids else "|".join(sorted(group_ids))
+            cache_key = f"qresult:{hashlib.md5((query_text + group_filter).encode()).hexdigest()}"
+
+            self.redis.setex(
+                cache_key,
+                ttl,
+                json.dumps(result, ensure_ascii=False)
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Error saving query result cache: {e}")
+            return False

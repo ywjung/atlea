@@ -230,7 +230,7 @@ class GroupMigration:
                 "FLAT",
                 {
                     "TYPE": "FLOAT32",
-                    "DIM": 1024,  # Jina v3 embedding dimension
+                    "DIM": 1024,  # KURE-v1 embedding dimension
                     "DISTANCE_METRIC": "COSINE",
                 }
             ),

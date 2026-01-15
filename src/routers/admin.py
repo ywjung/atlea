@@ -1999,3 +1999,91 @@ async def reveal_context7_api_key(
             status_code=500,
             detail=f"API 키를 조회할 수 없습니다: {str(e)}"
         )
+
+
+# ============================================================================
+# 시스템 통계 API
+# ============================================================================
+
+@router.get("/redis-stats")
+async def get_redis_stats(
+    request: Request,
+    user: dict = Depends(require_admin)
+):
+    """Redis 통계 조회 (관리자 전용)
+
+    Returns:
+        - total_keys: 전체 Redis 키 개수
+        - keyspace_hits: 캐시 히트 횟수
+        - keyspace_misses: 캐시 미스 횟수
+    """
+    try:
+        cache_manager = request.app.state.cache_manager
+        redis_client = cache_manager.redis
+
+        # Redis 통계 정보 조회
+        info = redis_client.info('stats')
+
+        return {
+            "total_keys": redis_client.dbsize(),
+            "keyspace_hits": info.get('keyspace_hits', 0),
+            "keyspace_misses": info.get('keyspace_misses', 0)
+        }
+
+    except Exception as e:
+        logger.error(f"Redis 통계 조회 실패: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Redis 통계를 조회할 수 없습니다: {str(e)}"
+        )
+
+
+@router.get("/document-stats")
+async def get_document_stats(
+    request: Request,
+    user: dict = Depends(require_admin)
+):
+    """문서 및 대화 통계 조회 (관리자 전용)
+
+    Returns:
+        - total_documents: 업로드된 문서 개수
+        - total_chunks: 인덱싱된 문서 청크 개수
+        - total_conversations: 전체 대화 개수
+    """
+    try:
+        cache_manager = request.app.state.cache_manager
+        redis_client = cache_manager.redis
+
+        # 문서 개수 (doc:group:* 패턴)
+        doc_keys = list(redis_client.scan_iter(match="doc:group:*", count=1000))
+        total_documents = len(doc_keys)
+
+        # RediSearch 인덱스에서 청크 개수
+        total_chunks = 0
+        try:
+            # vector_db.py에서 사용하는 실제 키: index:active
+            active_index = redis_client.get("index:active")
+            if active_index:
+                active_index = active_index.decode() if isinstance(active_index, bytes) else active_index
+                index_info = redis_client.ft(active_index).info()
+                total_chunks = int(index_info.get('num_docs', 0))
+        except Exception as e:
+            logger.warning(f"RediSearch 인덱스 정보 조회 실패: {e}")
+            total_chunks = 0
+
+        # 대화 개수 (conversation:* 패턴)
+        conv_keys = list(redis_client.scan_iter(match="conversation:*", count=1000))
+        total_conversations = len(conv_keys)
+
+        return {
+            "total_documents": total_documents,
+            "total_chunks": total_chunks,
+            "total_conversations": total_conversations
+        }
+
+    except Exception as e:
+        logger.error(f"문서 통계 조회 실패: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"문서 통계를 조회할 수 없습니다: {str(e)}"
+        )

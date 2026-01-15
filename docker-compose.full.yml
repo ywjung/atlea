@@ -1,0 +1,114 @@
+# 완전 통합 Docker Compose 설정
+# RAG 챗봇 시스템의 모든 구성 요소를 포함
+# 사용법: docker-compose -f docker-compose.full.yml up -d
+
+version: '3.8'
+
+services:
+  # Redis Vector Database
+  redis:
+    image: redis/redis-stack:latest
+    container_name: rag_chatbot_redis
+    ports:
+      - "6379:6379"      # Redis 포트
+      - "8001:8001"      # RedisInsight 웹 UI
+    volumes:
+      - redis_data:/data
+    environment:
+      - REDIS_ARGS=--save 60 1 --loglevel warning
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - chatbot_network
+
+  # Java 문서 처리 서비스
+  document-service:
+    build:
+      context: ./document-service
+      dockerfile: Dockerfile
+    container_name: rag_chatbot_document_service
+    ports:
+      - "8081:8081"      # API 포트
+      - "8082:8082"      # 관리/메트릭 포트
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - JVM_OPTS=-Xms512m -Xmx2048m -XX:+UseG1GC -XX:MaxGCPauseMillis=200
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/api/document/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 40s
+    networks:
+      - chatbot_network
+
+  # Python RAG 챗봇 애플리케이션
+  chatbot-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rag_chatbot_app
+    ports:
+      - "8000:8000"      # 웹 UI 및 API
+    volumes:
+      - ./data:/app/data                    # 문서 저장소
+      - ./model:/app/model                  # AI 모델 저장소
+      - ./logs:/app/logs                    # 로그 파일
+      - ./.env:/app/.env                    # 환경 설정
+    environment:
+      # Redis 연결
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+      # 문서 서비스 연결
+      - DOCUMENT_SERVICE_URL=http://document-service:8081
+      - HWP_SERVICE_URL=http://document-service:8081
+      # 모델 설정
+      - EMBEDDING_MODEL=nlpai-lab/KURE-v1
+      - LLM_MODEL=mlx-community/Qwen3-30B-A3B-4bit
+      - MODEL_DIR=/app/model
+      # 애플리케이션 설정
+      - DATA_DIR=/app/data
+      - CHUNK_SIZE=512
+      - CHUNK_OVERLAP=50
+      - MAX_FILE_SIZE_MB=100
+      - ENABLE_QUESTION_GENERATION=false
+      # 서버 설정
+      - HOST=0.0.0.0
+      - PORT=8000
+      # 보안 설정 (프로덕션에서는 반드시 변경!)
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-CHANGE_THIS_IN_PRODUCTION}
+      - JWT_ALGORITHM=HS256
+      - JWT_ACCESS_TOKEN_EXPIRE_MINUTES=60
+      - JWT_REFRESH_TOKEN_EXPIRE_DAYS=7
+      # 성능 설정
+      - RATE_LIMIT_ENABLED=true
+      - RATE_LIMIT_PER_MINUTE=60
+      - RATE_LIMIT_BURST=10
+    depends_on:
+      redis:
+        condition: service_healthy
+      document-service:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    networks:
+      - chatbot_network
+
+volumes:
+  redis_data:
+    driver: local
+
+networks:
+  chatbot_network:
+    driver: bridge

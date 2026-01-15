@@ -75,7 +75,7 @@ class AuditMiddleware(BaseHTTPMiddleware):
                     from ..auth.utils import verify_token
                     user_data = verify_token(token)
                     if user_data:
-                        return user_data.get("user_id"), user_data.get("username")
+                        return user_data.get("user_id"), user_data.get("sub")  # sub = username
                 except Exception:
                     pass  # 토큰 검증 실패 시 무시
 
@@ -86,7 +86,7 @@ class AuditMiddleware(BaseHTTPMiddleware):
                     from ..auth.utils import verify_token
                     user_data = verify_token(token)
                     if user_data:
-                        return user_data.get("user_id"), user_data.get("username")
+                        return user_data.get("user_id"), user_data.get("sub")  # sub = username
                 except Exception:
                     pass  # 토큰 검증 실패 시 무시
 

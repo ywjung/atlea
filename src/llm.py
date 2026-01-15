@@ -16,6 +16,7 @@ from loguru import logger
 from dotenv import load_dotenv
 from .model_manager import ModelManager
 from .platform_utils import get_platform_detector
+from .performance_utils import log_slow_query
 
 # Load environment variables
 load_dotenv()
@@ -407,6 +408,7 @@ class LLM:
         cleaned = re.sub(r'\n\s*\n\s*\n', '\n\n', cleaned)
         return cleaned.strip()
 
+    @log_slow_query(threshold_seconds=5.0)
     def generate_response(
         self,
         query: str,

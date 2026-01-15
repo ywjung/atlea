@@ -28,12 +28,10 @@ class QueryCache:
         if key in self.cache:
             entry = self.cache[key]
             if time.time() - entry['timestamp'] < self.ttl:
-                logger.debug(f"Cache HIT for key: {key[:16]}...")
                 return entry['value']
             else:
                 # Expired entry
                 del self.cache[key]
-                logger.debug(f"Cache EXPIRED for key: {key[:16]}...")
         return None
 
     def set(self, key: str, value: Any):
@@ -42,13 +40,11 @@ class QueryCache:
         if len(self.cache) >= self.max_size:
             oldest_key = min(self.cache.items(), key=lambda x: x[1]['timestamp'])[0]
             del self.cache[oldest_key]
-            logger.debug(f"Cache EVICTED oldest key: {oldest_key[:16]}...")
 
         self.cache[key] = {
             'value': value,
             'timestamp': time.time()
         }
-        logger.debug(f"Cache SET for key: {key[:16]}...")
 
     def clear(self):
         """Clear all cache entries"""
@@ -92,8 +88,6 @@ def cached_query(ttl: Optional[int] = None):
             start_time = time.time()
             result = await func(*args, **kwargs)
             execution_time = (time.time() - start_time) * 1000  # ms
-
-            logger.debug(f"{func.__name__} executed in {execution_time:.2f}ms")
 
             # Cache result
             query_cache.set(cache_key, result)

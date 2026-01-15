@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Configuration
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "jinaai/jina-embeddings-v3")
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "nlpai-lab/KURE-v1")
 LLM_MODEL = os.getenv("LLM_MODEL", "mlx-community/Qwen3-30B-A3B-4bit")
 MODEL_DIR = Path(os.getenv("MODEL_DIR", "./model"))
 

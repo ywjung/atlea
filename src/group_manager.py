@@ -71,6 +71,7 @@ class GroupManager:
     def create_group(
         self,
         name: str,
+        org_id: Optional[str] = None,
         description: str = '',
         color: str = '#4A90E2',
         icon: str = '📁',
@@ -82,6 +83,7 @@ class GroupManager:
 
         Args:
             name: Group name (max 100 chars)
+            org_id: Organization ID (optional - can be assigned later)
             description: Group description
             color: Hex color code (e.g., #4A90E2)
             icon: Emoji icon (e.g., 📁)
@@ -101,10 +103,16 @@ class GroupManager:
         if len(name) > 100:
             raise ValueError("그룹 이름은 100자를 초과할 수 없습니다.")
 
-        # Validate parent exists
+        # Validate parent exists and belongs to same organization (if org_id is provided)
         if parent_id:
-            if not self.client.exists(f'group:{parent_id}'):
+            parent_data = self.client.hgetall(f'group:{parent_id}')
+            if not parent_data:
                 raise ValueError("상위 그룹이 존재하지 않습니다.")
+
+            parent_org_id = parent_data.get(b'org_id', b'').decode('utf-8')
+            # Only validate org match if this group has an org_id
+            if org_id and parent_org_id and parent_org_id != org_id:
+                raise ValueError("상위 그룹은 같은 조직에 속해야 합니다.")
 
         # Generate group ID
         group_id = str(uuid.uuid4())
@@ -118,6 +126,7 @@ class GroupManager:
             'color': color,
             'icon': icon,
             'parent_id': parent_id or '',
+            'org_id': org_id or '',  # Organization ID (empty if not assigned)
             'created_at': now,
             'created_by': created_by,
             'updated_at': now,
@@ -125,19 +134,64 @@ class GroupManager:
             'document_count': '0'
         }
 
-        # Store group and update parent's children
+        # Store group and update indices
         pipe = self.client.pipeline()
         pipe.hset(f'group:{group_id}', mapping=group_data)
 
-        if parent_id:
-            pipe.sadd(f'group:children:{parent_id}', group_id)
+        # Add to organization's groups index only if org_id is provided
+        if org_id:
+            pipe.sadd(f'org:groups:{org_id}', group_id)
+
+            if parent_id:
+                pipe.sadd(f'group:children:{parent_id}', group_id)
+            else:
+                # Add to org-specific root
+                pipe.sadd(f'org:groups:root:{org_id}', group_id)
         else:
-            pipe.sadd('group:children:root', group_id)
+            # No organization assignment
+            if parent_id:
+                pipe.sadd(f'group:children:{parent_id}', group_id)
+            else:
+                # Add to global root (for admin view without org filter)
+                pipe.sadd(f'group:children:root', group_id)
 
         pipe.execute()
 
-        logger.info(f"Created group: {group_id} ({name})")
+        org_info = f"in org {org_id}" if org_id else "without org assignment"
+        logger.info(f"Created group: {group_id} ({name}) {org_info}")
         return group_id
+
+    def _is_descendant(self, potential_descendant_id: str, ancestor_id: str) -> bool:
+        """
+        Check if potential_descendant is a descendant of ancestor
+        
+        Used to prevent circular references when changing parent_id
+        
+        Args:
+            potential_descendant_id: ID of potential descendant
+            ancestor_id: ID of potential ancestor
+            
+        Returns:
+            True if potential_descendant is a descendant of ancestor
+        """
+        visited = set()
+        current_id = potential_descendant_id
+        
+        while current_id and current_id not in visited:
+            if current_id == ancestor_id:
+                return True
+            
+            visited.add(current_id)
+            
+            # Get parent of current group
+            group_data = self.client.hgetall(f'group:{current_id}')
+            if not group_data:
+                break
+            
+            parent_id = group_data.get(b'parent_id', b'').decode('utf-8')
+            current_id = parent_id if parent_id else None
+        
+        return False
 
     def update_group(
         self,
@@ -151,7 +205,7 @@ class GroupManager:
         Args:
             group_id: Group ID to update
             updated_by: Username who updated the group
-            **updates: Fields to update (name, description, color, icon)
+            **updates: Fields to update (name, description, color, icon, parent_id)
 
         Returns:
             True if successful
@@ -169,7 +223,7 @@ class GroupManager:
             raise ValueError("기본 그룹의 이름은 변경할 수 없습니다.")
 
         # Validate updates
-        allowed_fields = {'name', 'description', 'color', 'icon'}
+        allowed_fields = {'name', 'description', 'color', 'icon', 'parent_id'}
         update_data = {k: v for k, v in updates.items() if k in allowed_fields}
 
         if 'name' in update_data:
@@ -182,6 +236,76 @@ class GroupManager:
         if 'description' in update_data:
             update_data['description'] = update_data['description'].strip()
 
+        # Handle parent_id changes
+        if 'parent_id' in update_data:
+            new_parent_id = update_data['parent_id']
+
+            # Get current parent_id to update children indexes
+            current_group_data = self.client.hgetall(group_key)
+            old_parent_id = current_group_data.get(b'parent_id', b'').decode('utf-8') if current_group_data else ''
+
+            # Validate parent_id
+            if new_parent_id:
+                # Can't set parent to itself
+                if new_parent_id == group_id:
+                    raise ValueError("그룹을 자신의 하위로 설정할 수 없습니다.")
+
+                # Parent must exist
+                if not self.client.exists(f'group:{new_parent_id}'):
+                    raise ValueError("상위 그룹이 존재하지 않습니다.")
+
+                # Can't set parent to a descendant (circular reference prevention)
+                if self._is_descendant(new_parent_id, group_id):
+                    raise ValueError("하위 그룹을 상위 그룹으로 설정할 수 없습니다.")
+
+            # Update parent-child relationship indexes
+            pipe = self.client.pipeline()
+
+            # Remove from old parent's children (if had a parent)
+            if old_parent_id:
+                pipe.srem(f'group:children:{old_parent_id}', group_id)
+                logger.info(f"Removing {group_id} from children of {old_parent_id}")
+
+            # Add to new parent's children (if has a new parent)
+            if new_parent_id:
+                pipe.sadd(f'group:children:{new_parent_id}', group_id)
+                logger.info(f"Adding {group_id} to children of {new_parent_id}")
+
+            pipe.execute()
+
+            # Update GLOBAL root index (for admin view without org filter)
+            if new_parent_id:
+                # Has parent → remove from global root
+                self.client.srem('group:children:root', group_id)
+                logger.info(f"Removed group {group_id} from global root (new parent: {new_parent_id})")
+            else:
+                # No parent → add to global root
+                self.client.sadd('group:children:root', group_id)
+                logger.info(f"Added group {group_id} to global root (no parent)")
+
+            # Update organization root indexes
+            # Get all organizations this group belongs to
+            group_orgs = self.get_group_organizations(group_id)
+
+            for org_id in group_orgs:
+                # Check if new parent is in the same organization
+                parent_in_org = False
+                if new_parent_id:
+                    parent_in_org = self.is_group_in_organization(new_parent_id, org_id)
+
+                # Update root index
+                if new_parent_id and parent_in_org:
+                    # Has parent in same org → remove from root
+                    self.client.srem(f'org:groups:root:{org_id}', group_id)
+                    logger.info(f"Removed group {group_id} from root of organization {org_id} (new parent: {new_parent_id})")
+                else:
+                    # No parent or parent not in org → add to root
+                    self.client.sadd(f'org:groups:root:{org_id}', group_id)
+                    logger.info(f"Added group {group_id} to root of organization {org_id} (parent: {new_parent_id or 'none'})")
+
+            # Store empty string instead of None for consistency
+            update_data['parent_id'] = new_parent_id if new_parent_id else ''
+
         # Add metadata
         update_data['updated_at'] = datetime.now().isoformat()
         update_data['updated_by'] = updated_by
@@ -190,6 +314,90 @@ class GroupManager:
         self.client.hset(group_key, mapping=update_data)
 
         logger.info(f"Updated group: {group_id}")
+        return True
+
+    def change_group_organization(
+        self,
+        group_id: str,
+        new_org_id: str,
+        updated_by: str = 'user'
+    ) -> bool:
+        """
+        Change the organization of a group and all its descendants
+
+        Args:
+            group_id: Group ID to move
+            new_org_id: Target organization ID
+            updated_by: Username who performed the change
+
+        Returns:
+            True if successful
+
+        Raises:
+            ValueError: If group doesn't exist, is default group, or org doesn't exist
+        """
+        from .organization_manager import OrganizationManager
+
+        group_key = f'group:{group_id}'
+
+        # Validate group exists
+        if not self.client.exists(group_key):
+            raise ValueError("그룹이 존재하지 않습니다.")
+
+        # Prevent moving default group
+        if group_id == self.get_default_group_id():
+            raise ValueError("기본 그룹은 다른 조직으로 이동할 수 없습니다.")
+
+        # Get current organization
+        group_data = self.client.hgetall(group_key)
+        old_org_id = group_data.get(b'org_id', b'').decode('utf-8')
+
+        if old_org_id == new_org_id:
+            raise ValueError("그룹이 이미 해당 조직에 속해 있습니다.")
+
+        # Validate new organization exists
+        org_manager = OrganizationManager(self.client)
+        if not org_manager.get_organization(new_org_id):
+            raise ValueError("대상 조직이 존재하지 않습니다.")
+
+        # Get all descendant groups (children, grandchildren, etc.)
+        def get_all_descendants(gid: str) -> list:
+            """Recursively get all descendant group IDs"""
+            descendants = [gid]
+            children_key = f'group:children:{gid}'
+            children_ids = self.client.smembers(children_key)
+
+            for child_id_bytes in children_ids:
+                child_id = child_id_bytes.decode('utf-8')
+                descendants.extend(get_all_descendants(child_id))
+
+            return descendants
+
+        all_group_ids = get_all_descendants(group_id)
+
+        # Update all groups in a transaction
+        pipe = self.client.pipeline()
+
+        for gid in all_group_ids:
+            # Update group's org_id
+            pipe.hset(f'group:{gid}', 'org_id', new_org_id)
+            pipe.hset(f'group:{gid}', 'updated_at', datetime.now().isoformat())
+            pipe.hset(f'group:{gid}', 'updated_by', updated_by)
+
+            # Update organization indices
+            pipe.srem(f'org:groups:{old_org_id}', gid)
+            pipe.sadd(f'org:groups:{new_org_id}', gid)
+
+        # Update parent references if this is a root group
+        parent_id = group_data.get(b'parent_id', b'').decode('utf-8')
+        if not parent_id:
+            # Remove from old org root and add to new org root
+            pipe.srem(f'org:groups:root:{old_org_id}', group_id)
+            pipe.sadd(f'org:groups:root:{new_org_id}', group_id)
+
+        pipe.execute()
+
+        logger.info(f"Moved group {group_id} and {len(all_group_ids)-1} descendants from org {old_org_id} to {new_org_id}")
         return True
 
     def delete_group(
@@ -409,11 +617,21 @@ class GroupManager:
         # Use pipeline for atomic updates
         pipe = self.client.pipeline()
 
+        # Get active index for efficient scanning
+        active_index = self.client.get("index:active")
+        if active_index:
+            active_index = active_index.decode('utf-8')
+            index_pattern = f"doc:{active_index}:*"
+        else:
+            # Fallback to all docs if no active index
+            index_pattern = "doc:*"
+
         # Update all chunks of this document
-        for key in self.client.scan_iter(match="doc:*", count=100):
+        for key in self.client.scan_iter(match=index_pattern, count=100):
             key_str = key.decode('utf-8')
-            # Skip special keys
-            if ':' in key_str[4:]:  # doc:group:, doc:hash:, etc.
+            # Skip special keys (doc:group:, doc:hash:, doc:counts:, doc:version:, doc:files)
+            parts = key_str.split(':')
+            if len(parts) >= 2 and parts[1] in ['group', 'hash', 'counts', 'version', 'files']:
                 continue
 
             # Check if this chunk belongs to the file
@@ -487,12 +705,22 @@ class GroupManager:
         # Use pipeline for atomic batch updates
         pipe = self.client.pipeline()
 
+        # Get active index for efficient scanning
+        active_index = self.client.get("index:active")
+        if active_index:
+            active_index = active_index.decode('utf-8')
+            index_pattern = f"doc:{active_index}:*"
+        else:
+            # Fallback to all docs if no active index
+            index_pattern = "doc:*"
+
         # Single scan through all documents - update all matching files
-        for key in self.client.scan_iter(match="doc:*", count=1000):
+        for key in self.client.scan_iter(match=index_pattern, count=1000):
             key_str = key.decode('utf-8')
 
-            # Skip special keys
-            if ':' in key_str[4:]:  # doc:group:, doc:hash:, etc.
+            # Skip special keys (doc:group:, doc:hash:, doc:counts:, doc:version:, doc:files)
+            parts = key_str.split(':')
+            if len(parts) >= 2 and parts[1] in ['group', 'hash', 'counts', 'version', 'files']:
                 continue
 
             # Check if this chunk belongs to one of the target files
@@ -624,46 +852,85 @@ class GroupManager:
         children = self.client.smembers(f'group:children:{group_id}')
         result['children'] = [c.decode('utf-8') for c in children]
 
+        # Add organization name if org_id exists
+        org_id = result.get('org_id')
+        if org_id:
+            org_data = self.client.hgetall(f'org:{org_id}')
+            if org_data:
+                org_name = org_data.get(b'name')
+                if org_name:
+                    result['org_name'] = org_name.decode('utf-8')
+
         return result
 
-    def get_all_groups(self) -> List[Dict]:
+    def get_all_groups(self, org_id: Optional[str] = None) -> List[Dict]:
         """
-        Get all groups
+        Get all groups, optionally filtered by organization
+
+        Args:
+            org_id: Organization ID to filter by (None = all groups, for system admin)
 
         Returns:
             List of group dictionaries
         """
         groups = []
 
-        for key in self.client.scan_iter(match="group:*", count=100):
-            key_str = key.decode('utf-8')
+        if org_id:
+            # Get groups for specific organization
+            group_ids = self.client.smembers(f'org:groups:{org_id}')
+            for gid_bytes in group_ids:
+                group_id = gid_bytes.decode('utf-8')
+                group_data = self.get_group(group_id)
+                if group_data:
+                    groups.append(group_data)
+        else:
+            # Get all groups (system admin)
+            for key in self.client.scan_iter(match="group:*", count=100):
+                key_str = key.decode('utf-8')
 
-            # Skip non-group keys
-            if key_str.startswith('group:children:') or key_str.startswith('group:docs:') or key_str == 'group:default':
-                continue
+                # Skip non-group keys
+                if (key_str.startswith('group:children:') or
+                    key_str.startswith('group:docs:') or
+                    key_str.startswith('group:orgs:') or
+                    key_str == 'group:default'):
+                    continue
 
-            # Extract group ID
-            group_id = key_str.split(':', 1)[1]
-            group_data = self.get_group(group_id)
+                # Extract group ID
+                group_id = key_str.split(':', 1)[1]
+                group_data = self.get_group(group_id)
 
-            if group_data:
-                groups.append(group_data)
+                if group_data:
+                    groups.append(group_data)
 
         return groups
 
-    def get_group_tree(self) -> Dict:
+    def get_group_tree(self, org_id: Optional[str] = None) -> Dict:
         """
-        Get hierarchical group tree
+        Get hierarchical group tree, optionally filtered by organization
+
+        Args:
+            org_id: Organization ID to filter by (None = all groups, for system admin)
 
         Returns:
             Tree structure with nested children
         """
-        # Get all groups
-        all_groups = {g['id']: g for g in self.get_all_groups()}
+        # Get all groups for organization
+        all_groups = {g['id']: g for g in self.get_all_groups(org_id=org_id)}
+
+        # Track which groups are included in the tree
+        included_groups = set()
 
         # Build tree structure
         def build_tree(parent_id: Optional[str]) -> List[Dict]:
-            children_key = f'group:children:{parent_id}' if parent_id else 'group:children:root'
+            if parent_id:
+                children_key = f'group:children:{parent_id}'
+            else:
+                # Use org-specific root or global root
+                if org_id:
+                    children_key = f'org:groups:root:{org_id}'
+                else:
+                    children_key = 'group:children:root'
+
             children_ids = self.client.smembers(children_key)
 
             result = []
@@ -671,6 +938,7 @@ class GroupManager:
                 child_id = child_id_bytes.decode('utf-8')
                 if child_id in all_groups:
                     group = all_groups[child_id].copy()
+                    included_groups.add(child_id)
                     group['children'] = build_tree(child_id)
                     result.append(group)
 
@@ -678,10 +946,27 @@ class GroupManager:
             result.sort(key=lambda x: x['name'])
             return result
 
+        # Build tree starting from root
+        tree_children = build_tree(None)
+
+        # Find orphaned groups (in org but not in tree structure)
+        orphaned_groups = []
+        for group_id, group_data in all_groups.items():
+            if group_id not in included_groups:
+                orphaned = group_data.copy()
+                orphaned['children'] = []
+                orphaned_groups.append(orphaned)
+                logger.warning(f"Orphaned group found: {group_id} ({group_data.get('name')})")
+
+        # Add orphaned groups to root level
+        if orphaned_groups:
+            orphaned_groups.sort(key=lambda x: x['name'])
+            tree_children.extend(orphaned_groups)
+
         return {
             'id': 'root',
-            'name': '전체',
-            'children': build_tree(None)
+            'name': '전체' if not org_id else f'조직 그룹',
+            'children': tree_children
         }
 
     def get_group_documents(self, group_id: str) -> List[str]:
@@ -725,3 +1010,297 @@ class GroupManager:
 
         pipe.execute()
         logger.info("Synced document counts for all groups")
+
+    def get_descendant_group_ids(self, group_id: str) -> List[str]:
+        """
+        Get all descendant group IDs (children, grandchildren, etc.)
+
+        Args:
+            group_id: Parent group ID
+
+        Returns:
+            List of all descendant group IDs including the parent
+        """
+        result = [group_id]
+        all_groups = self.get_all_groups()
+
+        # Build parent-children mapping
+        children_map = {}
+        for group in all_groups:
+            parent_id = group.get('parent_id', '')
+            if parent_id:
+                if parent_id not in children_map:
+                    children_map[parent_id] = []
+                children_map[parent_id].append(group['id'])
+
+        # Recursively collect all descendants
+        def collect_descendants(parent_id: str):
+            if parent_id in children_map:
+                for child_id in children_map[parent_id]:
+                    result.append(child_id)
+                    collect_descendants(child_id)
+
+        collect_descendants(group_id)
+        return result
+
+    # ========================================================================
+    # N:M Relationship Methods (Group ↔ Organization)
+    # ========================================================================
+
+    def add_group_to_organization(
+        self,
+        group_id: str,
+        org_id: str,
+        updated_by: str = 'system'
+    ) -> bool:
+        """
+        Add a group to an organization (N:M relationship)
+
+        A group can belong to multiple organizations.
+        This adds the relationship without removing existing ones.
+
+        Root group logic:
+        - If the group has NO parent_id → always root
+        - If the group HAS parent_id BUT parent is NOT in this org → root
+        - If the group HAS parent_id AND parent IS in this org → NOT root (child)
+
+        Args:
+            group_id: Group ID to add
+            org_id: Organization ID to add to
+            updated_by: Username who performed the action
+
+        Returns:
+            True if successful
+
+        Raises:
+            ValueError: If group or organization doesn't exist
+        """
+        from datetime import datetime
+
+        # Validate group exists
+        group_key = f'group:{group_id}'
+        if not self.client.exists(group_key):
+            raise ValueError("그룹이 존재하지 않습니다")
+
+        # Check if already assigned
+        if self.is_group_in_organization(group_id, org_id):
+            logger.info(f"Group {group_id} is already in organization {org_id}")
+            return True
+
+        # 🆕 Cascade addition: Get all ancestors (parents, grandparents, etc.)
+        def get_all_ancestors(gid: str) -> list:
+            """Recursively get all ancestor group IDs"""
+            ancestors = []
+
+            # Get group data to check parent_id
+            gid_key = f'group:{gid}'
+            group_data = self.client.hgetall(gid_key)
+            parent_id = group_data.get(b'parent_id', b'').decode('utf-8') if b'parent_id' in group_data else ''
+
+            if parent_id:
+                ancestors.append(parent_id)
+                ancestors.extend(get_all_ancestors(parent_id))
+
+            return ancestors
+
+        # 🆕 Cascade addition: Get all descendants (children, grandchildren, etc.)
+        def get_all_descendants(gid: str) -> list:
+            """Recursively get all descendant group IDs"""
+            descendants = [gid]
+            children_key = f'group:children:{gid}'
+            children_ids = self.client.smembers(children_key)
+
+            for child_id_bytes in children_ids:
+                child_id = child_id_bytes.decode('utf-8') if isinstance(child_id_bytes, bytes) else child_id_bytes
+                descendants.extend(get_all_descendants(child_id))
+
+            return descendants
+
+        # Get all groups to add (ancestors + target group + descendants)
+        # This maintains tree structure: when adding a child, parents are auto-added
+        ancestors = get_all_ancestors(group_id)
+        descendants = get_all_descendants(group_id)
+
+        # Combine all groups: ancestors first (for proper tree order), then descendants
+        all_group_ids = ancestors + descendants
+
+        # Remove duplicates while preserving order
+        seen = set()
+        all_group_ids = [x for x in all_group_ids if not (x in seen or seen.add(x))]
+
+        logger.info(f"Adding {len(all_group_ids)} groups to organization {org_id} "
+                   f"({len(ancestors)} ancestors + {len(descendants)} including target and descendants)")
+
+        # Convert to set for faster lookup
+        groups_being_added = set(all_group_ids)
+
+        # Add bidirectional relationship for all groups
+        pipe = self.client.pipeline()
+
+        for gid in all_group_ids:
+            # Get group data to check parent_id
+            gid_key = f'group:{gid}'
+            group_data = self.client.hgetall(gid_key)
+            parent_id = group_data.get(b'parent_id', b'').decode('utf-8') if b'parent_id' in group_data else ''
+
+            # Check if parent is in the same organization
+            # Parent is considered "in org" if:
+            # 1. It's being added in this transaction, OR
+            # 2. It's already in the organization
+            parent_in_org = False
+            if parent_id:
+                parent_in_org = (parent_id in groups_being_added) or self.is_group_in_organization(parent_id, org_id)
+
+            # Add org to group's organizations
+            pipe.sadd(f'group:orgs:{gid}', org_id)
+
+            # Add group to org's groups
+            pipe.sadd(f'org:groups:{org_id}', gid)
+
+            # Add to root index only if:
+            # 1. No parent_id at all, OR
+            # 2. Has parent_id but parent is NOT in this organization
+            if not parent_id or not parent_in_org:
+                pipe.sadd(f'org:groups:root:{org_id}', gid)
+                logger.debug(f"Adding group {gid} to organization {org_id} as ROOT (parent_id={parent_id or 'none'}, parent_in_org={parent_in_org})")
+            else:
+                logger.debug(f"Adding group {gid} to organization {org_id} as CHILD of {parent_id}")
+
+            # Update group metadata
+            pipe.hset(gid_key, 'updated_at', datetime.now().isoformat())
+            pipe.hset(gid_key, 'updated_by', updated_by)
+
+        pipe.execute()
+
+        logger.info(f"Added group {group_id} and {len(all_group_ids) - 1} descendants to organization {org_id}")
+        return True
+
+    def remove_group_from_organization(
+        self,
+        group_id: str,
+        org_id: str,
+        updated_by: str = 'system'
+    ) -> bool:
+        """
+        Remove a group from an organization
+
+        Args:
+            group_id: Group ID to remove
+            org_id: Organization ID to remove from
+            updated_by: Username who performed the action
+
+        Returns:
+            True if successful
+
+        Raises:
+            ValueError: If this is the last organization or group doesn't exist
+        """
+        from datetime import datetime
+
+        # Validate group exists
+        group_key = f'group:{group_id}'
+        if not self.client.exists(group_key):
+            raise ValueError("그룹이 존재하지 않습니다")
+
+        # Check if group is in this organization
+        if not self.is_group_in_organization(group_id, org_id):
+            raise ValueError("그룹이 해당 조직에 속하지 않습니다")
+
+        # Prevent removing from default organization only
+        # Default organization serves as the home for all groups (including "미분류")
+        if org_id == "default":
+            raise ValueError("기본 조직에서는 그룹을 제거할 수 없습니다. 기본 조직은 모든 그룹의 홈입니다.")
+
+        # For non-default organizations, allow free removal of any group
+        # This includes the "미분류" (uncategorized) group
+        # Each organization can choose which groups to use
+
+        # 🆕 Cascade removal: Get all descendants (children, grandchildren, etc.)
+        def get_all_descendants(gid: str) -> list:
+            """Recursively get all descendant group IDs"""
+            descendants = [gid]
+            children_key = f'group:children:{gid}'
+            children_ids = self.client.smembers(children_key)
+
+            for child_id_bytes in children_ids:
+                child_id = child_id_bytes.decode('utf-8') if isinstance(child_id_bytes, bytes) else child_id_bytes
+                descendants.extend(get_all_descendants(child_id))
+
+            return descendants
+
+        # Get all groups to remove (parent + all descendants)
+        all_group_ids = get_all_descendants(group_id)
+        logger.info(f"Removing {len(all_group_ids)} groups from organization {org_id} (including descendants)")
+
+        # Remove bidirectional relationship for all groups
+        pipe = self.client.pipeline()
+
+        for gid in all_group_ids:
+            # Remove org from group's organizations
+            pipe.srem(f'group:orgs:{gid}', org_id)
+
+            # Remove group from org's groups
+            pipe.srem(f'org:groups:{org_id}', gid)
+
+            # Remove from root groups index (only applies to top-level groups)
+            pipe.srem(f'org:groups:root:{org_id}', gid)
+
+            # Update group metadata
+            pipe.hset(f'group:{gid}', 'updated_at', datetime.now().isoformat())
+            pipe.hset(f'group:{gid}', 'updated_by', updated_by)
+
+        pipe.execute()
+
+        logger.info(f"Removed group {group_id} and {len(all_group_ids) - 1} descendants from organization {org_id}")
+        return True
+
+    def get_group_organizations(self, group_id: str) -> List[str]:
+        """
+        Get all organizations that a group belongs to
+
+        Args:
+            group_id: Group ID
+
+        Returns:
+            List of organization IDs
+        """
+        org_ids_bytes = self.client.smembers(f'group:orgs:{group_id}')
+        org_ids = [org_id.decode('utf-8') for org_id in org_ids_bytes]
+
+        # Fallback: if no orgs found, check legacy org_id field
+        if not org_ids:
+            group_key = f'group:{group_id}'
+            if self.client.exists(group_key):
+                group_data = self.client.hgetall(group_key)
+                if b'org_id' in group_data:
+                    legacy_org_id = group_data[b'org_id'].decode('utf-8')
+                    if legacy_org_id:
+                        return [legacy_org_id]
+
+        return org_ids
+
+    def is_group_in_organization(self, group_id: str, org_id: str) -> bool:
+        """
+        Check if a group belongs to an organization
+
+        Args:
+            group_id: Group ID
+            org_id: Organization ID
+
+        Returns:
+            True if group belongs to organization
+        """
+        # Check N:M relationship
+        is_member = self.client.sismember(f'group:orgs:{group_id}', org_id)
+        if is_member:
+            return True
+
+        # Fallback: check legacy org_id field
+        group_key = f'group:{group_id}'
+        if self.client.exists(group_key):
+            group_data = self.client.hgetall(group_key)
+            if b'org_id' in group_data:
+                legacy_org_id = group_data[b'org_id'].decode('utf-8')
+                return legacy_org_id == org_id
+
+        return False

@@ -12,6 +12,7 @@ from redis import ConnectionPool
 from redis.commands.search.field import TextField, VectorField, NumericField, TagField
 from redis.commands.search.indexDefinition import IndexDefinition, IndexType
 from redis.commands.search.query import Query
+from .performance_utils import log_slow_query
 
 
 class VectorDB:
@@ -77,13 +78,13 @@ class VectorDB:
         health_check_interval: int = 30
     ):
         """
-        Initialize Redis Vector Database
+        Initialize Redis Vector Database with dual index support (Blue-Green deployment)
 
         Args:
             host: Redis host
             port: Redis port
             db: Redis database number
-            index_name: Name for search index
+            index_name: Base name for search index (actual name will be versioned)
             embedding_dim: Dimension of embeddings
             max_connections: Maximum number of connections in pool
             socket_timeout: Socket timeout in seconds
@@ -91,7 +92,7 @@ class VectorDB:
             socket_keepalive_options: TCP keepalive options dict
             health_check_interval: Connection health check interval in seconds
         """
-        self.index_name = index_name
+        self.base_index_name = index_name  # Base name for versioned indexes
         self.embedding_dim = embedding_dim
 
         try:
@@ -101,7 +102,7 @@ class VectorDB:
                 port=port,
                 db=db,
                 max_connections=max_connections,
-                decode_responses=False,
+                decode_responses=False,  # Keep as bytes for compatibility with existing code
                 socket_connect_timeout=socket_timeout,
                 socket_timeout=socket_timeout,
                 retry_on_timeout=True,
@@ -113,8 +114,171 @@ class VectorDB:
             logger.error(f"Failed to connect to Redis: {e}")
             raise
 
-        # Create or verify index (needed when schema changes)
+        # Initialize active index tracking
+        self._initialize_active_index()
+
+    def _initialize_active_index(self):
+        """Initialize or restore active index tracking"""
+        active_index = self.client.get("index:active")
+
+        if active_index:
+            # Restore existing active index
+            self.index_name = active_index.decode('utf-8')
+            logger.info(f"Restored active index: {self.index_name}")
+        else:
+            # First time initialization - create versioned index
+            import time
+            version = int(time.time())
+            self.index_name = f"{self.base_index_name}_v{version}"
+            self.client.set("index:active", self.index_name)
+            logger.info(f"Initialized new active index: {self.index_name}")
+
+        # Create or verify the active index exists
         self._create_index()
+
+    @property
+    def active_index_name(self) -> str:
+        """Get the currently active index name"""
+        active = self.client.get("index:active")
+        if active:
+            return active.decode('utf-8')
+        return self.index_name  # Fallback to current
+
+    def create_new_index(self, index_name: str) -> bool:
+        """
+        Create a new index with the specified name for dual index system
+
+        Args:
+            index_name: Name for the new index
+
+        Returns:
+            True if created successfully, False otherwise
+        """
+        try:
+            logger.info(f"Creating new index: {index_name}")
+            schema = (
+                TextField("text"),
+                TextField("filename", sortable=True),
+                TagField("filename_exact", separator="|"),
+                TagField("filename_hash", separator="|"),
+                TextField("source"),
+                NumericField("chunk_index"),
+                TagField("group_id", separator="|"),
+                VectorField(
+                    "embedding",
+                    "FLAT",
+                    {
+                        "TYPE": "FLOAT32",
+                        "DIM": self.embedding_dim,
+                        "DISTANCE_METRIC": "COSINE",
+                    }
+                ),
+            )
+
+            definition = IndexDefinition(
+                prefix=[f"doc:{index_name}:"],  # Unique prefix for this index
+                index_type=IndexType.HASH
+            )
+
+            self.client.ft(index_name).create_index(
+                fields=schema,
+                definition=definition
+            )
+            logger.success(f"Index '{index_name}' created successfully")
+            return True
+        except Exception as e:
+            # RediSearch 모듈이 없는 경우 경고만 하고 성공으로 처리
+            if "unknown command 'FT.CREATE'" in str(e):
+                logger.warning(f"⚠️  RediSearch module not available - skipping index '{index_name}' creation")
+                logger.warning(f"⚠️  Vector search disabled - system will work without search features")
+                return True  # Return True to allow system to continue
+            # 인덱스가 이미 존재하는 경우
+            elif "Index already exists" in str(e):
+                logger.info(f"Index '{index_name}' already exists")
+                return True
+            else:
+                logger.error(f"Failed to create index '{index_name}': {e}")
+                return False
+
+    def swap_indexes(self, new_index_name: str) -> bool:
+        """
+        Atomically swap the active index (Blue-Green deployment)
+
+        Args:
+            new_index_name: Name of the new index to make active
+
+        Returns:
+            True if swap successful, False otherwise
+        """
+        try:
+            old_index_name = self.active_index_name
+
+            # Verify new index exists (skip if RediSearch not available)
+            try:
+                self.client.ft(new_index_name).info()
+                logger.info(f"✓ Verified new index '{new_index_name}' exists")
+            except Exception as e:
+                # RediSearch 모듈이 없는 경우 검증을 건너뛰고 계속 진행
+                if "unknown command 'FT.INFO'" in str(e):
+                    logger.warning(f"⚠️  RediSearch not available - skipping index verification")
+                else:
+                    logger.error(f"Cannot swap: new index '{new_index_name}' verification failed: {e}")
+                    return False
+
+            # Atomic swap
+            self.client.set("index:active", new_index_name)
+            self.index_name = new_index_name
+
+            logger.success(f"✅ Index swap complete: {old_index_name} → {new_index_name}")
+
+            # Schedule old index cleanup (after a grace period)
+            self.client.set(f"index:old:{old_index_name}", "1", ex=300)  # Mark for cleanup in 5 minutes
+
+            return True
+        except Exception as e:
+            logger.error(f"Failed to swap indexes: {e}")
+            return False
+
+    def cleanup_old_index(self, index_name: str) -> bool:
+        """
+        Clean up old index and its documents after swap
+
+        Args:
+            index_name: Name of old index to cleanup
+
+        Returns:
+            True if cleanup successful, False otherwise
+        """
+        try:
+            logger.info(f"Cleaning up old index: {index_name}")
+
+            # Delete all documents with this index prefix
+            cursor = '0'
+            count = 0
+            while True:
+                cursor, keys = self.client.scan(
+                    cursor=cursor,
+                    match=f"doc:{index_name}:*",
+                    count=100
+                )
+                if keys:
+                    self.client.delete(*keys)
+                    count += len(keys)
+                if cursor == 0 or cursor == b'0':
+                    break
+
+            # Drop the index
+            try:
+                self.client.ft(index_name).dropindex(delete_documents=True)
+                logger.info(f"Dropped index: {index_name}")
+            except:
+                pass  # Index might not exist
+
+            logger.success(f"Cleaned up {count} documents from old index '{index_name}'")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to cleanup old index '{index_name}': {e}")
+            return False
 
     def _create_index(self):
         """Create or recreate search index"""
@@ -158,19 +322,33 @@ class VectorDB:
                 )
                 logger.success(f"Index '{self.index_name}' created successfully")
             except Exception as e:
-                logger.error(f"Failed to create index: {e}")
-                raise
+                # RediSearch 모듈이 없는 경우 경고만 하고 계속 진행
+                if "unknown command 'FT.CREATE'" in str(e):
+                    logger.warning(f"⚠️  RediSearch module not available - vector search disabled")
+                    logger.warning(f"⚠️  Install Redis Stack to enable vector search features")
+                    return
+                # 인덱스가 이미 존재하는 경우
+                elif "Index already exists" in str(e):
+                    logger.info(f"Index '{self.index_name}' already exists")
+                    return
+                else:
+                    logger.error(f"Failed to create index: {e}")
+                    raise
 
-    def add_documents(self, documents: List[Dict], embeddings: List[List[float]]):
+    def add_documents(self, documents: List[Dict], embeddings: List[List[float]], target_index: Optional[str] = None):
         """
         Add documents with embeddings to database
 
         Args:
             documents: List of document dictionaries
             embeddings: List of embedding vectors
+            target_index: Optional target index name (for dual index system). If None, uses active index.
         """
         if len(documents) != len(embeddings):
             raise ValueError("Number of documents must match number of embeddings")
+
+        # Use specified index or active index
+        index_name = target_index if target_index else self.active_index_name
 
         # Get default group ID if no group specified
         default_group_id = self.client.get('group:default')
@@ -186,8 +364,8 @@ class VectorDB:
 
         pipe = self.client.pipeline()
         for idx, (doc, embedding) in enumerate(zip(documents, embeddings)):
-            # Generate unique document ID using UUID to avoid overwriting
-            doc_id = f"doc:{uuid.uuid4().hex}"
+            # Generate unique document ID with index-specific prefix
+            doc_id = f"doc:{index_name}:{uuid.uuid4().hex}"
 
             # Convert embedding to bytes
             embedding_bytes = np.array(embedding, dtype=np.float32).tobytes()
@@ -228,8 +406,12 @@ class VectorDB:
         import time
         time.sleep(0.2)  # 200ms delay for index propagation
 
+        # Clear document count cache to reflect new documents
+        self.clear_document_count_cache()
+
         logger.success(f"Added {len(documents)} documents to database")
 
+    @log_slow_query(threshold_seconds=1.0)
     def search(
         self,
         query_embedding: List[float],
@@ -252,23 +434,18 @@ class VectorDB:
             List of matching documents with scores
         """
         try:
-            # DIAGNOSTIC: Check what query_embedding actually is
-            logger.warning(f"DIAGNOSTIC: query_embedding type: {type(query_embedding)}")
-            logger.warning(f"DIAGNOSTIC: query_embedding shape/len: {getattr(query_embedding, 'shape', len(query_embedding) if hasattr(query_embedding, '__len__') else 'no length')}")
-            if hasattr(query_embedding, '__len__') and len(query_embedding) < 10:
-                logger.warning(f"DIAGNOSTIC: query_embedding content: {query_embedding}")
+            # 🆕 Early return if group_ids is an empty list (no groups = no results)
+            if group_ids is not None and len(group_ids) == 0:
+                logger.info("⚠️ Empty group_ids list - user has no accessible groups, returning no results")
+                return []
+
+            # 🆕 Early return if document_ids is an empty list (no documents = no results)
+            if document_ids is not None and len(document_ids) == 0:
+                logger.info("⚠️ Empty document_ids list - no documents to search, returning no results")
+                return []
 
             # Convert query embedding to bytes
             query_bytes = np.array(query_embedding, dtype=np.float32).tobytes()
-
-            # DIAGNOSTIC: Check the actual bytes being sent
-            logger.warning(f"DIAGNOSTIC: query_bytes length: {len(query_bytes)} bytes")
-            logger.warning(f"DIAGNOSTIC: First 50 bytes of query_bytes: {query_bytes[:50].hex()}")
-
-            # DIAGNOSTIC: Compare with random embedding bytes
-            random_emb = np.random.randn(1024).astype(np.float32).tobytes()
-            logger.warning(f"DIAGNOSTIC: Random embedding bytes length: {len(random_emb)} bytes")
-            logger.warning(f"DIAGNOSTIC: First 50 bytes of random_emb: {random_emb[:50].hex()}")
 
             # Build filters
             filters = []
@@ -300,8 +477,6 @@ class VectorDB:
                 else:
                     combined_filter = "(" + " ".join(filters) + ")"
                 base_query = f"{combined_filter}=>[KNN {top_k} @embedding $vec AS score]"
-                logger.debug(f"Search filters: {filters}")
-                logger.debug(f"Redis query: {base_query}")
 
             query = (
                 Query(base_query)
@@ -309,96 +484,27 @@ class VectorDB:
                 .dialect(2)
             )
 
-            # Log query details for debugging
-            logger.debug(f"Query embedding vector length: {len(query_bytes)} bytes")
-            logger.debug(f"First 20 bytes of embedding: {query_bytes[:20].hex()}")
-            logger.debug(f"Final query string: {base_query}")
-            if filters:
-                logger.debug(f"Active filters: {filters}")
-
-            # DIAGNOSTIC: Check index state and test query
-            if filters:
-                try:
-                    # Check index info
-                    index_info = self.client.ft(self.index_name).info()
-                    num_docs = index_info.get('num_docs', 0)
-                    logger.warning(f"DIAGNOSTIC: Index '{self.index_name}' has {num_docs} total documents")
-
-                    # Check how many S2B documents exist
-                    s2b_check = self.client.execute_command(
-                        'FT.SEARCH', self.index_name,
-                        '@filename_exact:{S2B\\ FaQ1\\.pdf}',
-                        'LIMIT', '0', '0',
-                        'DIALECT', '2'
-                    )
-                    logger.warning(f"DIAGNOSTIC: {s2b_check[0]} documents match '@filename_exact:{{S2B\\ FaQ1\\.pdf}}'")
-
-                    # Test with random embedding
-                    test_embedding = np.random.randn(1024).astype(np.float32).tobytes()
-
-                    # Test WITHOUT SORTBY
-                    cmd_args = ['FT.SEARCH', self.index_name, base_query, 'PARAMS', '2', 'vec', 'RETURN', '1', 'filename_exact', 'DIALECT', '2']
-                    logger.warning(f"DIAGNOSTIC: Command args: {cmd_args}")
-                    logger.warning(f"DIAGNOSTIC: Embedding length: {len(test_embedding)} bytes")
-                    direct_result1 = self.client.execute_command(
-                        'FT.SEARCH', self.index_name,
-                        base_query,
-                        'PARAMS', '2', 'vec', test_embedding,
-                        'RETURN', '1', 'filename_exact',
-                        'DIALECT', '2'
-                    )
-                    logger.warning(f"DIAGNOSTIC: Hybrid query WITHOUT SORTBY returned {direct_result1[0]} results")
-
-                    # Test WITH SORTBY
-                    direct_result2 = self.client.execute_command(
-                        'FT.SEARCH', self.index_name,
-                        base_query,
-                        'PARAMS', '2', 'vec', test_embedding,
-                        'RETURN', '1', 'filename_exact',
-                        'SORTBY', 'score',
-                        'DIALECT', '2'
-                    )
-                    logger.warning(f"DIAGNOSTIC: Hybrid query WITH SORTBY returned {direct_result2[0]} results")
-                except Exception as e:
-                    logger.error(f"DIAGNOSTIC failed: {e}")
-                    import traceback
-                    logger.error(traceback.format_exc())
-
             # Execute search using execute_command (Query class has issues with hybrid queries)
-            logger.warning(f"ACTUAL SEARCH: Executing with base_query: {base_query}")
-            logger.warning(f"ACTUAL SEARCH: query_bytes TYPE: {type(query_bytes)}")
-            logger.warning(f"ACTUAL SEARCH: query_bytes length: {len(query_bytes)}")
-            logger.warning(f"ACTUAL SEARCH: query_bytes first 20 bytes: {query_bytes[:20].hex()}")
-            logger.warning(f"ACTUAL SEARCH: Redis connection: {self.client.connection_pool.connection_kwargs}")
-
-            # TEST: Try with a random embedding to see if it's the embedding that's the issue
-            test_bytes = np.random.randn(1024).astype(np.float32).tobytes()
-            logger.warning(f"ACTUAL SEARCH: test_bytes TYPE: {type(test_bytes)}")
-            logger.warning(f"ACTUAL SEARCH: test_bytes length: {len(test_bytes)}")
-
             try:
-                # Execute search with actual query bytes
-                logger.warning(f"SEARCH: base_query={base_query}")
-                logger.warning(f"SEARCH: query_bytes length={len(query_bytes)}")
+                # Use active_index_name to query the currently active index
+                index_name = self.active_index_name
 
                 raw_results = self.client.execute_command(
-                    'FT.SEARCH', self.index_name,
+                    'FT.SEARCH', index_name,
                     base_query,
                     'PARAMS', '2', 'vec', query_bytes,
                     'RETURN', '6', 'text', 'filename', 'source', 'chunk_index', 'group_id', 'score',
                     'DIALECT', '2'
                 )
-                logger.warning(f"SEARCH: Got {raw_results[0]} results from Redis")
 
             except Exception as e:
-                logger.error(f"SEARCH: execute_command failed: {e}")
+                logger.error(f"Vector search execute_command failed: {e}")
                 import traceback
                 logger.error(traceback.format_exc())
                 raise
 
             # Parse raw results
             num_results = raw_results[0]
-            logger.debug(f"Redis returned {num_results} results")
 
             # Convert raw results to result objects
             class SearchResult:
@@ -439,7 +545,6 @@ class VectorDB:
                 }
                 documents.append(doc_dict)
 
-            logger.debug(f"Found {len(documents)} matching documents")
             return documents
         except Exception as e:
             logger.error(f"Search failed: {e}")
@@ -448,10 +553,32 @@ class VectorDB:
     def count_documents(self) -> int:
         """Get total number of documents (chunks) in database"""
         try:
-            info = self.client.ft(self.index_name).info()
+            # Try RediSearch first (most efficient)
+            info = self.client.ft(self.active_index_name).info()
             return int(info.get("num_docs", 0))
         except:
-            return 0
+            # Fallback: Count keys manually if RediSearch is unavailable
+            try:
+                index_name = self.active_index_name
+                cursor = 0
+                count = 0
+
+                while True:
+                    cursor, keys = self.client.scan(cursor, match=f"doc:{index_name}:*", count=100)
+                    # Filter out non-document keys
+                    for key in keys:
+                        key_str = key.decode('utf-8') if isinstance(key, bytes) else key
+                        # Skip metadata keys like doc:hash:, doc:group:, etc.
+                        if not any(x in key_str for x in [':hash:', ':group:', ':version:', ':counts:', ':files']):
+                            count += 1
+
+                    if cursor == 0:
+                        break
+
+                return count
+            except Exception as e:
+                logger.warning(f"Failed to count documents: {e}")
+                return 0
 
     def count_unique_files(self) -> int:
         """
@@ -461,22 +588,27 @@ class VectorDB:
         - Uses SCAN instead of KEYS to avoid blocking Redis
         - Batches operations with pipeline to reduce round trips
         - Only fetches filename field instead of entire document
+        - Scans only the active index
         """
         try:
             filenames = set()
             batch_size = 100  # Process keys in batches
             key_batch = []
 
+            # Get active index name
+            index_name = self.active_index_name
+
             # Use SCAN to iterate keys without blocking Redis
-            # Scan all doc:* keys (both numeric doc:N and UUID doc:xxxxx)
-            for key in self.client.scan_iter(match="doc:*", count=batch_size):
+            # Scan only the active index: doc:index_name:*
+            for key in self.client.scan_iter(match=f"doc:{index_name}:*", count=batch_size):
                 key_str = key.decode('utf-8')
 
-                # Exclude doc:hash:xxx keys used for duplicate tracking
-                # Accept both numeric IDs (doc:0, doc:1) and UUID IDs (doc:abc123...)
+                # Skip non-document keys (like doc:index_name:hash:xxx, doc:index_name:group:xxx, etc.)
                 parts = key_str.split(':')
-                if len(parts) != 2 or parts[0] != 'doc' or parts[1] == 'hash':
-                    # Skip doc:hash:xxx or other invalid patterns
+                if len(parts) < 3:
+                    continue
+                # Skip metadata keys
+                if any(x in key_str for x in [':hash:', ':group:', ':version:', ':counts:', ':files']):
                     continue
 
                 key_batch.append(key)
@@ -546,7 +678,6 @@ class VectorDB:
                 "index:state",
                 json.dumps(metadata, ensure_ascii=False)
             )
-            logger.debug("Index state saved")
         except Exception as e:
             logger.error(f"Failed to save index state: {e}")
 
@@ -611,22 +742,25 @@ class VectorDB:
                 # Use cached counts
                 import json
                 filename_counts = json.loads(cached_counts)
-                logger.debug("Using cached document counts")
             else:
                 # Cache miss - need to scan all documents
                 logger.info("Cache miss - scanning all documents for counts")
 
-                # Get all document keys efficiently using SCAN
+                # Get all document keys efficiently using SCAN (filtered by active index)
                 filename_counts = {}
                 batch_size = 100
                 key_batch = []
 
-                for key in self.client.scan_iter(match="doc:*", count=batch_size):
+                # Use active index for more efficient scanning
+                index_pattern = f"doc:{self.active_index_name}:*"
+
+                for key in self.client.scan_iter(match=index_pattern, count=batch_size):
                     key_str = key.decode('utf-8')
 
                     # Exclude doc:hash:xxx and doc:group:xxx keys, accept both numeric and UUID document IDs
                     parts = key_str.split(':')
-                    if len(parts) != 2 or parts[0] != 'doc':
+                    # Accept doc:id or doc:index:id formats, exclude doc:hash:xxx, doc:group:xxx, doc:version:xxx, doc:counts:xxx, doc:files
+                    if len(parts) < 2 or parts[0] != 'doc' or parts[1] in ['hash', 'group', 'counts', 'version', 'files']:
                         continue
 
                     key_batch.append(key)
@@ -662,7 +796,6 @@ class VectorDB:
         try:
             cache_key = "doc:counts:cache"
             self.client.delete(cache_key)
-            logger.debug("Cleared document count cache")
         except Exception as e:
             logger.error(f"Failed to clear document count cache: {e}")
 
@@ -733,13 +866,21 @@ class VectorDB:
             batch_size = 100
             key_batch = []
 
-            # Scan all document keys
-            for key in self.client.scan_iter(match="doc:*", count=batch_size):
+            # Scan document keys from active index
+            index_pattern = f"doc:{self.active_index_name}:*"
+
+            for key in self.client.scan_iter(match=index_pattern, count=batch_size):
                 key_str = key.decode('utf-8')
 
-                # Skip non-document keys (like doc:hash:xxx)
+                # Skip non-document keys (like doc:hash:xxx, doc:group:xxx, doc:version:xxx, doc:counts:xxx, doc:files)
                 parts = key_str.split(':')
-                if len(parts) != 2 or parts[0] != 'doc' or parts[1] == 'hash':
+                # Accept both old format (doc:uuid) and new format (doc:index_name:uuid)
+                # Skip hash, group, version, counts, and files keys
+                if parts[0] != 'doc':
+                    continue
+                if len(parts) < 2:
+                    continue
+                if len(parts) >= 2 and parts[1] in ['hash', 'group', 'version', 'counts', 'files']:
                     continue
 
                 key_batch.append(key)
@@ -820,13 +961,15 @@ class VectorDB:
             batch_size = 100
             key_batch = []
 
-            # Scan all document keys
-            for key in self.client.scan_iter(match="doc:*", count=batch_size):
+            # Scan document keys from active index
+            index_pattern = f"doc:{self.active_index_name}:*"
+
+            for key in self.client.scan_iter(match=index_pattern, count=batch_size):
                 key_str = key.decode('utf-8')
 
                 # Skip non-document keys
                 parts = key_str.split(':')
-                if len(parts) != 2 or parts[0] != 'doc' or parts[1] == 'hash':
+                if len(parts) < 2 or parts[0] != 'doc' or parts[1] in ['hash', 'group', 'counts', 'version']:
                     continue
 
                 key_batch.append(key)
@@ -846,6 +989,10 @@ class VectorDB:
                 for key in deleted_keys:
                     pipe.delete(key)
                 pipe.execute()
+
+                # Clear document count cache after deletion
+                self.clear_document_count_cache()
+
                 logger.info(f"Deleted {len(deleted_keys)} chunks for {filename}")
 
             return len(deleted_keys)
@@ -922,4 +1069,209 @@ class VectorDB:
     def close(self):
         """Close Redis connection"""
         self.client.close()
-        logger.info("Redis connection closed")
+
+    def bm25_search(
+        self,
+        query_text: str,
+        top_k: int = 20,
+        group_ids: Optional[List[str]] = None,
+        document_ids: Optional[List[str]] = None
+    ) -> List[Dict]:
+        """
+        BM25 full-text search using TextField
+
+        Args:
+            query_text: Query text for BM25 search
+            top_k: Number of results to return
+            group_ids: Optional list of group IDs to filter by
+            document_ids: Optional list of document filenames to filter by
+
+        Returns:
+            List of matching documents with BM25 scores
+        """
+        try:
+            # 🆕 Early return if group_ids is an empty list (no groups = no results)
+            if group_ids is not None and len(group_ids) == 0:
+                logger.info("⚠️ Empty group_ids list - user has no accessible groups, returning no results")
+                return []
+
+            # 🆕 Early return if document_ids is an empty list (no documents = no results)
+            if document_ids is not None and len(document_ids) == 0:
+                logger.info("⚠️ Empty document_ids list - no documents to search, returning no results")
+                return []
+
+            # Build filters
+            filters = []
+
+            # Group filter
+            if group_ids:
+                escaped_groups = [self.escape_tag_value(gid) for gid in group_ids]
+                group_filter = "|".join(escaped_groups)
+                filters.append(f"@group_id:{{{group_filter}}}")
+
+            # Document filter
+            if document_ids:
+                filename_hashes = [hashlib.md5(filename.encode('utf-8')).hexdigest() for filename in document_ids]
+                hash_filter = "|".join(filename_hashes)
+                filters.append(f"@filename_hash:{{{hash_filter}}}")
+
+            # Escape query text for TextField search
+            escaped_query = self.escape_redis_query(query_text)
+
+            # Build BM25 query
+            # Search in 'text' TextField with BM25 scoring
+            text_query = f'@text:"{escaped_query}"'
+
+            # Combine with filters
+            if filters:
+                if len(filters) == 1:
+                    combined_filter = filters[0]
+                else:
+                    combined_filter = "(" + " ".join(filters) + ")"
+                final_query = f"({combined_filter} {text_query})"
+            else:
+                final_query = text_query
+
+            # Execute BM25 search
+            query = (
+                Query(final_query)
+                .return_fields("text", "filename", "source", "chunk_index", "group_id")
+                .paging(0, top_k)
+                .dialect(2)
+            )
+
+            # Use active_index_name to query the currently active index
+            results = self.client.ft(self.active_index_name).search(query)
+
+            # Parse results
+            documents = []
+            for i, doc in enumerate(results.docs):
+                # BM25 score is implicit in ranking order
+                # Use inverse rank as score (higher rank = higher score)
+                bm25_score = 1.0 / (i + 1)
+
+                doc_dict = {
+                    "text": doc.text,
+                    "filename": doc.filename,
+                    "source": getattr(doc, 'source', ''),
+                    "chunk_index": int(getattr(doc, 'chunk_index', 0)),
+                    "group_id": getattr(doc, 'group_id', ''),
+                    "score": bm25_score,
+                    "rank": i + 1
+                }
+                documents.append(doc_dict)
+
+            return documents
+
+        except Exception as e:
+            logger.error(f"BM25 search failed: {e}")
+            return []
+
+    @staticmethod
+    def _reciprocal_rank_fusion(
+        rankings: List[List[Dict]],
+        k: int = 60
+    ) -> List[Dict]:
+        """
+        Reciprocal Rank Fusion (RRF) algorithm to combine multiple rankings
+
+        RRF formula: score = sum(1 / (k + rank_i))
+        where rank_i is the rank in each ranking list
+
+        Args:
+            rankings: List of ranking lists (each is a list of documents)
+            k: Constant for RRF formula (default: 60)
+
+        Returns:
+            Combined ranking list sorted by RRF score
+        """
+        # Track scores for each unique document
+        doc_scores = {}
+        doc_data = {}
+
+        # Process each ranking
+        for ranking in rankings:
+            for rank, doc in enumerate(ranking, start=1):
+                # Use document text as unique identifier
+                doc_id = doc['text']
+
+                # Calculate RRF contribution
+                rrf_contribution = 1.0 / (k + rank)
+
+                # Add to total score
+                if doc_id in doc_scores:
+                    doc_scores[doc_id] += rrf_contribution
+                else:
+                    doc_scores[doc_id] = rrf_contribution
+                    doc_data[doc_id] = doc
+
+        # Create final ranking sorted by RRF score
+        final_ranking = []
+        for doc_id, score in sorted(doc_scores.items(), key=lambda x: x[1], reverse=True):
+            doc = doc_data[doc_id].copy()
+            doc['score'] = score
+            final_ranking.append(doc)
+
+        return final_ranking
+
+    def hybrid_search(
+        self,
+        query_text: str,
+        query_embedding: List[float],
+        top_k: int = 5,
+        group_ids: Optional[List[str]] = None,
+        document_ids: Optional[List[str]] = None,
+        retrieval_k: int = 20
+    ) -> List[Dict]:
+        """
+        Hybrid search combining vector search (semantic) and BM25 (keyword) using RRF
+
+        Args:
+            query_text: Query text for BM25 search
+            query_embedding: Query embedding vector for semantic search
+            top_k: Number of final results to return
+            group_ids: Optional list of group IDs to filter by
+            document_ids: Optional list of document filenames to filter by
+            retrieval_k: Number of documents to retrieve from each method before fusion (default: 20)
+
+        Returns:
+            List of documents ranked by RRF score
+        """
+        try:
+            logger.info(f"Hybrid search: query='{query_text[:50]}...', top_k={top_k}, retrieval_k={retrieval_k}")
+
+            # 1. Vector search (semantic similarity)
+            vector_results = self.search(
+                query_embedding=query_embedding,
+                top_k=retrieval_k,
+                group_ids=group_ids,
+                document_ids=document_ids
+            )
+
+            # 2. BM25 search (keyword matching)
+            bm25_results = self.bm25_search(
+                query_text=query_text,
+                top_k=retrieval_k,
+                group_ids=group_ids,
+                document_ids=document_ids
+            )
+
+            # 3. Combine using Reciprocal Rank Fusion
+            combined_results = self._reciprocal_rank_fusion([vector_results, bm25_results])
+
+            # 4. Return top_k results
+            final_results = combined_results[:top_k]
+            logger.info(f"Hybrid search returned {len(final_results)} final results")
+
+            return final_results
+
+        except Exception as e:
+            logger.error(f"Hybrid search failed: {e}")
+            # Fallback to vector search only
+            logger.warning("Falling back to vector search only")
+            return self.search(
+                query_embedding=query_embedding,
+                top_k=top_k,
+                group_ids=group_ids,
+                document_ids=document_ids
+            )

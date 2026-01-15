@@ -103,7 +103,6 @@ class ConversationManager:
 
         pipe.execute()
 
-        logger.debug(f"Added {role} message to session {session_id}")
         return True
 
     def get_messages(self, session_id: str, limit: int = None, offset: int = 0) -> List[Dict]:
@@ -159,6 +158,18 @@ class ConversationManager:
             k.decode('utf-8'): v.decode('utf-8')
             for k, v in session_data.items()
         }
+
+    def session_exists(self, session_id: str) -> bool:
+        """
+        Check if a conversation session exists
+
+        Args:
+            session_id: Conversation session ID
+
+        Returns:
+            True if session exists, False otherwise
+        """
+        return self.client.exists(f'conversation:{session_id}') > 0
 
     def list_sessions(self, limit: int = 50, offset: int = 0) -> List[Dict]:
         """
@@ -243,3 +254,73 @@ class ConversationManager:
             Number of sessions
         """
         return self.client.zcard('conversations:list')
+
+    def toggle_bookmark(self, session_id: str) -> bool:
+        """
+        Toggle bookmark status for a conversation session
+
+        Args:
+            session_id: Conversation session ID
+
+        Returns:
+            New bookmark status (True if bookmarked, False if unbookmarked)
+        """
+        if not self.client.exists(f'conversation:{session_id}'):
+            logger.warning(f"Session {session_id} does not exist")
+            return False
+
+        # Get current bookmark status
+        current_status = self.client.hget(f'conversation:{session_id}', 'is_bookmarked')
+        is_bookmarked = current_status and current_status.decode('utf-8') == '1'
+
+        # Toggle bookmark status
+        new_status = '0' if is_bookmarked else '1'
+        self.client.hset(f'conversation:{session_id}', 'is_bookmarked', new_status)
+
+        # Update bookmarks sorted set
+        if new_status == '1':
+            # Add to bookmarks set
+            self.client.zadd('conversations:bookmarked', {session_id: datetime.now().timestamp()})
+            logger.info(f"Bookmarked conversation: {session_id}")
+        else:
+            # Remove from bookmarks set
+            self.client.zrem('conversations:bookmarked', session_id)
+            logger.info(f"Unbookmarked conversation: {session_id}")
+
+        return new_status == '1'
+
+    def list_bookmarked_sessions(self, limit: int = 50, offset: int = 0) -> List[Dict]:
+        """
+        List bookmarked conversation sessions (sorted by most recent)
+
+        Args:
+            limit: Maximum number of sessions to return
+            offset: Number of sessions to skip
+
+        Returns:
+            List of bookmarked session dictionaries
+        """
+        # Get bookmarked session IDs from sorted set (most recent first)
+        session_ids = self.client.zrevrange(
+            'conversations:bookmarked',
+            offset,
+            offset + limit - 1
+        )
+
+        sessions = []
+        for session_id in session_ids:
+            session_id = session_id.decode('utf-8')
+            session = self.get_session(session_id)
+            if session:
+                sessions.append(session)
+
+        return sessions
+
+    def get_bookmarked_count(self) -> int:
+        """
+        Get total number of bookmarked conversations
+
+        Returns:
+            Number of bookmarked sessions
+        """
+        return self.client.zcard('conversations:bookmarked')

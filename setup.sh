@@ -245,13 +245,13 @@ echo ""
 # ========================================
 # 5. HWP Service Setup (Optional)
 # ========================================
-if [ "$SKIP_HWP" = false ] && [ -d "hwp-service" ]; then
+if [ "$SKIP_HWP" = false ] && [ -d "document-service" ]; then
     log_info "HWP 서비스 설정 중..."
 
     read -p "HWP 파일 처리 서비스를 설치하시겠습니까? (Y/n): " -n 1 -r
     echo
     if [[ ! $REPLY =~ ^[Nn]$ ]]; then
-        cd hwp-service
+        cd document-service
 
         log_info "Maven으로 HWP 서비스 빌드 중... (첫 실행 시 시간이 걸립니다)"
         if mvn clean package -DskipTests --quiet; then
@@ -267,7 +267,7 @@ else
     if [ "$SKIP_HWP" = true ]; then
         log_warning "HWP 서비스를 건너뜁니다 (Java/Maven 미설치)"
     else
-        log_warning "hwp-service 디렉토리를 찾을 수 없습니다"
+        log_warning "document-service 디렉토리를 찾을 수 없습니다"
     fi
     log_info "PDF 파일만 처리 가능합니다"
 fi
@@ -359,7 +359,7 @@ echo "2. 서버 시작:"
 echo "   ./run.sh"
 echo ""
 echo "3. HWP 서비스 시작 (선택사항):"
-echo "   cd hwp-service && mvn spring-boot:run"
+echo "   cd document-service && mvn spring-boot:run"
 echo ""
 echo "4. 브라우저에서 접속:"
 echo "   http://localhost:8000"

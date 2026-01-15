@@ -28,7 +28,7 @@ services:
   # Document Service (Java Spring Boot for multi-format document extraction)
   document-service:
     build:
-      context: ./hwp-service
+      context: ./document-service
       dockerfile: Dockerfile
     image: chatbot-document-service:latest
     container_name: chatbot_document_service
