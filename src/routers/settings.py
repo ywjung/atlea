@@ -399,9 +399,12 @@ async def update_admin_settings(request: Request):
 # ============================================================================
 
 @router.get("/hybrid-rag/status", response_model=HybridRAGStatusResponse, tags=["Hybrid RAG"])
-async def get_hybrid_rag_status(request: Request):
+async def get_hybrid_rag_status(
+    request: Request,
+    current_user: dict = Depends(get_current_active_user)
+):
     """
-    하이브리드 RAG 상태 조회 (공개 API - 인증 불필요)
+    하이브리드 RAG 상태 조회 (인증된 사용자 전용)
 
     Returns:
         현재 하이브리드 RAG 활성화 상태

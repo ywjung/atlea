@@ -4300,8 +4300,13 @@ async function loadSystemPromptFromServer() {
  */
 async function checkHybridRAGStatus() {
     try {
-        const response = await fetch('/api/hybrid-rag/status');
-        const data = await response.json();
+        // Check if user is authenticated first
+        if (!Auth.isAuthenticated()) {
+            logger.debug('Skipping Hybrid RAG status check - user not authenticated');
+            return;
+        }
+
+        const data = await Auth.apiCall('/api/hybrid-rag/status');
 
         if (searchModeSelect) {
             if (!data.enabled) {
@@ -4477,8 +4482,12 @@ if (searchModeSelect) {
     searchModeSelect.addEventListener('change', async (e) => {
         // 하이브리드 RAG 상태 재확인
         try {
-            const response = await fetch('/api/hybrid-rag/status');
-            const data = await response.json();
+            // Check if user is authenticated
+            if (!Auth.isAuthenticated()) {
+                return;
+            }
+
+            const data = await Auth.apiCall('/api/hybrid-rag/status');
 
             // 하이브리드 RAG가 비활성화 상태이고, local-only가 아닌 값으로 변경하려는 경우
             if (!data.enabled && e.target.value !== 'local-only') {
@@ -6607,6 +6616,13 @@ async function loadFilterOrgInfo() {
  */
 async function loadHybridRagStatus() {
     try {
+        // Check if user is authenticated first
+        if (!Auth.isAuthenticated()) {
+            logger.debug('Skipping Hybrid RAG status load - user not authenticated');
+            isHybridRagEnabled = false;
+            return;
+        }
+
         const data = await Auth.apiCall('/api/hybrid-rag/status');
         if (data.success) {
             isHybridRagEnabled = data.enabled;
