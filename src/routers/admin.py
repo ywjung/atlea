@@ -832,12 +832,18 @@ async def reset_user_password(
 
         # 모든 세션 무효화 (보안: 비밀번호 변경 시 모든 기존 세션 종료)
         session_ids = redis.smembers(f"user:sessions:{user_id_str}")
-        invalidated_sessions = 0
-        for session_id in session_ids:
-            session_id_str = session_id.decode() if isinstance(session_id, bytes) else session_id
-            redis.delete(f"session:{session_id_str}")
-            invalidated_sessions += 1
-        redis.delete(f"user:sessions:{user_id_str}")
+        invalidated_sessions = len(session_ids) if session_ids else 0
+
+        # Pipeline으로 모든 세션을 배치 삭제 (N+1 방지)
+        if session_ids:
+            pipe = redis.pipeline()
+            for session_id in session_ids:
+                session_id_str = session_id.decode() if isinstance(session_id, bytes) else session_id
+                pipe.delete(f"session:{session_id_str}")
+            pipe.delete(f"user:sessions:{user_id_str}")
+            pipe.execute()
+        else:
+            redis.delete(f"user:sessions:{user_id_str}")
 
         logger.info(
             f"관리자 {user['email']}가 사용자 {reset_request.email}의 비밀번호를 재설정했습니다 "
@@ -1283,17 +1289,23 @@ async def revoke_all_sessions(
 
         # 모든 세션 키 가져오기 (SCAN 사용 - 블로킹 방지)
         session_keys = cache_manager.safe_scan_keys("session:*")
-
-        revoked_count = 0
-        for session_key in session_keys:
-            session_key_str = session_key.decode() if isinstance(session_key, bytes) else session_key
-            redis.delete(session_key_str)
-            revoked_count += 1
-
-        # 모든 user:sessions 세트도 삭제 (SCAN 사용)
         user_session_keys = cache_manager.safe_scan_keys("user:sessions:*")
-        for key in user_session_keys:
-            redis.delete(key)
+
+        # Pipeline으로 모든 키를 배치 삭제 (N+1 방지)
+        if session_keys or user_session_keys:
+            pipe = redis.pipeline()
+
+            for session_key in session_keys:
+                session_key_str = session_key.decode() if isinstance(session_key, bytes) else session_key
+                pipe.delete(session_key_str)
+
+            for key in user_session_keys:
+                key_str = key.decode() if isinstance(key, bytes) else key
+                pipe.delete(key_str)
+
+            pipe.execute()
+
+        revoked_count = len(session_keys)
 
         # 대시보드 캐시 무효화 (세션 수 변경)
         await invalidate_dashboard_cache(redis)
@@ -1403,15 +1415,18 @@ async def revoke_user_sessions(
 
         # 사용자의 모든 세션 가져오기
         session_ids = redis.smembers(f"user:sessions:{user_id}")
+        revoked_count = len(session_ids) if session_ids else 0
 
-        revoked_count = 0
-        for session_id in session_ids:
-            session_id_str = session_id.decode() if isinstance(session_id, bytes) else session_id
-            redis.delete(f"session:{session_id_str}")
-            revoked_count += 1
-
-        # user:sessions 세트 삭제
-        redis.delete(f"user:sessions:{user_id}")
+        # Pipeline으로 모든 세션을 배치 삭제 (N+1 방지)
+        if session_ids:
+            pipe = redis.pipeline()
+            for session_id in session_ids:
+                session_id_str = session_id.decode() if isinstance(session_id, bytes) else session_id
+                pipe.delete(f"session:{session_id_str}")
+            pipe.delete(f"user:sessions:{user_id}")
+            pipe.execute()
+        else:
+            redis.delete(f"user:sessions:{user_id}")
 
         # 대시보드 캐시 무효화 (세션 수 변경)
         await invalidate_dashboard_cache(redis)
