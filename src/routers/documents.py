@@ -31,6 +31,7 @@ from ..group_manager import GroupManager
 from ..cache_manager import CacheManager
 from ..document_tracker import DocumentTracker
 from ..embeddings import EmbeddingModel
+from .admin import invalidate_stats_cache
 
 # Create router
 router = APIRouter(prefix="/api", tags=["Documents"])
@@ -1397,6 +1398,9 @@ async def upload_document(
             # Clear document count cache (new document added)
             vector_db.clear_document_count_cache()
 
+            # Invalidate statistics cache (document count changed)
+            invalidate_stats_cache(cache_manager.redis)
+
             # Note: Group assignment moved earlier (before add_documents) to ensure correct group_id
 
             # Get file stats
@@ -1533,6 +1537,9 @@ async def delete_document(
 
         # Clear document count cache (document deleted)
         vector_db.clear_document_count_cache()
+
+        # Invalidate statistics cache (document count changed)
+        invalidate_stats_cache(cache_manager.redis)
 
         return {
             "message": f"Document '{safe_filename}' deleted successfully",

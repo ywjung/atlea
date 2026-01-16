@@ -2050,6 +2050,22 @@ async def reveal_context7_api_key(
 # 시스템 통계 API
 # ============================================================================
 
+def invalidate_stats_cache(redis_client):
+    """통계 캐시 무효화
+
+    문서 업로드/삭제, 대화 생성 등 통계에 영향을 주는 작업 후 호출합니다.
+
+    Args:
+        redis_client: Redis 클라이언트
+    """
+    try:
+        redis_client.delete("cache:stats:documents")
+        redis_client.delete("cache:stats:redis")
+        logger.debug("통계 캐시 무효화 완료")
+    except Exception as e:
+        logger.warning(f"통계 캐시 무효화 실패: {e}")
+
+
 @router.get("/redis-stats")
 async def get_redis_stats(
     request: Request,
@@ -2061,19 +2077,38 @@ async def get_redis_stats(
         - total_keys: 전체 Redis 키 개수
         - keyspace_hits: 캐시 히트 횟수
         - keyspace_misses: 캐시 미스 횟수
+
+    Note:
+        통계는 5분간 캐싱됩니다 (빈번한 조회로 인한 성능 저하 방지)
     """
     try:
+        import json
         cache_manager = request.app.state.cache_manager
         redis_client = cache_manager.redis
+
+        cache_key = "cache:stats:redis"
+        cache_ttl = 300  # 5분
+
+        # 캐시 확인
+        cached_stats = redis_client.get(cache_key)
+        if cached_stats:
+            logger.debug("Redis 통계 캐시 히트")
+            return json.loads(cached_stats)
 
         # Redis 통계 정보 조회
         info = redis_client.info('stats')
 
-        return {
+        stats = {
             "total_keys": redis_client.dbsize(),
             "keyspace_hits": info.get('keyspace_hits', 0),
             "keyspace_misses": info.get('keyspace_misses', 0)
         }
+
+        # 캐시 저장
+        redis_client.setex(cache_key, cache_ttl, json.dumps(stats))
+        logger.debug(f"Redis 통계 캐시 저장 (TTL: {cache_ttl}초)")
+
+        return stats
 
     except Exception as e:
         logger.error(f"Redis 통계 조회 실패: {e}")
@@ -2094,10 +2129,23 @@ async def get_document_stats(
         - total_documents: 업로드된 문서 개수
         - total_chunks: 인덱싱된 문서 청크 개수
         - total_conversations: 전체 대화 개수
+
+    Note:
+        통계는 5분간 캐싱됩니다 (scan_iter 성능 부하 최소화)
     """
     try:
+        import json
         cache_manager = request.app.state.cache_manager
         redis_client = cache_manager.redis
+
+        cache_key = "cache:stats:documents"
+        cache_ttl = 300  # 5분
+
+        # 캐시 확인
+        cached_stats = redis_client.get(cache_key)
+        if cached_stats:
+            logger.debug("문서 통계 캐시 히트")
+            return json.loads(cached_stats)
 
         # 문서 개수 (doc:group:* 패턴)
         doc_keys = list(redis_client.scan_iter(match="doc:group:*", count=1000))
@@ -2109,7 +2157,7 @@ async def get_document_stats(
             # vector_db.py에서 사용하는 실제 키: index:active
             active_index = redis_client.get("index:active")
             if active_index:
-                active_index = active_index.decode() if isinstance(active_index, bytes) else active_index
+                active_index = CacheManager.decode_bytes(active_index)
                 index_info = redis_client.ft(active_index).info()
                 total_chunks = int(index_info.get('num_docs', 0))
         except Exception as e:
@@ -2120,11 +2168,17 @@ async def get_document_stats(
         conv_keys = list(redis_client.scan_iter(match="conversation:*", count=1000))
         total_conversations = len(conv_keys)
 
-        return {
+        stats = {
             "total_documents": total_documents,
             "total_chunks": total_chunks,
             "total_conversations": total_conversations
         }
+
+        # 캐시 저장
+        redis_client.setex(cache_key, cache_ttl, json.dumps(stats))
+        logger.debug(f"문서 통계 캐시 저장 (TTL: {cache_ttl}초)")
+
+        return stats
 
     except Exception as e:
         logger.error(f"문서 통계 조회 실패: {e}")
