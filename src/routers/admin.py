@@ -1155,15 +1155,27 @@ async def list_all_sessions(
         # 모든 세션 키 가져오기 (SCAN 사용 - 블로킹 방지)
         session_keys = cache_manager.safe_scan_keys("session:*")
 
-        sessions = []
-        active_count = 0
-        expired_count = 0
+        if not session_keys:
+            return SessionListResponse(
+                total_sessions=0,
+                active_sessions=0,
+                expired_sessions=0,
+                sessions=[]
+            )
 
+        # Pipeline 1: 모든 세션 데이터를 배치로 가져오기 (N+1 쿼리 방지)
+        pipe = redis.pipeline()
         for session_key in session_keys:
             session_key_str = session_key.decode() if isinstance(session_key, bytes) else session_key
+            pipe.hgetall(session_key_str)
 
-            # 세션 데이터 가져오기
-            session_data = redis.hgetall(session_key_str)
+        session_data_list = pipe.execute()
+
+        # 세션 데이터 파싱 및 user_id 수집
+        session_dicts = []
+        user_ids = set()
+
+        for session_data in session_data_list:
             if not session_data:
                 continue
 
@@ -1174,18 +1186,39 @@ async def list_all_sessions(
                 value = v.decode() if isinstance(v, bytes) else v
                 session_dict[key] = value
 
-            # 사용자 정보 가져오기
+            session_dicts.append(session_dict)
             user_id = session_dict.get("user_id")
-            user_data = redis.hgetall(f"user:{user_id}")
+            if user_id:
+                user_ids.add(user_id)
 
-            user_email = "Unknown"
-            username = "Unknown"
-            if user_data:
-                user_email_bytes = user_data.get(b'email' if isinstance(list(user_data.keys())[0], bytes) else 'email')
-                username_bytes = user_data.get(b'username' if isinstance(list(user_data.keys())[0], bytes) else 'username')
+        # Pipeline 2: 모든 사용자 데이터를 배치로 가져오기
+        user_data_map = {}
+        if user_ids:
+            pipe = redis.pipeline()
+            for user_id in user_ids:
+                pipe.hgetall(f"user:{user_id}")
 
-                user_email = user_email_bytes.decode() if isinstance(user_email_bytes, bytes) else user_email_bytes
-                username = username_bytes.decode() if isinstance(username_bytes, bytes) else username_bytes
+            user_data_results = pipe.execute()
+
+            # 사용자 데이터를 딕셔너리로 변환
+            for user_id, user_data in zip(user_ids, user_data_results):
+                if user_data:
+                    user_email_bytes = user_data.get(b'email' if isinstance(list(user_data.keys())[0], bytes) else 'email')
+                    username_bytes = user_data.get(b'username' if isinstance(list(user_data.keys())[0], bytes) else 'username')
+
+                    user_data_map[user_id] = {
+                        'email': user_email_bytes.decode() if isinstance(user_email_bytes, bytes) else user_email_bytes,
+                        'username': username_bytes.decode() if isinstance(username_bytes, bytes) else username_bytes
+                    }
+
+        # 세션 목록 생성
+        sessions = []
+        active_count = 0
+        expired_count = 0
+
+        for session_dict in session_dicts:
+            user_id = session_dict.get("user_id")
+            user_info = user_data_map.get(user_id, {'email': 'Unknown', 'username': 'Unknown'})
 
             # 만료 여부 확인
             expires_at_str = session_dict.get("expires_at", "")
@@ -1206,8 +1239,8 @@ async def list_all_sessions(
             sessions.append(SessionInfo(
                 session_id=session_dict.get("session_id", ""),
                 user_id=user_id or "",
-                user_email=user_email or "",
-                username=username or "",
+                user_email=user_info['email'] or "",
+                username=user_info['username'] or "",
                 created_at=session_dict.get("created_at", ""),
                 expires_at=expires_at_str,
                 ip_address=session_dict.get("ip_address", ""),
