@@ -806,13 +806,24 @@ async def list_documents(
                 # Fall back to zero counts
                 chunk_counts = {filename: 0 for filename in filenames}
 
+        # Batch fetch document group IDs (avoids N+1 queries)
+        doc_group_map = {}
+        if cache_manager:
+            pipe = cache_manager.redis.pipeline()
+            for filename in filenames:
+                pipe.get(f'doc:group:{filename}')
+
+            group_results = pipe.execute()
+            for filename, group_id in zip(filenames, group_results):
+                if group_id:
+                    doc_group_map[filename] = group_id.decode('utf-8') if isinstance(group_id, bytes) else group_id
+
         # Build document list with pre-fetched chunk counts
         documents = []
         for pdf_file in all_files:
             # Filter by organization: check if document's group belongs to user's org
-            doc_group_id = cache_manager.redis.get(f'doc:group:{pdf_file.name}')
+            doc_group_id = doc_group_map.get(pdf_file.name)
             if doc_group_id:
-                doc_group_id = doc_group_id.decode('utf-8')
                 # Skip documents not in user's organization groups
                 if doc_group_id not in org_group_ids:
                     continue
