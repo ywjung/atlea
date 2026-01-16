@@ -10,6 +10,7 @@ from loguru import logger
 
 from ..auth.middleware import require_admin
 from .auth import invalidate_dashboard_cache
+from ..cache_manager import CacheManager
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -838,7 +839,7 @@ async def reset_user_password(
         if session_ids:
             pipe = redis.pipeline()
             for session_id in session_ids:
-                session_id_str = session_id.decode() if isinstance(session_id, bytes) else session_id
+                session_id_str = CacheManager.decode_bytes(session_id)
                 pipe.delete(f"session:{session_id_str}")
             pipe.delete(f"user:sessions:{user_id_str}")
             pipe.execute()
@@ -1172,7 +1173,7 @@ async def list_all_sessions(
         # Pipeline 1: 모든 세션 데이터를 배치로 가져오기 (N+1 쿼리 방지)
         pipe = redis.pipeline()
         for session_key in session_keys:
-            session_key_str = session_key.decode() if isinstance(session_key, bytes) else session_key
+            session_key_str = CacheManager.decode_bytes(session_key)
             pipe.hgetall(session_key_str)
 
         session_data_list = pipe.execute()
@@ -1186,11 +1187,7 @@ async def list_all_sessions(
                 continue
 
             # bytes를 str로 변환
-            session_dict = {}
-            for k, v in session_data.items():
-                key = k.decode() if isinstance(k, bytes) else k
-                value = v.decode() if isinstance(v, bytes) else v
-                session_dict[key] = value
+            session_dict = CacheManager.decode_redis_hash(session_data)
 
             session_dicts.append(session_dict)
             user_id = session_dict.get("user_id")
@@ -1209,12 +1206,10 @@ async def list_all_sessions(
             # 사용자 데이터를 딕셔너리로 변환
             for user_id, user_data in zip(user_ids, user_data_results):
                 if user_data:
-                    user_email_bytes = user_data.get(b'email' if isinstance(list(user_data.keys())[0], bytes) else 'email')
-                    username_bytes = user_data.get(b'username' if isinstance(list(user_data.keys())[0], bytes) else 'username')
-
+                    decoded_user = CacheManager.decode_redis_hash(user_data)
                     user_data_map[user_id] = {
-                        'email': user_email_bytes.decode() if isinstance(user_email_bytes, bytes) else user_email_bytes,
-                        'username': username_bytes.decode() if isinstance(username_bytes, bytes) else username_bytes
+                        'email': decoded_user.get('email', 'Unknown'),
+                        'username': decoded_user.get('username', 'Unknown')
                     }
 
         # 세션 목록 생성
@@ -1296,11 +1291,11 @@ async def revoke_all_sessions(
             pipe = redis.pipeline()
 
             for session_key in session_keys:
-                session_key_str = session_key.decode() if isinstance(session_key, bytes) else session_key
+                session_key_str = CacheManager.decode_bytes(session_key)
                 pipe.delete(session_key_str)
 
             for key in user_session_keys:
-                key_str = key.decode() if isinstance(key, bytes) else key
+                key_str = CacheManager.decode_bytes(key)
                 pipe.delete(key_str)
 
             pipe.execute()
@@ -1421,7 +1416,7 @@ async def revoke_user_sessions(
         if session_ids:
             pipe = redis.pipeline()
             for session_id in session_ids:
-                session_id_str = session_id.decode() if isinstance(session_id, bytes) else session_id
+                session_id_str = CacheManager.decode_bytes(session_id)
                 pipe.delete(f"session:{session_id_str}")
             pipe.delete(f"user:sessions:{user_id}")
             pipe.execute()
