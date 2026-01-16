@@ -119,6 +119,35 @@ class CacheManager:
             logger.error(f"Failed to calculate similarity: {e}")
             return 0.0
 
+    def safe_scan_keys(self, pattern: str, count: int = 100) -> List[bytes]:
+        """
+        Safely scan Redis keys using SCAN instead of blocking KEYS command.
+
+        Args:
+            pattern: Redis key pattern (e.g., "session:*", "chunk:*")
+            count: Number of keys to scan per iteration (default: 100)
+
+        Returns:
+            List of matching keys as bytes
+
+        Note:
+            This method uses SCAN to avoid blocking Redis during key iteration.
+            SCAN is non-blocking and production-safe, unlike KEYS which blocks
+            the entire Redis instance.
+        """
+        try:
+            keys = []
+            cursor = 0
+            while True:
+                cursor, batch = self.redis.scan(cursor, match=pattern, count=count)
+                keys.extend(batch)
+                if cursor == 0:
+                    break
+            return keys
+        except Exception as e:
+            logger.error(f"Failed to scan keys with pattern {pattern}: {e}")
+            return []
+
     def _get_cache_key(self, question_hash: str) -> str:
         """Generate cache key for a question hash."""
         return f"{self.cache_prefix}:question:{question_hash}"

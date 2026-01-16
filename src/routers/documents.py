@@ -2116,7 +2116,8 @@ async def migrate_document_versions(
                 # Get chunk count from Redis if available
                 chunk_count = 0
                 try:
-                    chunk_keys = vector_db.client.keys(f"chunk:{filename}:*")
+                    # Use SCAN instead of KEYS to avoid blocking Redis
+                    chunk_keys = cache_manager.safe_scan_keys(f"chunk:{filename}:*")
                     chunk_count = len(chunk_keys) if chunk_keys else 0
                 except Exception as e:
                     logger.debug(f"Could not get chunk count for {filename}: {e}")

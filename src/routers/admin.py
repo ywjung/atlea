@@ -1149,10 +1149,11 @@ async def list_all_sessions(
     try:
         from datetime import datetime
 
-        redis = request.app.state.cache_manager.redis
+        cache_manager = request.app.state.cache_manager
+        redis = cache_manager.redis
 
-        # 모든 세션 키 가져오기
-        session_keys = redis.keys("session:*")
+        # 모든 세션 키 가져오기 (SCAN 사용 - 블로킹 방지)
+        session_keys = cache_manager.safe_scan_keys("session:*")
 
         sessions = []
         active_count = 0
@@ -1244,10 +1245,11 @@ async def revoke_all_sessions(
         무효화 결과
     """
     try:
-        redis = request.app.state.cache_manager.redis
+        cache_manager = request.app.state.cache_manager
+        redis = cache_manager.redis
 
-        # 모든 세션 키 가져오기
-        session_keys = redis.keys("session:*")
+        # 모든 세션 키 가져오기 (SCAN 사용 - 블로킹 방지)
+        session_keys = cache_manager.safe_scan_keys("session:*")
 
         revoked_count = 0
         for session_key in session_keys:
@@ -1255,8 +1257,8 @@ async def revoke_all_sessions(
             redis.delete(session_key_str)
             revoked_count += 1
 
-        # 모든 user:sessions 세트도 삭제
-        user_session_keys = redis.keys("user:sessions:*")
+        # 모든 user:sessions 세트도 삭제 (SCAN 사용)
+        user_session_keys = cache_manager.safe_scan_keys("user:sessions:*")
         for key in user_session_keys:
             redis.delete(key)
 
