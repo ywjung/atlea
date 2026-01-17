@@ -3,7 +3,7 @@ Brute Force Protection
 IP 기반 및 계정 기반 브루트 포스 공격 방어
 """
 from typing import Optional, Tuple, Dict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from redis import Redis
 from loguru import logger
 
@@ -135,8 +135,8 @@ class BruteForceProtection:
             locked_until_str = locked_until.decode() if isinstance(locked_until, bytes) else locked_until
             locked_until_dt = datetime.fromisoformat(locked_until_str)
 
-            if datetime.utcnow() < locked_until_dt:
-                remaining = int((locked_until_dt - datetime.utcnow()).total_seconds())
+            if datetime.now(timezone.utc).replace(tzinfo=None) < locked_until_dt:
+                remaining = int((locked_until_dt - datetime.now(timezone.utc).replace(tzinfo=None)).total_seconds())
                 return True, remaining
 
         return False, None
@@ -164,7 +164,7 @@ class BruteForceProtection:
         # 1. IP 기반 실패 카운트 (Redis Sorted Set 사용)
         if ip_address and ip_address != "unknown":
             ip_key = f"login_failed_ip:{ip_address}"
-            now = datetime.utcnow().timestamp()
+            now = datetime.now(timezone.utc).timestamp()
 
             # 현재 시간을 score로 사용하여 추가
             self.redis.zadd(ip_key, {email: now})
@@ -199,7 +199,7 @@ class BruteForceProtection:
 
             # 계정 잠금 (5회 이상)
             if account_failures >= self.max_attempts:
-                locked_until = datetime.utcnow() + timedelta(seconds=self.lockout_duration)
+                locked_until = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=self.lockout_duration)
                 self.redis.hset(
                     f"user:{user_id}",
                     "locked_until",
@@ -240,7 +240,7 @@ class BruteForceProtection:
 
         if ip_address and ip_address != "unknown":
             ip_key = f"login_failed_ip:{ip_address}"
-            now = datetime.utcnow().timestamp()
+            now = datetime.now(timezone.utc).timestamp()
             cutoff = now - self.ip_lockout_duration
 
             # 최근 실패 시도
@@ -269,7 +269,7 @@ class BruteForceProtection:
             # IP 차단 키 정리
             cursor = 0
             pattern = "login_failed_ip:*"
-            now = datetime.utcnow().timestamp()
+            now = datetime.now(timezone.utc).timestamp()
             cutoff = now - (self.ip_lockout_duration * 2)  # 2배 안전 마진
 
             while True:

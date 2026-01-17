@@ -4,7 +4,7 @@ WebSocket 기반 실시간 보안 알림 시스템
 중요한 보안 이벤트를 관리자에게 즉시 알림
 """
 from typing import Set, Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import WebSocket
 from loguru import logger
 import json
@@ -92,7 +92,7 @@ class AlertManager:
         await self.send_to_client(websocket, {
             "type": "connection",
             "message": "실시간 알림 연결됨",
-            "timestamp": datetime.utcnow().isoformat() + 'Z',
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "stats": self.stats
         })
 
@@ -148,7 +148,7 @@ class AlertManager:
             "type": "security_alert",
             "level": alert_level,
             "event_type": event_type,
-            "timestamp": event_data.get("timestamp", datetime.utcnow().isoformat() + 'Z'),
+            "timestamp": event_data.get("timestamp", datetime.now(timezone.utc).isoformat()),
             "user_id": event_data.get("user_id", "unknown"),
             "ip_address": event_data.get("ip_address", "unknown"),
             "message": event_data.get("message", ""),
@@ -178,7 +178,7 @@ class AlertManager:
         """현재 알림 통계 전송"""
         stats_data = {
             "type": "stats_update",
-            "timestamp": datetime.utcnow().isoformat() + 'Z',
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "stats": self.stats
         }
         await self.broadcast(stats_data)

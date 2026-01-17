@@ -8,7 +8,7 @@ import hmac
 import hashlib
 import json
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Any
 import httpx
 from loguru import logger
@@ -48,7 +48,7 @@ class WebhookService:
             생성된 웹훅 객체
         """
         webhook_id = str(uuid.uuid4())
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         webhook = Webhook(
             webhook_id=webhook_id,
@@ -187,7 +187,7 @@ class WebhookService:
         if webhook_data.timeout_seconds is not None:
             update_data["timeout_seconds"] = str(webhook_data.timeout_seconds)
 
-        update_data["updated_at"] = datetime.utcnow().isoformat()
+        update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
 
         if update_data:
             self.redis.hset(f"webhook:{webhook_id}", mapping=update_data)
@@ -258,7 +258,7 @@ class WebhookService:
             전송 기록
         """
         delivery_id = str(uuid.uuid4())
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         delivery = WebhookDelivery(
             delivery_id=delivery_id,
@@ -300,7 +300,7 @@ class WebhookService:
             delivery.status = "success" if response.status_code < 400 else "failed"
             delivery.response_status = response.status_code
             delivery.response_body = response.text[:500]  # 처음 500자만 저장
-            delivery.delivered_at = datetime.utcnow()
+            delivery.delivered_at = datetime.now(timezone.utc)
 
             if delivery.status == "success":
                 logger.info(
@@ -317,13 +317,13 @@ class WebhookService:
         except httpx.TimeoutException:
             delivery.status = "failed"
             delivery.error_message = "Request timeout"
-            delivery.delivered_at = datetime.utcnow()
+            delivery.delivered_at = datetime.now(timezone.utc)
             logger.error(f"Webhook delivery timeout: {delivery_id} to {webhook.url}")
 
         except Exception as e:
             delivery.status = "failed"
             delivery.error_message = str(e)[:200]
-            delivery.delivered_at = datetime.utcnow()
+            delivery.delivered_at = datetime.now(timezone.utc)
             logger.error(f"Webhook delivery error: {delivery_id} to {webhook.url} - {e}")
 
         # 전송 기록 저장
@@ -466,7 +466,7 @@ class WebhookService:
         # 테스트 페이로드 생성
         test_payload = {
             "event_type": event_type.value,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "test": True,
             "data": {
                 "message": "This is a test webhook delivery",

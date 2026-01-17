@@ -10,7 +10,7 @@ import hashlib
 import asyncio
 from pathlib import Path
 from typing import Optional, List
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI, HTTPException, UploadFile, File, Request, Response, Depends, BackgroundTasks, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
@@ -225,21 +225,21 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 "frame-ancestors 'none';"
             )
         else:
-            # Stricter CSP for main application
+            # Stricter CSP for main application (removed unsafe-eval for security)
             response.headers["Content-Security-Policy"] = (
                 "default-src 'self'; "
-                "script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
+                "script-src 'self' 'unsafe-inline' blob: https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
                 "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
                 "img-src 'self' data:; "
                 "font-src 'self' https://cdn.jsdelivr.net; "
-                "connect-src 'self' https://cdn.jsdelivr.net; "
+                "connect-src 'self' https://cdn.jsdelivr.net wss: ws:; "
                 "worker-src 'self' blob:; "
                 "frame-ancestors 'none';"
             )
 
-        # HSTS only for HTTPS connections (uncomment in production with HTTPS)
-        # if request.url.scheme == "https":
-        #     response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        # HSTS for HTTPS connections (enabled for production security)
+        if request.url.scheme == "https":
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
 
         return response
 
@@ -375,7 +375,7 @@ async def websocket_alerts(websocket: WebSocket):
                 if data == "ping":
                     await websocket.send_json({
                         "type": "pong",
-                        "timestamp": datetime.utcnow().isoformat() + 'Z'
+                        "timestamp": datetime.now(timezone.utc).isoformat()
                     })
                 # 통계 요청
                 elif data == "get_stats":
@@ -1173,7 +1173,7 @@ async def status():
                     "needs_reindex": change_summary["needs_reindex"],
                     "total_changes": change_summary["total_changes"]
                 }
-            except:
+            except Exception:
                 pass
 
         # System is ready if documents are indexed (LLM loads on first use)
@@ -1721,7 +1721,7 @@ async def convert_to_hwpx(
                     filename_part = parts[1].strip('"').strip("'")
                     try:
                         filename = urllib.parse.unquote(filename_part)
-                    except:
+                    except Exception:
                         pass
 
             if not filename.endswith(".hwpx"):
@@ -1828,7 +1828,7 @@ async def health_check():
 
         return {
             "status": "healthy" if is_healthy else "unhealthy",
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "redis": {
                 "healthy": redis_healthy,
                 "info": redis_info
@@ -1874,7 +1874,7 @@ async def metrics():
                 "used_memory": info.get("used_memory", 0),
                 "total_commands": info.get("total_commands_processed", 0)
             }
-        except:
+        except Exception:
             pass
 
         # System metrics

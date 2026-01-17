@@ -1154,7 +1154,7 @@ async def list_all_sessions(
         전체 세션 목록 및 통계
     """
     try:
-        from datetime import datetime
+        from datetime import datetime, timezone
 
         cache_manager = request.app.state.cache_manager
         redis = cache_manager.redis
@@ -1228,8 +1228,8 @@ async def list_all_sessions(
             if expires_at_str:
                 try:
                     expires_at = datetime.fromisoformat(expires_at_str.replace('Z', '+00:00'))
-                    is_expired = expires_at < datetime.utcnow()
-                except:
+                    is_expired = expires_at < datetime.now(timezone.utc)
+                except Exception:
                     pass
 
             if is_expired:

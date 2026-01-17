@@ -5,7 +5,8 @@ Embedding Module - KURE-v1 (Korean Universal Representation Embeddings) with opt
 import os
 import torch
 import hashlib
-from typing import List, Union, Dict
+from collections import OrderedDict
+from typing import List, Union, Optional
 from functools import lru_cache
 from loguru import logger
 from dotenv import load_dotenv
@@ -38,7 +39,7 @@ class EmbeddingModel:
         self.model_name = model_name
         self.model_manager = ModelManager(model_dir)
         self.cache_size = cache_size
-        self._embedding_cache: Dict[str, List[float]] = {}
+        self._embedding_cache: OrderedDict[str, List[float]] = OrderedDict()
 
         # Download model if needed
         logger.info("Initializing embedding model...")
@@ -74,19 +75,29 @@ class EmbeddingModel:
         """Generate cache key for text"""
         return hashlib.md5(text.encode()).hexdigest()
 
-    def _get_from_cache(self, text: str) -> List[float]:
-        """Get embedding from cache"""
+    def _get_from_cache(self, text: str) -> Optional[List[float]]:
+        """Get embedding from cache with LRU access tracking"""
         key = self._get_cache_key(text)
-        return self._embedding_cache.get(key)
+        if key in self._embedding_cache:
+            # Move to end for LRU (most recently used)
+            self._embedding_cache.move_to_end(key)
+            return self._embedding_cache[key]
+        return None
 
     def _add_to_cache(self, text: str, embedding: List[float]):
-        """Add embedding to cache with LRU eviction"""
-        if len(self._embedding_cache) >= self.cache_size:
-            # Simple FIFO eviction (LRU would need OrderedDict)
-            first_key = next(iter(self._embedding_cache))
-            del self._embedding_cache[first_key]
-
+        """Add embedding to cache with proper LRU eviction"""
         key = self._get_cache_key(text)
+
+        # If key exists, update and move to end
+        if key in self._embedding_cache:
+            self._embedding_cache[key] = embedding
+            self._embedding_cache.move_to_end(key)
+            return
+
+        # Evict least recently used (first item) if cache is full
+        if len(self._embedding_cache) >= self.cache_size:
+            self._embedding_cache.popitem(last=False)
+
         self._embedding_cache[key] = embedding
 
     def encode(

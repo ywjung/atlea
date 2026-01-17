@@ -4,7 +4,7 @@ Core service for user authentication, session management, and admin operations.
 """
 
 from typing import Optional, List, Dict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from redis import Redis
 from loguru import logger
 import uuid
@@ -69,7 +69,7 @@ class AuthService:
             user_id=user_id,
             email=user_data.email,
             username=user_data.username,
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
             is_active=True,
             role="user"
         )
@@ -147,6 +147,63 @@ class AuthService:
 
         return User(**user_dict)
 
+    async def get_users_by_ids(self, user_ids: list) -> dict:
+        """여러 사용자 ID로 배치 조회 (Pipeline 사용)
+
+        Args:
+            user_ids: 사용자 ID 목록
+
+        Returns:
+            {user_id: User} 딕셔너리 (없는 사용자는 제외)
+        """
+        if not user_ids:
+            return {}
+
+        # Pipeline으로 모든 사용자 데이터 일괄 조회
+        pipe = self.redis.pipeline()
+        for user_id in user_ids:
+            pipe.hgetall(f"user:{user_id}")
+        results = pipe.execute()
+
+        users = {}
+        for user_id, user_data in zip(user_ids, results):
+            if not user_data:
+                continue
+
+            # bytes를 string으로 변환
+            user_dict = {}
+            for key, value in user_data.items():
+                key_str = key.decode() if isinstance(key, bytes) else key
+                value_str = value.decode() if isinstance(value, bytes) else value
+                user_dict[key_str] = value_str
+
+            # datetime 필드 처리
+            if user_dict.get('created_at') and user_dict['created_at']:
+                user_dict['created_at'] = datetime.fromisoformat(user_dict['created_at'].replace('Z', '+00:00'))
+            if user_dict.get('last_login') and user_dict['last_login']:
+                user_dict['last_login'] = datetime.fromisoformat(user_dict['last_login'].replace('Z', '+00:00'))
+            else:
+                user_dict['last_login'] = None
+            if user_dict.get('locked_until') and user_dict['locked_until']:
+                user_dict['locked_until'] = datetime.fromisoformat(user_dict['locked_until'].replace('Z', '+00:00'))
+            else:
+                user_dict['locked_until'] = None
+
+            # boolean 필드 처리
+            if 'is_active' in user_dict:
+                user_dict['is_active'] = user_dict['is_active'].lower() in ('true', '1', 'yes')
+
+            # integer 필드 처리
+            if 'failed_login_attempts' in user_dict:
+                user_dict['failed_login_attempts'] = int(user_dict['failed_login_attempts'])
+
+            try:
+                users[user_id] = User(**user_dict)
+            except Exception:
+                continue
+
+        return users
+
     def record_login_history(
         self, user_id: str, email: str, ip_address: Optional[str],
         status: str, username: Optional[str] = None,
@@ -165,9 +222,9 @@ class AuthService:
             failure_reason: 실패 사유
         """
         import json
-        from datetime import datetime
+        from datetime import datetime, timezone
 
-        timestamp = datetime.utcnow()
+        timestamp = datetime.now(timezone.utc)
         score = timestamp.timestamp()
 
         history_entry = {
@@ -351,7 +408,7 @@ class AuthService:
             if key_str in ['created_at', 'last_login', 'locked_until']:
                 try:
                     user_dict[key_str] = datetime.fromisoformat(value_str) if value_str and value_str != 'None' else None
-                except:
+                except Exception:
                     user_dict[key_str] = None
             elif key_str == 'is_active':
                 user_dict[key_str] = value_str.lower() == 'true'
@@ -363,7 +420,7 @@ class AuthService:
         user = User(**user_dict)
 
         # 마지막 로그인 시간 업데이트
-        user.last_login = datetime.utcnow()
+        user.last_login = datetime.now(timezone.utc)
         self.redis.hset(f"user:{user_id}", "last_login", user.last_login.isoformat())
 
         # 세션 생성
@@ -371,8 +428,8 @@ class AuthService:
         session = Session(
             session_id=session_id,
             user_id=user_id,
-            created_at=datetime.utcnow(),
-            expires_at=datetime.utcnow() + timedelta(days=30),
+            created_at=datetime.now(timezone.utc),
+            expires_at=datetime.now(timezone.utc) + timedelta(days=30),
             ip_address=ip_address,
             user_agent=user_agent
         )
@@ -495,7 +552,7 @@ class AuthService:
             if key_str in ['created_at', 'last_login', 'locked_until']:
                 try:
                     user_dict[key_str] = datetime.fromisoformat(value_str) if value_str and value_str != 'None' else None
-                except:
+                except Exception:
                     user_dict[key_str] = None
             elif key_str == 'is_active':
                 user_dict[key_str] = value_str.lower() == 'true'
@@ -627,7 +684,7 @@ class AuthService:
             if key_str in ['created_at', 'last_login', 'locked_until']:
                 try:
                     user_dict[key_str] = datetime.fromisoformat(value_str) if value_str and value_str != 'None' else None
-                except:
+                except Exception:
                     user_dict[key_str] = None
             elif key_str == 'is_active':
                 user_dict[key_str] = value_str.lower() == 'true'
@@ -716,8 +773,8 @@ class AuthService:
                     if key_str in ['created_at', 'expires_at']:
                         try:
                             session_dict[key_str] = datetime.fromisoformat(value_str)
-                        except:
-                            session_dict[key_str] = datetime.utcnow()
+                        except Exception:
+                            session_dict[key_str] = datetime.now(timezone.utc)
                     else:
                         session_dict[key_str] = value_str
 
@@ -792,113 +849,139 @@ class AuthService:
     # ============= Admin Methods =============
 
     async def get_system_stats(self) -> dict:
-        """시스템 통계 조회
+        """시스템 통계 조회 (Redis Pipeline 최적화)
 
         Returns:
             시스템 통계
         """
-        total_users = self.redis.scard("users:all")
+        # Helper function for bytes decoding
+        def decode_value(val):
+            return val.decode('utf-8') if isinstance(val, bytes) else val
 
-        # 활성 사용자 수, 관리자 수, 최근 로그인 계산
+        def decode_dict(d):
+            if not d:
+                return {}
+            return {decode_value(k): decode_value(v) for k, v in d.items()}
+
+        def parse_datetime(dt_str):
+            """Parse datetime string handling Z suffix, returns naive datetime"""
+            if not dt_str:
+                return None
+            try:
+                if dt_str.endswith('Z'):
+                    dt = datetime.fromisoformat(dt_str.replace('Z', '+00:00'))
+                else:
+                    dt = datetime.fromisoformat(dt_str)
+                # Always return naive datetime for consistent comparison
+                if dt.tzinfo is not None:
+                    return dt.replace(tzinfo=None)
+                return dt
+            except (ValueError, AttributeError, TypeError):
+                return None
+
+        total_users = self.redis.scard("users:all")
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        twenty_four_hours_ago = now - timedelta(hours=24)
+
+        # 1. Get all user IDs
+        all_user_ids = self.redis.smembers("users:all")
+        user_id_list = [decode_value(uid) for uid in all_user_ids]
+
+        if not user_id_list:
+            return {
+                "total_users": 0,
+                "active_users": 0,
+                "inactive_users": 0,
+                "admin_users": 0,
+                "active_sessions": 0,
+                "recent_logins": [],
+                "recent_logins_24h": 0,
+                "security_events": 0,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+
+        # 2. Batch fetch all user data using Pipeline (N+1 → 1 query)
+        pipe = self.redis.pipeline()
+        for user_id in user_id_list:
+            pipe.hgetall(f"user:{user_id}")
+        user_data_list = pipe.execute()
+
+        # Process user data
         active_users = 0
         admin_users = 0
         recent_logins = []
         recent_logins_24h = 0
 
-        # 24시간 전 시각 계산
-        now = datetime.utcnow()
-        twenty_four_hours_ago = now - timedelta(hours=24)
+        for user_id, user_data_raw in zip(user_id_list, user_data_list):
+            if not user_data_raw:
+                continue
 
-        all_user_ids = self.redis.smembers("users:all")
-        for user_id in all_user_ids:
-            user_id_str = user_id.decode() if isinstance(user_id, bytes) else user_id
-            user_data = self.redis.hgetall(f"user:{user_id_str}")
-            if user_data:
-                # is_active 확인
-                is_active = user_data.get(b'is_active' if isinstance(list(user_data.keys())[0], bytes) else 'is_active')
-                is_active_str = is_active.decode() if isinstance(is_active, bytes) else str(is_active)
-                if is_active_str.lower() == 'true':
-                    active_users += 1
+            user_data = decode_dict(user_data_raw)
 
-                # role 확인
-                role = user_data.get(b'role' if isinstance(list(user_data.keys())[0], bytes) else 'role')
-                role_str = role.decode() if isinstance(role, bytes) else str(role) if role else 'user'
-                if role_str == 'admin':
-                    admin_users += 1
+            # Count active users
+            if user_data.get('is_active', '').lower() == 'true':
+                active_users += 1
 
-                # 최근 로그인 정보 수집
-                last_login = user_data.get(b'last_login' if isinstance(list(user_data.keys())[0], bytes) else 'last_login')
-                if last_login:
-                    last_login_str = last_login.decode() if isinstance(last_login, bytes) else str(last_login)
-                    email = user_data.get(b'email' if isinstance(list(user_data.keys())[0], bytes) else 'email')
-                    email_str = email.decode() if isinstance(email, bytes) else str(email)
-                    username = user_data.get(b'username' if isinstance(list(user_data.keys())[0], bytes) else 'username')
-                    username_str = username.decode() if isinstance(username, bytes) else str(username)
+            # Count admin users
+            role = user_data.get('role', 'user')
+            if role == 'admin':
+                admin_users += 1
 
-                    # 24시간 내 로그인 체크
-                    try:
-                        # Handle both formats: with 'Z' suffix and without
-                        if last_login_str.endswith('Z'):
-                            last_login_dt = datetime.fromisoformat(last_login_str.replace('Z', '+00:00'))
-                            # Remove timezone info to compare with naive datetime
-                            last_login_dt = last_login_dt.replace(tzinfo=None)
-                        else:
-                            # Assume UTC if no timezone info
-                            last_login_dt = datetime.fromisoformat(last_login_str)
+            # Collect recent login info
+            last_login_str = user_data.get('last_login')
+            if last_login_str:
+                last_login_dt = parse_datetime(last_login_str)
+                if last_login_dt and last_login_dt > twenty_four_hours_ago:
+                    recent_logins_24h += 1
 
-                        if last_login_dt > twenty_four_hours_ago:
-                            recent_logins_24h += 1
-                    except (ValueError, AttributeError, TypeError) as e:
-                        # Skip invalid timestamps
-                        pass
+                recent_logins.append({
+                    "user_id": user_id,
+                    "email": user_data.get('email', ''),
+                    "username": user_data.get('username', ''),
+                    "last_login": last_login_str,
+                    "role": role
+                })
 
-                    recent_logins.append({
-                        "user_id": user_id_str,
-                        "email": email_str,
-                        "username": username_str,
-                        "last_login": last_login_str,
-                        "role": role_str
-                    })
-
-        # 최근 로그인 정렬 (최신순)
+        # Sort and limit recent logins
         recent_logins.sort(key=lambda x: x.get('last_login', ''), reverse=True)
-        recent_logins = recent_logins[:10]  # 최근 10개만
+        recent_logins = recent_logins[:10]
 
-        # 활성 세션 수 계산 (만료된 세션 제외)
+        # 3. Batch fetch all session IDs using Pipeline (N+1 → 1 query)
+        pipe = self.redis.pipeline()
+        for user_id in user_id_list:
+            pipe.smembers(f"user:sessions:{user_id}")
+        session_ids_list = pipe.execute()
+
+        # Collect all session IDs
+        all_session_ids = []
+        for session_ids_raw in session_ids_list:
+            if session_ids_raw:
+                for sid in session_ids_raw:
+                    all_session_ids.append(decode_value(sid))
+
+        # 4. Batch fetch all session data using Pipeline (N*M → 1 query)
         active_sessions = 0
-        for user_id in all_user_ids:
-            user_id_str = user_id.decode() if isinstance(user_id, bytes) else user_id
-            session_ids = self.redis.smembers(f"user:sessions:{user_id_str}")
+        if all_session_ids:
+            pipe = self.redis.pipeline()
+            for session_id in all_session_ids:
+                pipe.hgetall(f"session:{session_id}")
+            session_data_list = pipe.execute()
 
-            # 각 세션의 만료 여부 확인
-            for session_id in session_ids:
-                session_id_str = session_id.decode() if isinstance(session_id, bytes) else session_id
-                session_data = self.redis.hgetall(f"session:{session_id_str}")
+            for session_data_raw in session_data_list:
+                if not session_data_raw:
+                    continue
 
-                if session_data:
-                    # 만료 시간 확인
-                    expires_at = session_data.get(b'expires_at' if isinstance(list(session_data.keys())[0], bytes) else 'expires_at')
-                    if expires_at:
-                        expires_at_str = expires_at.decode() if isinstance(expires_at, bytes) else expires_at
-                        try:
-                            # ISO 형식 파싱 (Z 접미사 처리)
-                            if expires_at_str.endswith('Z'):
-                                expires_at_dt = datetime.fromisoformat(expires_at_str.replace('Z', '+00:00'))
-                                expires_at_dt = expires_at_dt.replace(tzinfo=None)
-                            else:
-                                expires_at_dt = datetime.fromisoformat(expires_at_str)
+                session_data = decode_dict(session_data_raw)
+                expires_at_str = session_data.get('expires_at')
+                expires_at_dt = parse_datetime(expires_at_str)
 
-                            # 만료되지 않은 세션만 카운트
-                            if expires_at_dt >= now:
-                                active_sessions += 1
-                        except (ValueError, AttributeError):
-                            # 파싱 실패 시 무시
-                            pass
+                if expires_at_dt and expires_at_dt >= now:
+                    active_sessions += 1
 
-        # 보안 이벤트 수 계산 (Redis ZSET에서 직접 조회)
+        # Security events count
         try:
             security_events = self.redis.zcard("security_logs:all") or 0
-        except:
+        except Exception:
             security_events = 0
 
         return {
@@ -910,7 +993,7 @@ class AuthService:
             "recent_logins": recent_logins,
             "recent_logins_24h": recent_logins_24h,
             "security_events": security_events,
-            "timestamp": datetime.utcnow().isoformat() + 'Z'
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
 
     async def get_all_users(self, page: int = 1, page_size: int = 50) -> dict:
@@ -1004,7 +1087,7 @@ class AuthService:
             if key_str in ['created_at', 'last_login', 'locked_until']:
                 try:
                     user_dict[key_str] = datetime.fromisoformat(value_str) if value_str and value_str != 'None' else None
-                except:
+                except Exception:
                     user_dict[key_str] = None
             elif key_str == 'is_active':
                 user_dict[key_str] = value_str.lower() == 'true'
@@ -1066,7 +1149,7 @@ class AuthService:
             if key_str in ['created_at', 'last_login', 'locked_until']:
                 try:
                     user_dict[key_str] = datetime.fromisoformat(value_str) if value_str and value_str != 'None' else None
-                except:
+                except Exception:
                     user_dict[key_str] = None
             elif key_str == 'is_active':
                 user_dict[key_str] = value_str.lower() == 'true'
@@ -1170,7 +1253,7 @@ class AuthService:
             try:
                 end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
                 max_score = end_dt.timestamp()
-            except:
+            except Exception:
                 max_score = time.time()
         else:
             max_score = time.time()
@@ -1179,7 +1262,7 @@ class AuthService:
             try:
                 start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
                 min_score = start_dt.timestamp()
-            except:
+            except Exception:
                 min_score = max_score - (24 * 60 * 60)  # 24시간 전
         else:
             min_score = max_score - (24 * 60 * 60)  # 기본: 24시간 전
@@ -1205,7 +1288,7 @@ class AuthService:
                         continue
 
                     parsed_logs.append(log_dict)
-                except:
+                except Exception:
                     continue
 
             # 페이지네이션
@@ -1268,7 +1351,7 @@ class AuthService:
             try:
                 end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
                 max_score = end_dt.timestamp()
-            except:
+            except Exception:
                 max_score = time.time()
         else:
             max_score = time.time()
@@ -1277,7 +1360,7 @@ class AuthService:
             try:
                 start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
                 min_score = start_dt.timestamp()
-            except:
+            except Exception:
                 min_score = max_score - (7 * 24 * 60 * 60)  # 7일 전
         else:
             min_score = max_score - (7 * 24 * 60 * 60)  # 기본: 7일 전
@@ -1303,7 +1386,7 @@ class AuthService:
                         continue
 
                     parsed_history.append(history_dict)
-                except:
+                except Exception:
                     continue
 
             # 페이지네이션

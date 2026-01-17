@@ -138,6 +138,26 @@ class PasswordResetOTP(BaseModel):
         return v
 
 
+class PasswordResetOTPConfirm(BaseModel):
+    """OTP 검증 후 토큰 기반 비밀번호 재설정"""
+    reset_token: str = Field(..., min_length=20, max_length=128, description="재설정 토큰")
+    new_password: str = Field(..., min_length=8, max_length=128, description="새 비밀번호")
+
+    @field_validator('reset_token')
+    @classmethod
+    def validate_reset_token(cls, v: str) -> str:
+        """토큰 형식 검증 - 영문, 숫자, 하이픈, 언더스코어만 허용"""
+        if not re.match(r'^[A-Za-z0-9_-]+$', v):
+            raise ValueError("유효하지 않은 토큰 형식입니다")
+        return v
+
+    @field_validator('new_password')
+    @classmethod
+    def validate_new_password(cls, v: str) -> str:
+        """비밀번호 강도 검증"""
+        return validate_password_strength(v)
+
+
 class ProfileUpdate(BaseModel):
     """프로필 업데이트"""
     username: Optional[str] = Field(None, min_length=2, max_length=50)

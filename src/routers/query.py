@@ -165,6 +165,84 @@ class QueryRequest(BaseModel):
             raise ValueError("max_tokens는 1-8192 사이의 값이어야 합니다.")
         return v
 
+    @validator('document_ids')
+    def validate_document_ids(cls, v):
+        """Validate document_ids list"""
+        if v is None:
+            return v
+        if not isinstance(v, list):
+            raise ValueError("document_ids는 리스트여야 합니다.")
+        if len(v) > 100:
+            raise ValueError("document_ids는 최대 100개까지 지정할 수 있습니다.")
+        for doc_id in v:
+            if not isinstance(doc_id, str) or len(doc_id) > 500:
+                raise ValueError("document_id는 500자 이하의 문자열이어야 합니다.")
+            # Prevent path traversal
+            if '..' in doc_id or doc_id.startswith('/'):
+                raise ValueError("잘못된 document_id 형식입니다.")
+        return v
+
+    @validator('group_ids')
+    def validate_group_ids(cls, v):
+        """Validate group_ids list"""
+        if v is None:
+            return v
+        if not isinstance(v, list):
+            raise ValueError("group_ids는 리스트여야 합니다.")
+        if len(v) > 50:
+            raise ValueError("group_ids는 최대 50개까지 지정할 수 있습니다.")
+        for group_id in v:
+            if not isinstance(group_id, str) or len(group_id) > 100:
+                raise ValueError("group_id는 100자 이하의 문자열이어야 합니다.")
+            # Only allow alphanumeric, dash, underscore
+            if not re.match(r'^[a-zA-Z0-9_-]+$', group_id):
+                raise ValueError("group_id는 영문, 숫자, 대시, 언더스코어만 허용됩니다.")
+        return v
+
+    @validator('system_prompt')
+    def validate_system_prompt(cls, v):
+        """Validate system_prompt to prevent prompt injection"""
+        if v is None:
+            return v
+        if len(v) > 5000:
+            raise ValueError("system_prompt는 최대 5000자까지 지정할 수 있습니다.")
+        # Remove potentially harmful patterns
+        v = re.sub(r'(?i)ignore\s+(all\s+)?(previous|above|prior)\s+(instructions?|prompts?)', '', v)
+        v = re.sub(r'(?i)disregard\s+(all\s+)?(previous|above|prior)', '', v)
+        return v.strip()
+
+    @validator('history')
+    def validate_history(cls, v):
+        """Validate conversation history"""
+        if v is None:
+            return v
+        if not isinstance(v, list):
+            raise ValueError("history는 리스트여야 합니다.")
+        if len(v) > 50:
+            raise ValueError("history는 최대 50개까지 지정할 수 있습니다.")
+        for item in v:
+            if not isinstance(item, dict):
+                raise ValueError("history 항목은 딕셔너리여야 합니다.")
+            if 'role' not in item or 'content' not in item:
+                raise ValueError("history 항목에는 role과 content가 필요합니다.")
+            if item['role'] not in ['user', 'assistant', 'system']:
+                raise ValueError("role은 user, assistant, system 중 하나여야 합니다.")
+            if len(str(item.get('content', ''))) > 10000:
+                raise ValueError("history content는 최대 10000자까지 지정할 수 있습니다.")
+        return v
+
+    @validator('session_id')
+    def validate_session_id(cls, v):
+        """Validate session_id format"""
+        if v is None:
+            return v
+        if len(v) > 100:
+            raise ValueError("session_id는 최대 100자까지 지정할 수 있습니다.")
+        # Only allow safe characters
+        if not re.match(r'^[a-zA-Z0-9_-]+$', v):
+            raise ValueError("session_id는 영문, 숫자, 대시, 언더스코어만 허용됩니다.")
+        return v
+
 
 class QueryResponse(BaseModel):
     answer: str

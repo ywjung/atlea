@@ -5,7 +5,7 @@
 """
 
 from typing import Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 from loguru import logger
 import json
 import asyncio
@@ -132,7 +132,7 @@ class SecurityLogger:
 
         # 보안 이벤트 데이터 구성
         event_data = {
-            "timestamp": datetime.utcnow().isoformat() + 'Z',  # UTC with Z suffix for proper timezone handling
+            "timestamp": datetime.now(timezone.utc).isoformat(),  # UTC timezone-aware datetime
             "event_type": event_type,
             "level": level,
             "user_id": user_id or "anonymous",

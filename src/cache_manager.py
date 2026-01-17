@@ -516,17 +516,25 @@ class CacheManager:
         try:
             cached_hashes = self.redis.smembers(self.index_key)
 
-            # Count valid entries (not expired)
+            # Count valid entries using Pipeline (O(N) → O(1) round trips)
             valid_count = 0
-            for cached_hash in cached_hashes:
-                cache_key = self._get_cache_key(cached_hash.decode() if isinstance(cached_hash, bytes) else cached_hash)
-                if self.redis.exists(cache_key):
-                    valid_count += 1
+            if cached_hashes:
+                hash_list = [h.decode() if isinstance(h, bytes) else h for h in cached_hashes]
+                cache_keys = [self._get_cache_key(h) for h in hash_list]
 
-            # Get query statistics
-            total_queries = self.redis.get(self.stats_queries_key)
-            cache_hits = self.redis.get(self.stats_hits_key)
-            memory_hits = self.redis.get(self.stats_memory_hits_key)
+                # Batch check existence with pipeline
+                pipe = self.redis.pipeline()
+                for key in cache_keys:
+                    pipe.exists(key)
+                exists_results = pipe.execute()
+                valid_count = sum(1 for exists in exists_results if exists)
+
+            # Get query statistics with pipeline (3 queries → 1 round trip)
+            pipe = self.redis.pipeline()
+            pipe.get(self.stats_queries_key)
+            pipe.get(self.stats_hits_key)
+            pipe.get(self.stats_memory_hits_key)
+            total_queries, cache_hits, memory_hits = pipe.execute()
 
             total_queries = int(total_queries) if total_queries else 0
             cache_hits = int(cache_hits) if cache_hits else 0

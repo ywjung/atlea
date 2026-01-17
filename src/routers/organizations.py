@@ -292,13 +292,16 @@ async def get_organization_members(
     members = org_manager.get_members(org_id)
     admins = org_manager.get_org_admins(org_id)
 
-    # 멤버 정보 조회 (간단한 정보만)
+    # 멤버 정보 배치 조회 (Pipeline 사용으로 N+1 쿼리 제거)
     from ..auth.service import AuthService
     auth_service = AuthService(cache_manager.redis)
 
+    # 모든 멤버 정보를 한 번의 Pipeline으로 조회
+    users_dict = await auth_service.get_users_by_ids(list(members))
+
     member_list = []
     for user_id in members:
-        user = await auth_service.get_user_by_id(user_id)
+        user = users_dict.get(user_id)
         if user:
             member_list.append({
                 "user_id": user.user_id,
@@ -551,14 +554,15 @@ async def get_organization_groups(
         if groups:
             logger.info(f"📂 [조직 그룹 목록] {[g['name'] for g in groups[:5]]}{'...' if len(groups) > 5 else ''}")
 
+        # 배치로 모든 그룹의 문서 수와 조직 수를 한 번에 조회 (N+1 쿼리 제거)
+        group_ids = [g['id'] for g in groups]
+        group_counts = group_manager.batch_get_group_counts(group_ids)
+
         # Add document count and organization count for each group
         for group in groups:
-            docs = group_manager.get_group_documents(group['id'])
-            group['document_count'] = len(docs)
-
-            # Get number of organizations this group belongs to
-            group_orgs = group_manager.get_group_organizations(group['id'])
-            group['org_count'] = len(group_orgs)
+            counts = group_counts.get(group['id'], {'document_count': 0, 'org_count': 0})
+            group['document_count'] = counts['document_count']
+            group['org_count'] = counts['org_count']
 
         # Get root group IDs (groups explicitly assigned to this organization as top-level)
         root_group_ids_bytes = cache_manager.redis.smembers(f'org:groups:root:{org_id}')

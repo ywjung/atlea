@@ -182,11 +182,11 @@ async def generate_questions_pool_background():
     """
     try:
         logger.info("📝 Background: Generating question pool for all documents...")
-        start_time = asyncio.get_event_loop().time()
+        start_time = asyncio.get_running_loop().time()
 
         await generate_questions_pool()
 
-        elapsed = asyncio.get_event_loop().time() - start_time
+        elapsed = asyncio.get_running_loop().time() - start_time
         logger.success(f"✅ Question pool ready! Generated {len(suggested_questions_pool)} questions in {elapsed:.1f}s")
     except Exception as e:
         logger.error(f"❌ Background question generation failed: {e}")

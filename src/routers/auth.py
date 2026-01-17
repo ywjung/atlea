@@ -6,13 +6,14 @@ FastAPI router for user registration, login, logout, and user management.
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from pydantic import BaseModel
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 import time
 import secrets
 from loguru import logger
 from ..auth.models import (
     UserCreate, UserLogin, LoginResponse, TokenPair,
-    PasswordReset, PasswordResetConfirm, PasswordResetOTP, ProfileUpdate, PasswordChange, Session,
+    PasswordReset, PasswordResetConfirm, PasswordResetOTP, PasswordResetOTPConfirm,
+    ProfileUpdate, PasswordChange, Session,
     WebhookCreate, WebhookUpdate, Webhook, WebhookEvent, WebhookTestRequest, WebhookDelivery
 )
 from ..auth.service import AuthService
@@ -755,13 +756,13 @@ async def verify_otp_for_reset(
 @router.post("/confirm-password-reset-otp")
 async def confirm_password_reset_otp(
     request: Request,
-    reset_data: dict
+    reset_data: PasswordResetOTPConfirm
 ):
     """OTP 검증 후 비밀번호 재설정 (토큰 기반)
 
     Args:
         request: FastAPI Request
-        reset_data: JSON body with reset_token and new_password
+        reset_data: Pydantic validated body with reset_token and new_password
 
     Returns:
         성공 메시지
@@ -769,18 +770,11 @@ async def confirm_password_reset_otp(
     Raises:
         HTTPException: 토큰 검증 실패 또는 비밀번호 업데이트 실패 시
     """
-    from ..auth.models import validate_password_strength
     from ..auth.utils import hash_password
 
-    # Extract data from JSON body
-    reset_token = reset_data.get("reset_token")
-    new_password = reset_data.get("new_password")
-
-    if not reset_token or not new_password:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="재설정 토큰과 새 비밀번호는 필수입니다"
-        )
+    # Pydantic 모델로 이미 검증됨 - reset_token과 new_password
+    reset_token = reset_data.reset_token
+    new_password = reset_data.new_password
 
     redis = request.app.state.cache_manager.redis
 
@@ -795,16 +789,9 @@ async def confirm_password_reset_otp(
 
         email = email.decode() if isinstance(email, bytes) else email
 
-        # 2. 비밀번호 강도 검증
-        try:
-            validate_password_strength(new_password)
-        except ValueError as e:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=str(e)
-            )
+        # 비밀번호 강도 검증은 Pydantic 모델에서 이미 수행됨
 
-        # 3. 사용자 찾기
+        # 2. 사용자 찾기
         user_id = redis.get(f"user:email:{email}")
         if not user_id:
             raise HTTPException(
@@ -1065,7 +1052,7 @@ async def get_admin_dashboard(
         "users": users,
         "logs": logs,
         "cached": False,
-        "timestamp": datetime.utcnow().isoformat() + 'Z'
+        "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
     # 3. 캐시 저장

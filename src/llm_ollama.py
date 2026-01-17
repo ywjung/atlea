@@ -404,7 +404,7 @@ class OllamaLLM:
                 # Try to read response body if available
                 error_text = e.response.read().decode('utf-8') if hasattr(e.response, 'read') else str(e.response)
                 logger.error(f"  Response: {error_text[:500]}")
-            except:
+            except Exception:
                 logger.error(f"  Response: <unable to read streaming response>")
             raise
         except Exception as e:

@@ -119,7 +119,7 @@ class DocumentService:
                 try:
                     error_detail = response.json()
                     logger.error(f"Error details: {error_detail}")
-                except:
+                except Exception:
                     logger.error(f"Response: {response.text[:200]}")
                 return None
 

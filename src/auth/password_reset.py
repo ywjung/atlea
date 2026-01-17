@@ -4,7 +4,7 @@
 """
 
 from typing import Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from jose import jwt, JWTError
 from redis import Redis
 import os
@@ -30,7 +30,7 @@ def create_password_reset_token(email: str) -> str:
     Returns:
         JWT 재설정 토큰
     """
-    expire = datetime.utcnow() + timedelta(minutes=RESET_TOKEN_EXPIRE_MINUTES)
+    expire = datetime.now(timezone.utc) + timedelta(minutes=RESET_TOKEN_EXPIRE_MINUTES)
     to_encode = {
         "sub": email,
         "exp": expire,

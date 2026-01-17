@@ -4,11 +4,18 @@
 """
 import smtplib
 import os
+import time
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from typing import Optional
 from loguru import logger
 from redis import Redis
+
+
+# SMTP 설정 캐시 (TTL 기반)
+_smtp_settings_cache: dict = {}
+_smtp_settings_cache_time: float = 0
+SMTP_SETTINGS_CACHE_TTL = 300  # 5분 캐시
 
 
 class EmailService:
@@ -216,6 +223,9 @@ def save_smtp_settings(
         redis_client.hset("smtp:settings", mapping=settings)
         logger.info("SMTP 설정이 Redis에 저장되었습니다")
 
+        # 캐시 무효화
+        invalidate_smtp_settings_cache()
+
         # 싱글톤 인스턴스 설정 다시 로드
         global _email_service
         if _email_service:
@@ -227,8 +237,15 @@ def save_smtp_settings(
         return False
 
 
+def invalidate_smtp_settings_cache():
+    """SMTP 설정 캐시 무효화"""
+    global _smtp_settings_cache, _smtp_settings_cache_time
+    _smtp_settings_cache = {}
+    _smtp_settings_cache_time = 0
+
+
 def get_smtp_settings(redis_client: Redis) -> dict:
-    """Redis에서 SMTP 설정 조회
+    """Redis에서 SMTP 설정 조회 (캐시 사용)
 
     Args:
         redis_client: Redis 클라이언트
@@ -236,10 +253,17 @@ def get_smtp_settings(redis_client: Redis) -> dict:
     Returns:
         SMTP 설정 딕셔너리
     """
+    global _smtp_settings_cache, _smtp_settings_cache_time
+
+    # 캐시가 유효하면 캐시된 값 반환
+    current_time = time.time()
+    if _smtp_settings_cache and (current_time - _smtp_settings_cache_time) < SMTP_SETTINGS_CACHE_TTL:
+        return _smtp_settings_cache
+
     try:
         smtp_settings = redis_client.hgetall("smtp:settings")
         if smtp_settings:
-            return {
+            result = {
                 "host": smtp_settings.get(b"host", b"").decode(),
                 "port": int(smtp_settings.get(b"port", b"587").decode()),
                 "username": smtp_settings.get(b"username", b"").decode(),
@@ -250,7 +274,7 @@ def get_smtp_settings(redis_client: Redis) -> dict:
             }
         else:
             # 환경 변수에서 로드
-            return {
+            result = {
                 "host": os.getenv("SMTP_HOST", "smtp.gmail.com"),
                 "port": int(os.getenv("SMTP_PORT", "587")),
                 "username": os.getenv("SMTP_USERNAME", ""),
@@ -259,6 +283,12 @@ def get_smtp_settings(redis_client: Redis) -> dict:
                 "from_name": os.getenv("SMTP_FROM_NAME", "AI Chatbot"),
                 "configured": bool(os.getenv("SMTP_USERNAME"))
             }
+
+        # 캐시 업데이트
+        _smtp_settings_cache = result
+        _smtp_settings_cache_time = current_time
+        return result
+
     except Exception as e:
         logger.error(f"SMTP 설정 조회 실패: {e}")
         return {

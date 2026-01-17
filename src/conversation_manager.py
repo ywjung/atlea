@@ -231,19 +231,29 @@ class ConversationManager:
     def clear_all_sessions(self) -> int:
         """
         Delete all conversation sessions (use with caution)
+        Pipeline 최적화로 모든 세션을 한 번에 삭제
 
         Returns:
             Number of sessions deleted
         """
-        session_ids = self.client.zrange('conversations:list', 0, -1)
+        session_ids_bytes = self.client.zrange('conversations:list', 0, -1)
 
-        count = 0
+        if not session_ids_bytes:
+            logger.info("No conversation sessions to delete")
+            return 0
+
+        session_ids = [sid.decode('utf-8') for sid in session_ids_bytes]
+
+        # 단일 Pipeline으로 모든 세션 삭제 (N+1 쿼리 제거)
+        pipe = self.client.pipeline()
         for session_id in session_ids:
-            session_id = session_id.decode('utf-8')
-            if self.delete_session(session_id):
-                count += 1
+            pipe.delete(f'conversation:{session_id}')
+            pipe.delete(f'conversation:{session_id}:messages')
+            pipe.zrem('conversations:list', session_id)
+        pipe.execute()
 
-        logger.info(f"Deleted {count} conversation sessions")
+        count = len(session_ids)
+        logger.info(f"Deleted {count} conversation sessions (batch)")
         return count
 
     def get_session_count(self) -> int:

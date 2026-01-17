@@ -13,7 +13,7 @@ Admin privileges required for admin-specific endpoints.
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 import logging
 
@@ -140,7 +140,7 @@ async def submit_feedback(
         feedback_key = f"feedback:{feedback.conversation_id}:{feedback.message_id}"
         feedback_data = {
             "type": feedback.feedback_type,
-            "timestamp": datetime.utcnow().isoformat() + 'Z',
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "conversation_id": feedback.conversation_id,
             "message_id": feedback.message_id
         }
@@ -153,7 +153,7 @@ async def submit_feedback(
         )
 
         # 통계용 ZSET에 추가 (타임스탬프를 스코어로 사용)
-        timestamp_score = datetime.utcnow().timestamp()
+        timestamp_score = datetime.now(timezone.utc).timestamp()
         stats_key = f"feedback:stats:{feedback.feedback_type}"
         redis.zadd(stats_key, {feedback_key: timestamp_score})
 
@@ -258,7 +258,7 @@ async def get_feedback_stats(
         positive_ratio = (positive_count / total_count * 100) if total_count > 0 else 0
 
         # 최근 7일 피드백 조회
-        week_ago = (datetime.utcnow().timestamp() - 7 * 24 * 60 * 60)
+        week_ago = (datetime.now(timezone.utc).timestamp() - 7 * 24 * 60 * 60)
         recent_positive = redis.zcount("feedback:stats:positive", week_ago, "+inf")
         recent_negative = redis.zcount("feedback:stats:negative", week_ago, "+inf")
 

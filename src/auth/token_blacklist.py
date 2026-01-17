@@ -5,7 +5,7 @@ Redis 기반 토큰 무효화 시스템.
 """
 
 from typing import Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from redis import Redis
 from jose import jwt, JWTError
 from loguru import logger
@@ -68,8 +68,8 @@ class TokenBlacklist:
                 return None
 
             # 만료까지 남은 시간 계산
-            exp_datetime = datetime.fromtimestamp(exp)
-            now = datetime.utcnow()
+            exp_datetime = datetime.fromtimestamp(exp, tz=timezone.utc)
+            now = datetime.now(timezone.utc)
 
             if exp_datetime <= now:
                 # 이미 만료된 토큰
@@ -115,7 +115,7 @@ class TokenBlacklist:
             self.redis.setex(
                 key,
                 ttl,
-                f"{reason}:{datetime.utcnow().isoformat()}"
+                f"{reason}:{datetime.now(timezone.utc).isoformat()}"
             )
 
             # 사용자별 토큰 세트에도 추가 (선택적)
@@ -127,7 +127,7 @@ class TokenBlacklist:
                     self.redis.sadd(user_tokens_key, token)
                     # 사용자 세트도 동일한 TTL 설정
                     self.redis.expire(user_tokens_key, ttl)
-            except:
+            except Exception:
                 pass  # 사용자별 추적 실패해도 블랙리스트는 작동
 
             logger.info(f"Token added to blacklist: reason={reason}, ttl={ttl}s")

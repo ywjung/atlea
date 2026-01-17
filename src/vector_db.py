@@ -271,7 +271,7 @@ class VectorDB:
             try:
                 self.client.ft(index_name).dropindex(delete_documents=True)
                 logger.info(f"Dropped index: {index_name}")
-            except:
+            except Exception:
                 pass  # Index might not exist
 
             logger.success(f"Cleaned up {count} documents from old index '{index_name}'")
@@ -397,6 +397,9 @@ class VectorDB:
             }
 
             pipe.hset(doc_id, mapping=doc_data)
+            # Add to filename index for O(1) lookup by filename
+            filename_index_key = f"doc:files:{index_name}:{filename_hash}"
+            pipe.sadd(filename_index_key, doc_id)
 
         pipe.execute()
 
@@ -556,7 +559,7 @@ class VectorDB:
             # Try RediSearch first (most efficient)
             info = self.client.ft(self.active_index_name).info()
             return int(info.get("num_docs", 0))
-        except:
+        except Exception:
             # Fallback: Count keys manually if RediSearch is unavailable
             try:
                 index_name = self.active_index_name
@@ -663,7 +666,7 @@ class VectorDB:
         """
         try:
             return self.count_documents() > 0
-        except:
+        except Exception:
             return False
 
     def save_index_state(self, metadata: Dict):
@@ -850,10 +853,10 @@ class VectorDB:
 
     def get_chunks_by_filename(self, filename: str) -> List[Dict]:
         """
-        Get all chunks for a specific filename by scanning all documents
+        Get all chunks for a specific filename using filename index for O(1) lookup.
 
-        Due to RedisSearch limitations with special characters in filenames,
-        we scan all doc:* keys and filter by filename in Python.
+        Uses the filename index (doc:files:{index}:{hash}) for direct key lookup
+        instead of scanning all documents. Falls back to scan if index doesn't exist.
 
         Args:
             filename: Name of the file to get chunks for
@@ -862,47 +865,123 @@ class VectorDB:
             List of chunks with their text and metadata, sorted by chunk_index
         """
         try:
-            chunks = []
-            batch_size = 100
-            key_batch = []
+            # Calculate filename hash for index lookup
+            filename_hash = hashlib.md5(filename.encode('utf-8')).hexdigest()
+            filename_index_key = f"doc:files:{self.active_index_name}:{filename_hash}"
 
-            # Scan document keys from active index
-            index_pattern = f"doc:{self.active_index_name}:*"
+            # Try to get doc_ids from filename index (O(1) lookup)
+            doc_ids = self.client.smembers(filename_index_key)
 
-            for key in self.client.scan_iter(match=index_pattern, count=batch_size):
-                key_str = key.decode('utf-8')
+            if doc_ids:
+                # Use index-based retrieval (optimized path)
+                chunks = self._get_chunks_from_index(doc_ids, filename)
+                logger.info(f"Retrieved {len(chunks)} chunks for {filename} (indexed)")
+                return chunks
 
-                # Skip non-document keys (like doc:hash:xxx, doc:group:xxx, doc:version:xxx, doc:counts:xxx, doc:files)
-                parts = key_str.split(':')
-                # Accept both old format (doc:uuid) and new format (doc:index_name:uuid)
-                # Skip hash, group, version, counts, and files keys
-                if parts[0] != 'doc':
-                    continue
-                if len(parts) < 2:
-                    continue
-                if len(parts) >= 2 and parts[1] in ['hash', 'group', 'version', 'counts', 'files']:
-                    continue
-
-                key_batch.append(key)
-
-                # Process batch
-                if len(key_batch) >= batch_size:
-                    self._extract_chunks_from_batch(key_batch, filename, chunks)
-                    key_batch = []
-
-            # Process remaining keys
-            if key_batch:
-                self._extract_chunks_from_batch(key_batch, filename, chunks)
-
-            # Sort chunks by chunk_index
-            chunks.sort(key=lambda x: x['chunk_index'])
-
-            logger.info(f"Retrieved {len(chunks)} chunks for {filename}")
+            # Fallback to scan for backward compatibility (when index doesn't exist)
+            logger.debug(f"Filename index not found for {filename}, falling back to scan")
+            chunks = self._get_chunks_by_scan(filename)
+            logger.info(f"Retrieved {len(chunks)} chunks for {filename} (scanned)")
             return chunks
 
         except Exception as e:
             logger.error(f"Failed to get chunks for {filename}: {e}")
             return []
+
+    def _get_chunks_from_index(self, doc_ids: set, filename: str) -> List[Dict]:
+        """
+        Get chunks using doc_ids from filename index with Pipeline.
+
+        Args:
+            doc_ids: Set of document IDs from filename index
+            filename: Original filename for verification
+
+        Returns:
+            List of chunks sorted by chunk_index
+        """
+        if not doc_ids:
+            return []
+
+        chunks = []
+        doc_id_list = list(doc_ids)
+
+        # Batch fetch all documents using pipeline (single round trip)
+        pipe = self.client.pipeline()
+        for doc_id in doc_id_list:
+            # Decode if bytes
+            doc_id_str = doc_id.decode('utf-8') if isinstance(doc_id, bytes) else doc_id
+            pipe.hgetall(doc_id_str)
+        results = pipe.execute()
+
+        # Extract chunk data
+        for doc_data in results:
+            if not doc_data:
+                continue
+
+            # Decode document data (exclude embedding for performance)
+            doc = {k.decode('utf-8'): v.decode('utf-8') if isinstance(v, bytes) else v
+                   for k, v in doc_data.items() if k != b'embedding'}
+
+            # Verify filename matches (safety check)
+            if doc.get('filename') == filename:
+                chunk_data = {
+                    "text": doc.get("text", ""),
+                    "filename": doc.get("filename", filename),
+                    "source": doc.get("source", ""),
+                    "chunk_index": int(doc.get("chunk_index", 0)),
+                    "page": doc.get("source", "N/A"),
+                    "metadata": {
+                        "chunk_index": int(doc.get("chunk_index", 0)),
+                        "source": doc.get("source", "")
+                    }
+                }
+                chunks.append(chunk_data)
+
+        # Sort by chunk_index
+        chunks.sort(key=lambda x: x['chunk_index'])
+        return chunks
+
+    def _get_chunks_by_scan(self, filename: str) -> List[Dict]:
+        """
+        Fallback method: Get chunks by scanning all documents (for backward compatibility).
+
+        Args:
+            filename: Name of the file to get chunks for
+
+        Returns:
+            List of chunks sorted by chunk_index
+        """
+        chunks = []
+        batch_size = 100
+        key_batch = []
+
+        # Scan document keys from active index
+        index_pattern = f"doc:{self.active_index_name}:*"
+
+        for key in self.client.scan_iter(match=index_pattern, count=batch_size):
+            key_str = key.decode('utf-8')
+
+            # Skip non-document keys
+            parts = key_str.split(':')
+            if parts[0] != 'doc' or len(parts) < 2:
+                continue
+            if parts[1] in ['hash', 'group', 'version', 'counts', 'files']:
+                continue
+
+            key_batch.append(key)
+
+            # Process batch
+            if len(key_batch) >= batch_size:
+                self._extract_chunks_from_batch(key_batch, filename, chunks)
+                key_batch = []
+
+        # Process remaining keys
+        if key_batch:
+            self._extract_chunks_from_batch(key_batch, filename, chunks)
+
+        # Sort chunks by chunk_index
+        chunks.sort(key=lambda x: x['chunk_index'])
+        return chunks
 
     def _extract_chunks_from_batch(self, keys: List[bytes], target_filename: str, chunks: List[Dict]):
         """
@@ -948,7 +1027,10 @@ class VectorDB:
 
     def delete_by_filename(self, filename: str) -> int:
         """
-        Delete all chunks associated with a filename by scanning
+        Delete all chunks associated with a filename using filename index for O(1) lookup.
+
+        Uses the filename index (doc:files:{index}:{hash}) for direct key lookup
+        instead of scanning all documents. Falls back to scan if index doesn't exist.
 
         Args:
             filename: Name of the file whose chunks should be deleted
@@ -957,48 +1039,104 @@ class VectorDB:
             Number of chunks deleted
         """
         try:
-            deleted_keys = []
-            batch_size = 100
-            key_batch = []
+            # Calculate filename hash for index lookup
+            filename_hash = hashlib.md5(filename.encode('utf-8')).hexdigest()
+            filename_index_key = f"doc:files:{self.active_index_name}:{filename_hash}"
 
-            # Scan document keys from active index
-            index_pattern = f"doc:{self.active_index_name}:*"
+            # Try to get doc_ids from filename index (O(1) lookup)
+            doc_ids = self.client.smembers(filename_index_key)
 
-            for key in self.client.scan_iter(match=index_pattern, count=batch_size):
-                key_str = key.decode('utf-8')
+            if doc_ids:
+                # Use index-based deletion (optimized path)
+                deleted_count = self._delete_by_index(doc_ids, filename_index_key)
+                logger.info(f"Deleted {deleted_count} chunks for {filename} (indexed)")
+                return deleted_count
 
-                # Skip non-document keys
-                parts = key_str.split(':')
-                if len(parts) < 2 or parts[0] != 'doc' or parts[1] in ['hash', 'group', 'counts', 'version']:
-                    continue
+            # Fallback to scan for backward compatibility
+            logger.debug(f"Filename index not found for {filename}, falling back to scan")
+            deleted_count = self._delete_by_scan(filename)
+            logger.info(f"Deleted {deleted_count} chunks for {filename} (scanned)")
+            return deleted_count
 
-                key_batch.append(key)
-
-                # Process batch
-                if len(key_batch) >= batch_size:
-                    self._find_keys_to_delete(key_batch, filename, deleted_keys)
-                    key_batch = []
-
-            # Process remaining keys
-            if key_batch:
-                self._find_keys_to_delete(key_batch, filename, deleted_keys)
-
-            # Delete all matching keys
-            if deleted_keys:
-                pipe = self.client.pipeline()
-                for key in deleted_keys:
-                    pipe.delete(key)
-                pipe.execute()
-
-                # Clear document count cache after deletion
-                self.clear_document_count_cache()
-
-                logger.info(f"Deleted {len(deleted_keys)} chunks for {filename}")
-
-            return len(deleted_keys)
         except Exception as e:
             logger.error(f"Failed to delete documents for {filename}: {e}")
             return 0
+
+    def _delete_by_index(self, doc_ids: set, filename_index_key: str) -> int:
+        """
+        Delete chunks using doc_ids from filename index with Pipeline.
+
+        Args:
+            doc_ids: Set of document IDs from filename index
+            filename_index_key: Key of the filename index to delete
+
+        Returns:
+            Number of chunks deleted
+        """
+        if not doc_ids:
+            return 0
+
+        # Delete all documents and the index in a single pipeline
+        pipe = self.client.pipeline()
+        for doc_id in doc_ids:
+            doc_id_str = doc_id.decode('utf-8') if isinstance(doc_id, bytes) else doc_id
+            pipe.delete(doc_id_str)
+        # Also delete the filename index itself
+        pipe.delete(filename_index_key)
+        pipe.execute()
+
+        # Clear document count cache after deletion
+        self.clear_document_count_cache()
+
+        return len(doc_ids)
+
+    def _delete_by_scan(self, filename: str) -> int:
+        """
+        Fallback method: Delete chunks by scanning all documents (for backward compatibility).
+
+        Args:
+            filename: Name of the file whose chunks should be deleted
+
+        Returns:
+            Number of chunks deleted
+        """
+        deleted_keys = []
+        batch_size = 100
+        key_batch = []
+
+        # Scan document keys from active index
+        index_pattern = f"doc:{self.active_index_name}:*"
+
+        for key in self.client.scan_iter(match=index_pattern, count=batch_size):
+            key_str = key.decode('utf-8')
+
+            # Skip non-document keys
+            parts = key_str.split(':')
+            if len(parts) < 2 or parts[0] != 'doc' or parts[1] in ['hash', 'group', 'counts', 'version', 'files']:
+                continue
+
+            key_batch.append(key)
+
+            # Process batch
+            if len(key_batch) >= batch_size:
+                self._find_keys_to_delete(key_batch, filename, deleted_keys)
+                key_batch = []
+
+        # Process remaining keys
+        if key_batch:
+            self._find_keys_to_delete(key_batch, filename, deleted_keys)
+
+        # Delete all matching keys
+        if deleted_keys:
+            pipe = self.client.pipeline()
+            for key in deleted_keys:
+                pipe.delete(key)
+            pipe.execute()
+
+            # Clear document count cache after deletion
+            self.clear_document_count_cache()
+
+        return len(deleted_keys)
 
     def _find_keys_to_delete(self, keys: List[bytes], target_filename: str, deleted_keys: List[bytes]):
         """
@@ -1022,6 +1160,96 @@ class VectorDB:
         for key, filename_bytes in zip(keys, results):
             if filename_bytes and filename_bytes.decode('utf-8') == target_filename:
                 deleted_keys.append(key)
+
+    def build_filename_index(self) -> Dict[str, int]:
+        """
+        Build filename index for existing documents (migration utility).
+
+        Scans all documents and creates the filename index (doc:files:{index}:{hash})
+        for O(1) lookup. This is a one-time migration that enables optimized
+        chunk retrieval and deletion.
+
+        Returns:
+            Dictionary with {filename: chunk_count} for indexed files
+        """
+        try:
+            logger.info("Building filename index for existing documents...")
+            batch_size = 100
+            key_batch = []
+            filename_counts = {}
+
+            # Scan document keys from active index
+            index_pattern = f"doc:{self.active_index_name}:*"
+
+            for key in self.client.scan_iter(match=index_pattern, count=batch_size):
+                key_str = key.decode('utf-8')
+
+                # Skip non-document keys
+                parts = key_str.split(':')
+                if parts[0] != 'doc' or len(parts) < 2:
+                    continue
+                if parts[1] in ['hash', 'group', 'version', 'counts', 'files']:
+                    continue
+
+                key_batch.append(key)
+
+                # Process batch
+                if len(key_batch) >= batch_size:
+                    self._build_index_batch(key_batch, filename_counts)
+                    key_batch = []
+
+            # Process remaining keys
+            if key_batch:
+                self._build_index_batch(key_batch, filename_counts)
+
+            logger.success(f"Built filename index for {len(filename_counts)} files, total {sum(filename_counts.values())} chunks")
+            return filename_counts
+
+        except Exception as e:
+            logger.error(f"Failed to build filename index: {e}")
+            return {}
+
+    def _build_index_batch(self, keys: List[bytes], filename_counts: Dict[str, int]):
+        """
+        Build filename index entries for a batch of document keys.
+
+        Args:
+            keys: List of Redis keys to process
+            filename_counts: Dictionary to track counts per filename
+        """
+        if not keys:
+            return
+
+        # Get filenames for all keys in batch
+        pipe = self.client.pipeline()
+        for key in keys:
+            pipe.hget(key, 'filename')
+        results = pipe.execute()
+
+        # Group by filename hash for batch index updates
+        filename_to_keys = {}
+        for key, filename_bytes in zip(keys, results):
+            if not filename_bytes:
+                continue
+
+            filename = filename_bytes.decode('utf-8') if isinstance(filename_bytes, bytes) else filename_bytes
+            filename_hash = hashlib.md5(filename.encode('utf-8')).hexdigest()
+
+            if filename_hash not in filename_to_keys:
+                filename_to_keys[filename_hash] = []
+            filename_to_keys[filename_hash].append(key)
+
+            # Track counts
+            filename_counts[filename] = filename_counts.get(filename, 0) + 1
+
+        # Add all keys to their respective filename index sets
+        pipe = self.client.pipeline()
+        for filename_hash, doc_keys in filename_to_keys.items():
+            index_key = f"doc:files:{self.active_index_name}:{filename_hash}"
+            for key in doc_keys:
+                key_str = key.decode('utf-8') if isinstance(key, bytes) else key
+                pipe.sadd(index_key, key_str)
+        pipe.execute()
 
     def sample_documents_by_filename(self, filename: str, limit: int = 3) -> List[Dict]:
         """

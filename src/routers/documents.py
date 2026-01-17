@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Optional, List
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException, Request, Depends, UploadFile, File, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Request, Depends, UploadFile, File, BackgroundTasks, Query
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from loguru import logger
@@ -300,24 +300,39 @@ async def rebuild_doc_group_mappings():
         file_to_group = {}
         cursor = 0
 
+        # Helper for bytes decoding
+        def decode_value(val):
+            return val.decode('utf-8') if isinstance(val, bytes) else val
+
         while True:
             cursor, keys = vector_db.client.scan(cursor, match=f"doc:{index_name}:*", count=100)
 
+            # Filter valid document keys
+            valid_keys = []
             for key in keys:
+                key_str = decode_value(key)
                 # Skip non-document keys
-                if any(x in key for x in [':hash:', ':group:', ':version:', ':counts:', ':files']):
+                if any(x in key_str for x in [':hash:', ':group:', ':version:', ':counts:', ':files']):
                     continue
+                valid_keys.append(key)
 
-                # Get document data
-                doc_data = vector_db.client.hgetall(key)
-                if not doc_data:
-                    continue
+            # Batch fetch document data using pipeline (N hgetall → 1 round trip)
+            if valid_keys:
+                pipe = vector_db.client.pipeline()
+                for key in valid_keys:
+                    pipe.hgetall(key)
+                results = pipe.execute()
 
-                filename = doc_data.get('filename')
-                group_id = doc_data.get('group_id')
+                for doc_data in results:
+                    if not doc_data:
+                        continue
 
-                if filename and group_id and filename not in file_to_group:
-                    file_to_group[filename] = group_id
+                    # Decode bytes keys/values
+                    filename = decode_value(doc_data.get(b'filename') or doc_data.get('filename'))
+                    group_id = decode_value(doc_data.get(b'group_id') or doc_data.get('group_id'))
+
+                    if filename and group_id and filename not in file_to_group:
+                        file_to_group[filename] = group_id
 
             if cursor == 0:
                 break
@@ -367,7 +382,7 @@ async def index_pdfs(doc_tracker: DocumentTracker, target_index: Optional[str] =
             chunk_overlap=CHUNK_OVERLAP
         )
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         chunks = await loop.run_in_executor(
             None,  # Use default ThreadPoolExecutor
             doc_processor.process_directory,
@@ -419,7 +434,7 @@ async def index_pdfs(doc_tracker: DocumentTracker, target_index: Optional[str] =
             batch = texts[i:i + batch_size]
 
             # Run CPU-intensive embedding generation in thread pool to avoid blocking event loop
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             batch_embeddings = await loop.run_in_executor(
                 None,  # Use default ThreadPoolExecutor
                 lambda b=batch: embedding_model.encode(b, batch_size=batch_size, show_progress_bar=False)
@@ -751,6 +766,8 @@ async def get_reindex_progress(
 @router.get("/documents")
 async def list_documents(
     filter_scope: str = None,
+    page: int = Query(1, ge=1, description="페이지 번호 (1부터 시작)"),
+    page_size: int = Query(50, ge=1, le=200, description="페이지당 문서 수 (최대 200)"),
     current_user: dict = Depends(get_current_active_user)
 ):
     """
@@ -760,6 +777,8 @@ async def list_documents(
     Args:
         filter_scope: "user" - always filter by organization (for search filters)
                      None - admin sees all, users see organization only (for admin page)
+        page: 페이지 번호 (기본값: 1)
+        page_size: 페이지당 문서 수 (기본값: 50, 최대: 200)
     """
     try:
         data_path = Path(DATA_DIR)
@@ -807,6 +826,16 @@ async def list_documents(
                 # Fall back to zero counts
                 chunk_counts = {filename: 0 for filename in filenames}
 
+        # Batch fetch version metadata (avoids N+1 queries)
+        version_metadata_map = {}
+        if document_version:
+            try:
+                version_metadata_map = document_version.batch_get_latest_version_metadata(filenames)
+            except Exception as e:
+                logger.error(f"Failed to batch fetch version metadata: {e}")
+                # Fall back to empty - will use chunk_counts fallback
+                version_metadata_map = {}
+
         # Batch fetch document group IDs (avoids N+1 queries)
         doc_group_map = {}
         if cache_manager:
@@ -835,33 +864,13 @@ async def list_documents(
             # Get file stats
             stat = pdf_file.stat()
 
-            # Get chunk count from latest version metadata (not all versions!)
+            # Get chunk count from pre-fetched version metadata (N+1 쿼리 제거)
             chunk_count = 0
-            if document_version:
-                try:
-                    latest_version = document_version.get_latest_version(pdf_file.name)
-                    if latest_version:
-                        version_meta = document_version.get_version(pdf_file.name, latest_version)
-                        if version_meta and 'chunk_count' in version_meta:
-                            # chunk_count might be None or '0' for old versions - use batch count in that case
-                            chunk_count_from_meta = version_meta.get('chunk_count')
-                            if chunk_count_from_meta and int(chunk_count_from_meta) > 0:
-                                chunk_count = int(chunk_count_from_meta)
-                            else:
-                                # Fallback to batch count if chunk_count is None or 0
-                                chunk_count = chunk_counts.get(pdf_file.name, 0)
-                        else:
-                            # Fallback to batch count if version metadata doesn't have chunk_count
-                            chunk_count = chunk_counts.get(pdf_file.name, 0)
-                    else:
-                        # No version metadata - fallback to batch count
-                        chunk_count = chunk_counts.get(pdf_file.name, 0)
-                except Exception as e:
-                    logger.warning(f"Failed to get version metadata for {pdf_file.name}: {e}")
-                    # Fallback to batch count
-                    chunk_count = chunk_counts.get(pdf_file.name, 0)
+            version_meta = version_metadata_map.get(pdf_file.name)
+            if version_meta and version_meta.get('chunk_count', 0) > 0:
+                chunk_count = version_meta['chunk_count']
             else:
-                # No version system - fallback to batch count
+                # Fallback to batch count if no version metadata or chunk_count is 0
                 chunk_count = chunk_counts.get(pdf_file.name, 0)
 
             documents.append({
@@ -880,9 +889,18 @@ async def list_documents(
         # Sort by modified date (newest first)
         documents.sort(key=lambda x: x["created_at"], reverse=True)
 
+        # 페이지네이션 적용
+        total_count = len(documents)
+        start_idx = (page - 1) * page_size
+        end_idx = start_idx + page_size
+        paginated_documents = documents[start_idx:end_idx]
+
         return {
-            "documents": documents,
-            "total_count": len(documents)
+            "documents": paginated_documents,
+            "total_count": total_count,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": (total_count + page_size - 1) // page_size  # ceiling division
         }
     except Exception as e:
         # Security: Use sanitized error message (prevents information disclosure)
@@ -2170,6 +2188,40 @@ async def migrate_document_versions(
         }
     except Exception as e:
         safe_message = get_safe_error_message(e, "migrate versions endpoint")
+        raise HTTPException(status_code=500, detail=safe_message)
+
+
+# POST /api/documents/build-filename-index
+@router.post("/documents/build-filename-index", tags=["Documents", "Admin"])
+async def build_filename_index(
+    current_user: dict = Depends(require_admin)
+):
+    """
+    Build filename index for optimized chunk retrieval (Admin only).
+
+    This is a one-time migration that creates the filename index
+    (doc:files:{index}:{hash}) for O(1) lookup of chunks by filename.
+    After this migration, get_chunks_by_filename and delete_by_filename
+    will be significantly faster.
+
+    Returns:
+        Dictionary with indexed file counts
+    """
+    try:
+        if not vector_db:
+            raise HTTPException(status_code=500, detail="Vector database not available")
+
+        # Build the filename index
+        result = vector_db.build_filename_index()
+
+        return {
+            "message": f"Filename index built successfully for {len(result)} files",
+            "files_indexed": len(result),
+            "total_chunks": sum(result.values()),
+            "details": result
+        }
+    except Exception as e:
+        safe_message = get_safe_error_message(e, "build filename index endpoint")
         raise HTTPException(status_code=500, detail=safe_message)
 
 

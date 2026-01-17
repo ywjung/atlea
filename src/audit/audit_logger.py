@@ -5,7 +5,7 @@ User activity tracking and audit logging system
 import json
 import time
 from typing import Optional, Dict, List, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from loguru import logger
 
@@ -111,7 +111,7 @@ class AuditLogger:
             log_id = f"{timestamp}:{self.redis.incr('audit:counter')}"
 
             # KST 변환
-            kst_time = datetime.utcnow() + timedelta(hours=9)
+            kst_time = datetime.now(timezone.utc) + timedelta(hours=9)
 
             # 로그 데이터 구성
             log_entry = {
@@ -227,7 +227,7 @@ class AuditLogger:
             else:
                 # 기본: 오늘 날짜
                 if not end_date:
-                    end_date = (datetime.utcnow() + timedelta(hours=9)).strftime("%Y-%m-%d")
+                    end_date = (datetime.now(timezone.utc) + timedelta(hours=9)).strftime("%Y-%m-%d")
                 index_key = f"{self.daily_index_prefix}:{end_date}"
 
             # 시간 범위 설정
@@ -290,7 +290,7 @@ class AuditLogger:
             통계 데이터
         """
         try:
-            kst_now = datetime.utcnow() + timedelta(hours=9)
+            kst_now = datetime.now(timezone.utc) + timedelta(hours=9)
 
             if not end_date:
                 end_date = kst_now.strftime("%Y-%m-%d")
@@ -351,7 +351,7 @@ class AuditLogger:
     def cleanup_old_logs(self):
         """오래된 로그 정리 (수동 실행용)"""
         try:
-            cutoff_date = datetime.utcnow() - timedelta(days=self.retention_days)
+            cutoff_date = datetime.now(timezone.utc) - timedelta(days=self.retention_days)
             cutoff_ts = int(cutoff_date.timestamp() * 1000)
 
             # 인덱스에서 오래된 항목 제거

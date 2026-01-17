@@ -183,7 +183,7 @@ class MetricsCollector:
             for item in raw_data:
                 try:
                     searches.append(json.loads(item))
-                except:
+                except Exception:
                     continue
 
             return searches
@@ -447,7 +447,7 @@ class MetricsCollector:
                     if key_date < cutoff_date:
                         self.redis.delete(key)
                         logger.debug(f"🗑️ Deleted old metric: {key_str}")
-                except:
+                except Exception:
                     continue
 
             logger.info(f"✅ Old metrics cleaned (older than {days} days)")
@@ -490,7 +490,7 @@ class MetricsCollector:
                 from .performance_utils import performance_tracker
                 perf_stats = performance_tracker.get_stats()
                 metrics['performance'] = perf_stats
-            except:
+            except Exception:
                 metrics['performance'] = None
 
             # 캐시 통계 (전역 통계에서 가져오기)

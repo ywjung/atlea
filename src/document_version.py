@@ -251,6 +251,61 @@ class DocumentVersion:
 
         return metadata
 
+    def batch_get_latest_version_metadata(self, filenames: list) -> dict:
+        """여러 파일의 최신 버전 메타데이터를 배치로 조회 (Pipeline 사용)
+
+        Args:
+            filenames: 파일명 목록
+
+        Returns:
+            {filename: {chunk_count: int, ...} or None} 딕셔너리
+        """
+        if not filenames:
+            return {}
+
+        # Step 1: 모든 파일의 최신 버전 번호를 한 번에 조회
+        pipe = self.redis.pipeline()
+        for filename in filenames:
+            key = self.VERSION_LATEST_KEY.format(filename=filename)
+            pipe.get(key)
+        version_results = pipe.execute()
+
+        # Step 2: 버전이 있는 파일의 메타데이터를 한 번에 조회
+        files_with_versions = []
+        for filename, version in zip(filenames, version_results):
+            if version:
+                version_num = int(version)
+                files_with_versions.append((filename, version_num))
+
+        if not files_with_versions:
+            return {filename: None for filename in filenames}
+
+        pipe = self.redis.pipeline()
+        for filename, version in files_with_versions:
+            meta_key = self.VERSION_META_KEY.format(filename=filename, version=version)
+            pipe.hgetall(meta_key)
+        meta_results = pipe.execute()
+
+        # Step 3: 결과 매핑
+        result = {filename: None for filename in filenames}
+        for (filename, version), meta in zip(files_with_versions, meta_results):
+            if meta:
+                try:
+                    metadata = {
+                        k.decode('utf-8') if isinstance(k, bytes) else k:
+                        v.decode('utf-8') if isinstance(v, bytes) else v
+                        for k, v in meta.items()
+                    }
+                    metadata['version'] = int(metadata.get('version', version))
+                    metadata['file_size'] = int(metadata.get('file_size', 0))
+                    metadata['chunk_count'] = int(metadata.get('chunk_count', 0))
+                    metadata['indexed'] = metadata.get('indexed') == 'True'
+                    result[filename] = metadata
+                except Exception:
+                    result[filename] = None
+
+        return result
+
     def restore_version(self, filename: str, version: int, target_path: Path) -> bool:
         """특정 버전을 복원
 

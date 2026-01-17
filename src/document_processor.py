@@ -200,7 +200,7 @@ class DocumentProcessor:
                         text = self._extract_readable_text(data)
                         if text.strip():
                             text_parts.append(text)
-                    except:
+                    except Exception:
                         continue
                 ole.close()
 
@@ -225,17 +225,17 @@ class DocumentProcessor:
             # HWP 파일은 압축되어 있을 수 있음
             try:
                 decompressed = zlib.decompress(data)
-            except:
+            except Exception:
                 decompressed = data
 
             # UTF-16 LE로 디코딩 시도
             try:
                 text = decompressed.decode('utf-16le', errors='ignore')
-            except:
+            except Exception:
                 # UTF-8 시도
                 try:
                     text = decompressed.decode('utf-8', errors='ignore')
-                except:
+                except Exception:
                     # CP949 (EUC-KR) 시도
                     text = decompressed.decode('cp949', errors='ignore')
 
@@ -266,10 +266,10 @@ class DocumentProcessor:
                     if readable_chars > len(text) * 0.3:  # 30% 이상이 읽을 수 있는 문자
                         text = ''.join(char for char in text if char.isprintable() or char in '\n\r\t ')
                         return text
-                except:
+                except Exception:
                     continue
             return ""
-        except:
+        except Exception:
             return ""
 
     def create_chunks(self, text: str, metadata: Dict = None) -> List[Dict]:

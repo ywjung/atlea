@@ -669,7 +669,7 @@ class HybridRAGOrchestrator:
                     return 0.6
                 else:
                     return 0.4
-            except:
+            except Exception:
                 pass
 
         return 0.5  # 기본값

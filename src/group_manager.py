@@ -865,7 +865,7 @@ class GroupManager:
 
     def get_all_groups(self, org_id: Optional[str] = None) -> List[Dict]:
         """
-        Get all groups, optionally filtered by organization
+        Get all groups, optionally filtered by organization (Pipeline 최적화)
 
         Args:
             org_id: Organization ID to filter by (None = all groups, for system admin)
@@ -873,34 +873,71 @@ class GroupManager:
         Returns:
             List of group dictionaries
         """
-        groups = []
-
+        # Step 1: Collect group IDs
+        group_id_list = []
         if org_id:
-            # Get groups for specific organization
-            group_ids = self.client.smembers(f'org:groups:{org_id}')
-            for gid_bytes in group_ids:
-                group_id = gid_bytes.decode('utf-8')
-                group_data = self.get_group(group_id)
-                if group_data:
-                    groups.append(group_data)
+            group_ids_bytes = self.client.smembers(f'org:groups:{org_id}')
+            group_id_list = [gid.decode('utf-8') for gid in group_ids_bytes]
         else:
-            # Get all groups (system admin)
             for key in self.client.scan_iter(match="group:*", count=100):
                 key_str = key.decode('utf-8')
-
-                # Skip non-group keys
                 if (key_str.startswith('group:children:') or
                     key_str.startswith('group:docs:') or
                     key_str.startswith('group:orgs:') or
                     key_str == 'group:default'):
                     continue
-
-                # Extract group ID
                 group_id = key_str.split(':', 1)[1]
-                group_data = self.get_group(group_id)
+                group_id_list.append(group_id)
 
-                if group_data:
-                    groups.append(group_data)
+        if not group_id_list:
+            return []
+
+        # Step 2: Batch fetch group data and children using Pipeline
+        pipe = self.client.pipeline()
+        for gid in group_id_list:
+            pipe.hgetall(f'group:{gid}')
+            pipe.smembers(f'group:children:{gid}')
+        results = pipe.execute()
+
+        # Step 3: Parse group data and collect org_ids for batch lookup
+        groups = []
+        org_ids_to_fetch = set()
+        for i, group_id in enumerate(group_id_list):
+            group_data = results[i * 2]
+            children_data = results[i * 2 + 1]
+
+            if not group_data:
+                continue
+
+            # Convert bytes to strings
+            result = {k.decode('utf-8'): v.decode('utf-8') for k, v in group_data.items()}
+            result['id'] = group_id
+            result['children'] = [c.decode('utf-8') for c in children_data]
+
+            org_id_val = result.get('org_id')
+            if org_id_val:
+                org_ids_to_fetch.add(org_id_val)
+
+            groups.append(result)
+
+        # Step 4: Batch fetch org names using Pipeline
+        if org_ids_to_fetch:
+            org_id_list = list(org_ids_to_fetch)
+            pipe = self.client.pipeline()
+            for oid in org_id_list:
+                pipe.hget(f'org:{oid}', 'name')
+            org_name_results = pipe.execute()
+
+            org_names = {}
+            for oid, name in zip(org_id_list, org_name_results):
+                if name:
+                    org_names[oid] = name.decode('utf-8') if isinstance(name, bytes) else name
+
+            # Attach org_name to groups
+            for group in groups:
+                oid = group.get('org_id')
+                if oid and oid in org_names:
+                    group['org_name'] = org_names[oid]
 
         return groups
 
@@ -1278,6 +1315,37 @@ class GroupManager:
                         return [legacy_org_id]
 
         return org_ids
+
+    def batch_get_group_counts(self, group_ids: List[str]) -> Dict[str, Dict[str, int]]:
+        """
+        배치로 그룹별 문서 수와 조직 수를 조회 (Pipeline 사용으로 N+1 쿼리 제거)
+
+        Args:
+            group_ids: 그룹 ID 목록
+
+        Returns:
+            {group_id: {'document_count': int, 'org_count': int}} 딕셔너리
+        """
+        if not group_ids:
+            return {}
+
+        # Pipeline으로 모든 그룹의 문서 수와 조직 수를 한 번에 조회
+        pipe = self.client.pipeline()
+        for group_id in group_ids:
+            pipe.scard(f'group:docs:{group_id}')  # 문서 수
+            pipe.scard(f'group:orgs:{group_id}')  # 조직 수
+        results = pipe.execute()
+
+        counts = {}
+        for i, group_id in enumerate(group_ids):
+            doc_count = results[i * 2] or 0
+            org_count = results[i * 2 + 1] or 0
+            counts[group_id] = {
+                'document_count': doc_count,
+                'org_count': org_count
+            }
+
+        return counts
 
     def is_group_in_organization(self, group_id: str, org_id: str) -> bool:
         """
