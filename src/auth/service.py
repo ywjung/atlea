@@ -21,6 +21,7 @@ from .utils import (
 from .brute_force_protection import BruteForceProtection
 from .security_logger import SecurityLogger
 from .password_reset import PasswordResetService
+from src.redis_helpers import decode_bytes, decode_redis_hash
 
 
 class AuthService:
@@ -119,11 +120,7 @@ class AuthService:
             return None
 
         # bytes를 string으로 변환
-        user_dict = {}
-        for key, value in user_data.items():
-            key_str = key.decode() if isinstance(key, bytes) else key
-            value_str = value.decode() if isinstance(value, bytes) else value
-            user_dict[key_str] = value_str
+        user_dict = decode_redis_hash(user_data)
 
         # datetime 필드 처리 (빈 문자열은 None으로 처리)
         if user_dict.get('created_at') and user_dict['created_at']:
@@ -171,11 +168,7 @@ class AuthService:
                 continue
 
             # bytes를 string으로 변환
-            user_dict = {}
-            for key, value in user_data.items():
-                key_str = key.decode() if isinstance(key, bytes) else key
-                value_str = value.decode() if isinstance(value, bytes) else value
-                user_dict[key_str] = value_str
+            user_dict = decode_redis_hash(user_data)
 
             # datetime 필드 처리
             if user_dict.get('created_at') and user_dict['created_at']:
@@ -199,7 +192,11 @@ class AuthService:
 
             try:
                 users[user_id] = User(**user_dict)
-            except Exception:
+            except (ValueError, TypeError, KeyError) as e:
+                logger.warning(f"Failed to parse user {user_id}: {e}")
+                continue
+            except Exception as e:
+                logger.error(f"Unexpected error parsing user {user_id}: {e}", exc_info=True)
                 continue
 
         return users
@@ -302,7 +299,7 @@ class AuthService:
             )
             raise ValueError("유효하지 않은 이메일 또는 비밀번호입니다")
 
-        user_id = user_id.decode() if isinstance(user_id, bytes) else user_id
+        user_id = decode_bytes(user_id)
 
         # 사용자 데이터 먼저 조회 (username 필요)
         user_data = self.redis.hgetall(f"user:{user_id}")
@@ -312,9 +309,9 @@ class AuthService:
             )
             raise ValueError("유효하지 않은 이메일 또는 비밀번호입니다")
 
-        # username 추출
-        username_raw = user_data.get(b'username' if isinstance(list(user_data.keys())[0], bytes) else 'username')
-        username = username_raw.decode() if isinstance(username_raw, bytes) else str(username_raw) if username_raw else "unknown"
+        # username 추출 (decode_redis_hash로 미리 변환)
+        decoded_user_data = decode_redis_hash(user_data)
+        username = decoded_user_data.get('username', 'unknown')
 
         # 계정 잠금 체크
         account_blocked, account_ttl = self.brute_force_protection.check_account_blocked(user_id)
@@ -334,14 +331,12 @@ class AuthService:
             )
 
         # 계정 활성화 상태 확인
-        is_active = user_data.get(b'is_active' if isinstance(list(user_data.keys())[0], bytes) else 'is_active')
-        is_active_str = is_active.decode() if isinstance(is_active, bytes) else str(is_active)
+        is_active_str = decoded_user_data.get('is_active', 'true')
         if is_active_str.lower() != 'true':
             raise ValueError("비활성화된 계정입니다")
 
         # 비밀번호 확인
-        password_hash = user_data.get(b'password_hash' if isinstance(list(user_data.keys())[0], bytes) else 'password_hash')
-        password_hash_str = password_hash.decode() if isinstance(password_hash, bytes) else password_hash
+        password_hash_str = decoded_user_data.get('password_hash', '')
 
         if not verify_password(credentials.password, password_hash_str):
             self.brute_force_protection.record_failed_attempt(
@@ -363,13 +358,11 @@ class AuthService:
         from .totp import TOTPService
         totp_service = TOTPService(self.redis)
         if totp_service.is_enabled():
-            # 사용자의 totp_secret 확인 (bytes와 str 모두 처리)
-            totp_secret = user_data.get(b'totp_secret') or user_data.get('totp_secret')
-            if totp_secret:
-                totp_secret_str = totp_secret.decode() if isinstance(totp_secret, bytes) else totp_secret
+            # 사용자의 totp_secret 확인
+            totp_secret_str = decoded_user_data.get('totp_secret', '')
 
-                # totp_secret이 None이나 빈 문자열이 아닌 경우에만 검증
-                if totp_secret_str and totp_secret_str != 'None' and totp_secret_str != '':
+            # totp_secret이 None이나 빈 문자열이 아닌 경우에만 검증
+            if totp_secret_str and totp_secret_str != 'None' and totp_secret_str != '':
                     # TOTP 토큰이 제공되지 않았거나 잘못된 경우
                     if not credentials.totp_token or not totp_service.verify_token(totp_secret_str, credentials.totp_token):
                         self.brute_force_protection.record_failed_attempt(
@@ -400,11 +393,9 @@ class AuthService:
         )
 
         # 사용자 데이터 파싱
+        decoded_data = decode_redis_hash(user_data)
         user_dict = {}
-        for key, value in user_data.items():
-            key_str = key.decode() if isinstance(key, bytes) else key
-            value_str = value.decode() if isinstance(value, bytes) else value
-
+        for key_str, value_str in decoded_data.items():
             if key_str in ['created_at', 'last_login', 'locked_until']:
                 try:
                     user_dict[key_str] = datetime.fromisoformat(value_str) if value_str and value_str != 'None' else None
@@ -493,7 +484,7 @@ class AuthService:
         session_data = self.redis.hgetall(f"session:{session_id}")
         if session_data:
             user_id = session_data.get(b'user_id' if isinstance(list(session_data.keys())[0], bytes) else 'user_id')
-            user_id = user_id.decode() if isinstance(user_id, bytes) else user_id
+            user_id = decode_bytes(user_id)
 
             self.redis.delete(f"session:{session_id}")
             self.redis.srem(f"user:sessions:{user_id}", session_id)
@@ -544,11 +535,9 @@ class AuthService:
             raise ValueError("사용자를 찾을 수 없습니다")
 
         # 사용자 데이터 파싱
+        decoded_data = decode_redis_hash(user_data)
         user_dict = {}
-        for key, value in user_data.items():
-            key_str = key.decode() if isinstance(key, bytes) else key
-            value_str = value.decode() if isinstance(value, bytes) else value
-
+        for key_str, value_str in decoded_data.items():
             if key_str in ['created_at', 'last_login', 'locked_until']:
                 try:
                     user_dict[key_str] = datetime.fromisoformat(value_str) if value_str and value_str != 'None' else None
@@ -598,7 +587,7 @@ class AuthService:
         if not user_id:
             raise ValueError("사용자를 찾을 수 없습니다")
 
-        user_id = user_id.decode() if isinstance(user_id, bytes) else user_id
+        user_id = decode_bytes(user_id)
         reset_token = await self.password_reset_service.create_reset_token(user_id, email)
 
         logger.info(f"🔑 Password reset requested: {email}")
@@ -635,7 +624,7 @@ class AuthService:
         # 모든 세션 무효화
         session_ids = self.redis.smembers(f"user:sessions:{user_id}")
         for session_id in session_ids:
-            session_id_str = session_id.decode() if isinstance(session_id, bytes) else session_id
+            session_id_str = decode_bytes(session_id)
             self.redis.delete(f"session:{session_id_str}")
         self.redis.delete(f"user:sessions:{user_id}")
 
@@ -644,7 +633,7 @@ class AuthService:
         # 보안 로그 기록
         user_data = self.redis.hgetall(f"user:{user_id}")
         email = user_data.get(b'email' if isinstance(list(user_data.keys())[0], bytes) else 'email')
-        email = email.decode() if isinstance(email, bytes) else email
+        email = decode_bytes(email)
 
         SecurityLogger.log_event(
             event_type="password_reset_completed",
@@ -676,11 +665,9 @@ class AuthService:
 
         # 업데이트된 사용자 조회
         user_data = self.redis.hgetall(f"user:{user_id}")
+        decoded_data = decode_redis_hash(user_data)
         user_dict = {}
-        for key, value in user_data.items():
-            key_str = key.decode() if isinstance(key, bytes) else key
-            value_str = value.decode() if isinstance(value, bytes) else value
-
+        for key_str, value_str in decoded_data.items():
             if key_str in ['created_at', 'last_login', 'locked_until']:
                 try:
                     user_dict[key_str] = datetime.fromisoformat(value_str) if value_str and value_str != 'None' else None
@@ -718,7 +705,7 @@ class AuthService:
 
         # 현재 비밀번호 확인
         password_hash = user_data.get(b'password_hash' if isinstance(list(user_data.keys())[0], bytes) else 'password_hash')
-        password_hash_str = password_hash.decode() if isinstance(password_hash, bytes) else password_hash
+        password_hash_str = decode_bytes(password_hash)
 
         if not verify_password(old_password, password_hash_str):
             raise ValueError("현재 비밀번호가 일치하지 않습니다")
@@ -730,7 +717,7 @@ class AuthService:
         # 모든 세션 무효화
         session_ids = self.redis.smembers(f"user:sessions:{user_id}")
         for session_id in session_ids:
-            session_id_str = session_id.decode() if isinstance(session_id, bytes) else session_id
+            session_id_str = decode_bytes(session_id)
             self.redis.delete(f"session:{session_id_str}")
         self.redis.delete(f"user:sessions:{user_id}")
 
@@ -738,7 +725,7 @@ class AuthService:
 
         # 보안 로그 기록
         email = user_data.get(b'email' if isinstance(list(user_data.keys())[0], bytes) else 'email')
-        email = email.decode() if isinstance(email, bytes) else email
+        email = decode_bytes(email)
 
         SecurityLogger.log_event(
             event_type="password_changed",
@@ -761,15 +748,13 @@ class AuthService:
         sessions = []
 
         for session_id in session_ids:
-            session_id_str = session_id.decode() if isinstance(session_id, bytes) else session_id
+            session_id_str = decode_bytes(session_id)
             session_data = self.redis.hgetall(f"session:{session_id_str}")
 
             if session_data:
+                decoded_session = decode_redis_hash(session_data)
                 session_dict = {}
-                for key, value in session_data.items():
-                    key_str = key.decode() if isinstance(key, bytes) else key
-                    value_str = value.decode() if isinstance(value, bytes) else value
-
+                for key_str, value_str in decoded_session.items():
                     if key_str in ['created_at', 'expires_at']:
                         try:
                             session_dict[key_str] = datetime.fromisoformat(value_str)
@@ -801,7 +786,7 @@ class AuthService:
             return False
 
         session_user_id = session_data.get(b'user_id' if isinstance(list(session_data.keys())[0], bytes) else 'user_id')
-        session_user_id = session_user_id.decode() if isinstance(session_user_id, bytes) else session_user_id
+        session_user_id = decode_bytes(session_user_id)
 
         if session_user_id != user_id:
             raise ValueError("이 세션에 대한 권한이 없습니다")
@@ -1016,19 +1001,17 @@ class AuthService:
 
         users = []
         for user_id in page_user_ids:
-            user_id_str = user_id.decode() if isinstance(user_id, bytes) else user_id
+            user_id_str = decode_bytes(user_id)
             user_data = self.redis.hgetall(f"user:{user_id_str}")
 
             if user_data:
+                decoded_data = decode_redis_hash(user_data)
                 user_dict = {}
-                for key, value in user_data.items():
-                    key_str = key.decode() if isinstance(key, bytes) else key
-                    value_str = value.decode() if isinstance(value, bytes) else value
-
+                for key_str, value_str in decoded_data.items():
                     if key_str in ['created_at', 'last_login', 'locked_until']:
                         try:
                             user_dict[key_str] = datetime.fromisoformat(value_str) if value_str and value_str != 'None' else None
-                        except:
+                        except Exception:
                             user_dict[key_str] = None
                     elif key_str == 'is_active':
                         user_dict[key_str] = value_str.lower() == 'true'
@@ -1073,17 +1056,15 @@ class AuthService:
         if not is_active:
             session_ids = self.redis.smembers(f"user:sessions:{user_id}")
             for session_id in session_ids:
-                session_id_str = session_id.decode() if isinstance(session_id, bytes) else session_id
+                session_id_str = decode_bytes(session_id)
                 self.redis.delete(f"session:{session_id_str}")
             self.redis.delete(f"user:sessions:{user_id}")
 
         # 업데이트된 사용자 조회
         user_data = self.redis.hgetall(f"user:{user_id}")
+        decoded_data = decode_redis_hash(user_data)
         user_dict = {}
-        for key, value in user_data.items():
-            key_str = key.decode() if isinstance(key, bytes) else key
-            value_str = value.decode() if isinstance(value, bytes) else value
-
+        for key_str, value_str in decoded_data.items():
             if key_str in ['created_at', 'last_login', 'locked_until']:
                 try:
                     user_dict[key_str] = datetime.fromisoformat(value_str) if value_str and value_str != 'None' else None
@@ -1141,11 +1122,9 @@ class AuthService:
 
         # 업데이트된 사용자 조회
         user_data = self.redis.hgetall(f"user:{user_id}")
+        decoded_data = decode_redis_hash(user_data)
         user_dict = {}
-        for key, value in user_data.items():
-            key_str = key.decode() if isinstance(key, bytes) else key
-            value_str = value.decode() if isinstance(value, bytes) else value
-
+        for key_str, value_str in decoded_data.items():
             if key_str in ['created_at', 'last_login', 'locked_until']:
                 try:
                     user_dict[key_str] = datetime.fromisoformat(value_str) if value_str and value_str != 'None' else None
@@ -1191,7 +1170,7 @@ class AuthService:
             raise ValueError("사용자를 찾을 수 없습니다")
 
         email = user_data.get(b'email' if isinstance(list(user_data.keys())[0], bytes) else 'email')
-        email = email.decode() if isinstance(email, bytes) else email
+        email = decode_bytes(email)
 
         # 사용자 데이터 삭제
         self.redis.delete(f"user:{user_id}")
@@ -1201,7 +1180,7 @@ class AuthService:
         # 모든 세션 삭제
         session_ids = self.redis.smembers(f"user:sessions:{user_id}")
         for session_id in session_ids:
-            session_id_str = session_id.decode() if isinstance(session_id, bytes) else session_id
+            session_id_str = decode_bytes(session_id)
             self.redis.delete(f"session:{session_id_str}")
         self.redis.delete(f"user:sessions:{user_id}")
 
@@ -1280,7 +1259,7 @@ class AuthService:
             parsed_logs = []
             for log_data in all_logs:
                 try:
-                    log_str = log_data.decode() if isinstance(log_data, bytes) else log_data
+                    log_str = decode_bytes(log_data)
                     log_dict = json.loads(log_str)
 
                     # 이벤트 타입 필터
@@ -1288,7 +1267,11 @@ class AuthService:
                         continue
 
                     parsed_logs.append(log_dict)
-                except Exception:
+                except json.JSONDecodeError as e:
+                    logger.warning(f"Failed to parse security log JSON: {e}")
+                    continue
+                except Exception as e:
+                    logger.warning(f"Error processing security log: {e}")
                     continue
 
             # 페이지네이션
@@ -1378,7 +1361,7 @@ class AuthService:
             parsed_history = []
             for history_data in all_history:
                 try:
-                    history_str = history_data.decode() if isinstance(history_data, bytes) else history_data
+                    history_str = decode_bytes(history_data)
                     history_dict = json.loads(history_str)
 
                     # 상태 필터
@@ -1386,7 +1369,11 @@ class AuthService:
                         continue
 
                     parsed_history.append(history_dict)
-                except Exception:
+                except json.JSONDecodeError as e:
+                    logger.warning(f"Failed to parse login history JSON: {e}")
+                    continue
+                except Exception as e:
+                    logger.warning(f"Error processing login history: {e}")
                     continue
 
             # 페이지네이션

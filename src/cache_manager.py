@@ -11,6 +11,11 @@ from collections import OrderedDict
 from loguru import logger
 from datetime import datetime
 
+from src.redis_helpers import (
+    decode_bytes as _decode_bytes,
+    decode_redis_hash as _decode_redis_hash,
+)
+
 # Module load timestamp for debugging
 logger.warning(f"🔄 cache_manager.py loaded at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - Version: FIXED_OLLAMA_ENCODE")
 
@@ -152,48 +157,17 @@ class CacheManager:
     def decode_bytes(value):
         """
         Safely decode bytes to string, or return value as-is if not bytes.
-
-        Args:
-            value: Value to decode (bytes, str, or other)
-
-        Returns:
-            Decoded string if value was bytes, otherwise original value
-
-        Example:
-            >>> CacheManager.decode_bytes(b'hello')
-            'hello'
-            >>> CacheManager.decode_bytes('hello')
-            'hello'
-            >>> CacheManager.decode_bytes(123)
-            123
+        Delegates to redis_helpers.decode_bytes for consistency.
         """
-        return value.decode('utf-8') if isinstance(value, bytes) else value
+        return _decode_bytes(value)
 
     @staticmethod
     def decode_redis_hash(hash_data: Dict) -> Dict[str, str]:
         """
         Decode all keys and values in a Redis hash from bytes to strings.
-
-        Args:
-            hash_data: Dictionary from redis.hgetall()
-
-        Returns:
-            Dictionary with all keys and values decoded to strings
-
-        Example:
-            >>> data = {b'name': b'John', b'age': b'30'}
-            >>> CacheManager.decode_redis_hash(data)
-            {'name': 'John', 'age': '30'}
+        Delegates to redis_helpers.decode_redis_hash for consistency.
         """
-        if not hash_data:
-            return {}
-
-        decoded = {}
-        for k, v in hash_data.items():
-            key = k.decode('utf-8') if isinstance(k, bytes) else k
-            value = v.decode('utf-8') if isinstance(v, bytes) else v
-            decoded[key] = value
-        return decoded
+        return _decode_redis_hash(hash_data)
 
     def _get_cache_key(self, question_hash: str) -> str:
         """Generate cache key for a question hash."""

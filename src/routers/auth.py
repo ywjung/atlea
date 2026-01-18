@@ -20,6 +20,7 @@ from ..auth.service import AuthService
 from ..auth.webhook_service import WebhookService
 from ..auth.middleware import get_current_active_user, require_admin
 from ..auth.rate_limiter import create_rate_limit_dependency, RateLimitConfig
+from ..redis_helpers import decode_bytes, decode_redis_hash
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 
@@ -368,7 +369,7 @@ async def logout(
                     )
 
                     for session_id in session_ids:
-                        session_id_str = session_id.decode() if isinstance(session_id, bytes) else session_id
+                        session_id_str = decode_bytes(session_id)
                         await auth_service.logout(
                             session_id_str,
                             ip_address=ip_address,
@@ -596,7 +597,7 @@ async def reset_password_with_otp(
                 detail="사용자를 찾을 수 없습니다"
             )
 
-        user_id = user_id.decode() if isinstance(user_id, bytes) else user_id
+        user_id = decode_bytes(user_id)
 
         # 사용자 데이터 조회
         user_data = redis.hgetall(f"user:{user_id}")
@@ -607,11 +608,7 @@ async def reset_password_with_otp(
             )
 
         # bytes를 문자열로 변환
-        user = {
-            k.decode() if isinstance(k, bytes) else k:
-            v.decode() if isinstance(v, bytes) else v
-            for k, v in user_data.items()
-        }
+        user = decode_redis_hash(user_data)
 
         # 2. 사용자에게 OTP가 설정되어 있는지 확인
         if not user.get("totp_secret"):
@@ -692,7 +689,7 @@ async def verify_otp_for_reset(
                 detail="사용자를 찾을 수 없습니다"
             )
 
-        user_id = user_id.decode() if isinstance(user_id, bytes) else user_id
+        user_id = decode_bytes(user_id)
 
         # 사용자 데이터 조회
         user_data = redis.hgetall(f"user:{user_id}")
@@ -703,11 +700,7 @@ async def verify_otp_for_reset(
             )
 
         # bytes를 문자열로 변환
-        user = {
-            k.decode() if isinstance(k, bytes) else k:
-            v.decode() if isinstance(v, bytes) else v
-            for k, v in user_data.items()
-        }
+        user = decode_redis_hash(user_data)
 
         # 2. 사용자에게 OTP가 설정되어 있는지 확인
         if not user.get("totp_secret"):
@@ -787,7 +780,7 @@ async def confirm_password_reset_otp(
                 detail="유효하지 않거나 만료된 토큰입니다"
             )
 
-        email = email.decode() if isinstance(email, bytes) else email
+        email = decode_bytes(email)
 
         # 비밀번호 강도 검증은 Pydantic 모델에서 이미 수행됨
 
@@ -799,7 +792,7 @@ async def confirm_password_reset_otp(
                 detail="사용자를 찾을 수 없습니다"
             )
 
-        user_id = user_id.decode() if isinstance(user_id, bytes) else user_id
+        user_id = decode_bytes(user_id)
 
         # 4. 비밀번호 해싱 및 업데이트
         password_hash = hash_password(new_password)

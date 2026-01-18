@@ -11,6 +11,8 @@ from loguru import logger
 from ..auth.middleware import require_admin
 from .auth import invalidate_dashboard_cache
 from ..cache_manager import CacheManager
+from ..redis_helpers import decode_bytes, decode_redis_hash
+from ..auth.rate_limiter import create_rate_limit_dependency
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -532,11 +534,7 @@ async def get_user_totp_qr(
             )
 
         # bytes를 string으로 변환
-        user_dict = {}
-        for key, value in user_data.items():
-            key_str = key.decode() if isinstance(key, bytes) else key
-            value_str = value.decode() if isinstance(value, bytes) else value
-            user_dict[key_str] = value_str
+        user_dict = decode_redis_hash(user_data)
 
         email = user_dict.get("email", "")
         totp_secret = user_dict.get("totp_secret")
@@ -575,7 +573,8 @@ async def get_user_totp_qr(
 async def reset_user_totp(
     user_id: str,
     request: Request,
-    user=Depends(require_admin)
+    user=Depends(require_admin),
+    _rate_limit=Depends(create_rate_limit_dependency(5, 60, "admin_totp_reset"))
 ):
     """
     사용자 2FA Secret 재생성 (관리자 전용)
@@ -601,11 +600,7 @@ async def reset_user_totp(
             )
 
         # bytes를 string으로 변환
-        user_dict = {}
-        for key, value in user_data.items():
-            key_str = key.decode() if isinstance(key, bytes) else key
-            value_str = value.decode() if isinstance(value, bytes) else value
-            user_dict[key_str] = value_str
+        user_dict = decode_redis_hash(user_data)
 
         email = user_dict.get("email", "")
 
@@ -787,7 +782,8 @@ def generate_temporary_password(length: int = 12) -> str:
 async def reset_user_password(
     reset_request: PasswordResetRequest,
     request: Request,
-    user=Depends(require_admin)
+    user=Depends(require_admin),
+    _rate_limit=Depends(create_rate_limit_dependency(10, 60, "admin_password_reset"))
 ):
     """
     사용자 비밀번호 재설정 (관리자 전용)
@@ -814,7 +810,7 @@ async def reset_user_password(
                 detail="해당 이메일의 사용자를 찾을 수 없습니다"
             )
 
-        user_id_str = user_id.decode() if isinstance(user_id, bytes) else user_id
+        user_id_str = decode_bytes(user_id)
 
         # 새 비밀번호 결정 (입력된 것 또는 자동 생성)
         new_password = reset_request.new_password
@@ -1269,7 +1265,8 @@ async def list_all_sessions(
 @router.delete("/sessions/all", response_model=RevokeSessionResponse)
 async def revoke_all_sessions(
     request: Request,
-    user=Depends(require_admin)
+    user=Depends(require_admin),
+    _rate_limit=Depends(create_rate_limit_dependency(3, 60, "admin_session_revoke_all"))
 ):
     """모든 활성 세션 무효화 (관리자 전용)
 
@@ -1327,7 +1324,8 @@ async def revoke_all_sessions(
 async def revoke_session(
     session_id: str,
     request: Request,
-    user=Depends(require_admin)
+    user=Depends(require_admin),
+    _rate_limit=Depends(create_rate_limit_dependency(20, 60, "admin_session_revoke"))
 ):
     """특정 세션 무효화 (관리자 전용)
 
@@ -1349,12 +1347,8 @@ async def revoke_session(
             )
 
         # 세션에서 user_id 추출
-        user_id = None
-        for k, v in session_data.items():
-            key = k.decode() if isinstance(k, bytes) else k
-            if key == "user_id":
-                user_id = v.decode() if isinstance(v, bytes) else v
-                break
+        decoded_session = decode_redis_hash(session_data)
+        user_id = decoded_session.get("user_id")
 
         # 세션 삭제
         redis.delete(f"session:{session_id}")
@@ -1387,7 +1381,8 @@ async def revoke_session(
 async def revoke_user_sessions(
     user_id: str,
     request: Request,
-    user=Depends(require_admin)
+    user=Depends(require_admin),
+    _rate_limit=Depends(create_rate_limit_dependency(10, 60, "admin_user_session_revoke"))
 ):
     """특정 사용자의 모든 세션 무효화 (관리자 전용)
 
@@ -1427,12 +1422,8 @@ async def revoke_user_sessions(
         await invalidate_dashboard_cache(redis)
 
         # 사용자 이메일 추출
-        user_email = None
-        for k, v in user_data.items():
-            key = k.decode() if isinstance(k, bytes) else k
-            if key == "email":
-                user_email = v.decode() if isinstance(v, bytes) else v
-                break
+        decoded_user = decode_redis_hash(user_data)
+        user_email = decoded_user.get("email")
 
         logger.info(
             f"관리자 {user['email']}가 사용자 {user_email}의 모든 세션을 무효화했습니다 "
@@ -1766,7 +1757,8 @@ async def delete_tavily_api_key(
 @router.get("/tavily-api-key/reveal")
 async def reveal_tavily_api_key(
     request: Request,
-    user: dict = Depends(require_admin)
+    user: dict = Depends(require_admin),
+    _rate_limit=Depends(create_rate_limit_dependency(5, 60, "admin_api_key_reveal"))
 ):
     """Tavily API 키 전체 내용 조회 (관리자 전용, 보안 주의)"""
     try:
@@ -2002,7 +1994,8 @@ async def delete_context7_api_key(
 @router.get("/context7-api-key/reveal")
 async def reveal_context7_api_key(
     request: Request,
-    user: dict = Depends(require_admin)
+    user: dict = Depends(require_admin),
+    _rate_limit=Depends(create_rate_limit_dependency(5, 60, "admin_api_key_reveal"))
 ):
     """Context7 API 키 전체 내용 조회 (관리자 전용, 보안 주의)"""
     try:
