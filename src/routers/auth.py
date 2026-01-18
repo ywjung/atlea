@@ -71,9 +71,9 @@ async def send_password_reset_email(email_service, to_email: str, reset_token: s
         발송 성공 여부
     """
     try:
-        # 비밀번호 재설정 링크 생성
-        base_url = os.getenv("BASE_URL", "http://localhost:8000")
-        reset_link = f"{base_url}/static/reset-password.html?token={reset_token}"
+        # 비밀번호 재설정 링크 생성 (config에서 BASE_URL 가져오기)
+        from ..config.production import config
+        reset_link = f"{config.BASE_URL}/static/reset-password.html?token={reset_token}"
 
         subject = "비밀번호 재설정 안내"
         html_body = f"""

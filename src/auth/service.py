@@ -622,12 +622,17 @@ class AuthService:
         password_hash = hash_password(new_password)
         self.redis.hset(f"user:{user_id}", "password_hash", password_hash)
 
-        # 모든 세션 무효화
+        # 모든 세션 무효화 (Pipeline으로 배치 삭제)
         session_ids = self.redis.smembers(f"user:sessions:{user_id}")
-        for session_id in session_ids:
-            session_id_str = decode_bytes(session_id)
-            self.redis.delete(f"session:{session_id_str}")
-        self.redis.delete(f"user:sessions:{user_id}")
+        if session_ids:
+            pipe = self.redis.pipeline()
+            for session_id in session_ids:
+                session_id_str = decode_bytes(session_id)
+                pipe.delete(f"session:{session_id_str}")
+            pipe.delete(f"user:sessions:{user_id}")
+            pipe.execute()
+        else:
+            self.redis.delete(f"user:sessions:{user_id}")
 
         logger.info(f"🔐 Password reset: {user_id}")
 
@@ -715,12 +720,17 @@ class AuthService:
         new_password_hash = hash_password(new_password)
         self.redis.hset(f"user:{user_id}", "password_hash", new_password_hash)
 
-        # 모든 세션 무효화
+        # 모든 세션 무효화 (Pipeline으로 배치 삭제)
         session_ids = self.redis.smembers(f"user:sessions:{user_id}")
-        for session_id in session_ids:
-            session_id_str = decode_bytes(session_id)
-            self.redis.delete(f"session:{session_id_str}")
-        self.redis.delete(f"user:sessions:{user_id}")
+        if session_ids:
+            pipe = self.redis.pipeline()
+            for session_id in session_ids:
+                session_id_str = decode_bytes(session_id)
+                pipe.delete(f"session:{session_id_str}")
+            pipe.delete(f"user:sessions:{user_id}")
+            pipe.execute()
+        else:
+            self.redis.delete(f"user:sessions:{user_id}")
 
         logger.info(f"🔒 Password changed: {user_id}")
 
@@ -1058,13 +1068,18 @@ class AuthService:
 
         self.redis.hset(f"user:{user_id}", "is_active", str(is_active))
 
-        # 비활성화 시 모든 세션 무효화
+        # 비활성화 시 모든 세션 무효화 (Pipeline으로 배치 삭제)
         if not is_active:
             session_ids = self.redis.smembers(f"user:sessions:{user_id}")
-            for session_id in session_ids:
-                session_id_str = decode_bytes(session_id)
-                self.redis.delete(f"session:{session_id_str}")
-            self.redis.delete(f"user:sessions:{user_id}")
+            if session_ids:
+                pipe = self.redis.pipeline()
+                for session_id in session_ids:
+                    session_id_str = decode_bytes(session_id)
+                    pipe.delete(f"session:{session_id_str}")
+                pipe.delete(f"user:sessions:{user_id}")
+                pipe.execute()
+            else:
+                self.redis.delete(f"user:sessions:{user_id}")
 
         # 업데이트된 사용자 조회
         user_data = self.redis.hgetall(f"user:{user_id}")

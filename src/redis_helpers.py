@@ -122,3 +122,85 @@ def get_hash_field(hash_data: Dict, field: str, default: Any = None) -> Any:
         return default
 
     return decode_bytes(value)
+
+
+def to_int(value: Any, default: int = 0) -> int:
+    """
+    Convert a value to integer, handling bytes and strings.
+
+    Args:
+        value: Value to convert (bytes, str, int, None)
+        default: Default value if conversion fails
+
+    Returns:
+        Integer value or default
+
+    Example:
+        >>> to_int(b'42')
+        42
+        >>> to_int('42')
+        42
+        >>> to_int(None, 0)
+        0
+    """
+    if value is None:
+        return default
+    try:
+        decoded = decode_bytes(value)
+        return int(decoded) if decoded else default
+    except (ValueError, TypeError):
+        return default
+
+
+def to_bool(value: Any, default: bool = False) -> bool:
+    """
+    Convert a value to boolean, handling bytes and strings.
+
+    Args:
+        value: Value to convert (bytes, str, bool, None)
+        default: Default value if conversion fails
+
+    Returns:
+        Boolean value
+
+    Example:
+        >>> to_bool(b'true')
+        True
+        >>> to_bool('True')
+        True
+        >>> to_bool('1')
+        True
+        >>> to_bool(b'false')
+        False
+    """
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    decoded = decode_bytes(value)
+    if isinstance(decoded, str):
+        return decoded.lower() in ('true', '1', 'yes')
+    return default
+
+
+def to_bytes(value: Any) -> bytes:
+    """
+    Convert a value to bytes for Redis storage.
+
+    Args:
+        value: Value to convert (str, bytes, int, etc.)
+
+    Returns:
+        Bytes representation
+
+    Example:
+        >>> to_bytes('hello')
+        b'hello'
+        >>> to_bytes(42)
+        b'42'
+    """
+    if isinstance(value, bytes):
+        return value
+    if isinstance(value, str):
+        return value.encode('utf-8')
+    return str(value).encode('utf-8')

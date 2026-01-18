@@ -52,6 +52,7 @@ class ProductionConfig:
     # Security
     SECRET_KEY: Optional[str] = os.getenv("SECRET_KEY")
     REQUIRE_HTTPS: bool = os.getenv("REQUIRE_HTTPS", "false").lower() == "true"
+    BASE_URL: str = os.getenv("BASE_URL", "http://localhost:8000")
 
     # Logging
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO" if ENV == "production" else "DEBUG")
@@ -73,6 +74,12 @@ class ProductionConfig:
             # SECRET_KEY 필수
             if not cls.SECRET_KEY:
                 errors.append("SECRET_KEY must be set in production")
+
+            # BASE_URL 검증 (production에서는 localhost가 아니어야 함)
+            if not cls.BASE_URL or cls.BASE_URL == "http://localhost:8000":
+                logger.warning("⚠️  BASE_URL is using default localhost (must be set for production)")
+            elif not cls.BASE_URL.startswith("https://"):
+                logger.warning("⚠️  BASE_URL should use HTTPS in production")
 
             # DEBUG 모드 비활성화 확인
             if cls.DEBUG:
