@@ -1338,6 +1338,21 @@ async def revoke_session(
     try:
         redis = request.app.state.cache_manager.redis
 
+        # 세션 ID 형식 검증
+        if not session_id or len(session_id) < 10:
+            raise HTTPException(
+                status_code=400,
+                detail="유효하지 않은 세션 ID 형식입니다"
+            )
+
+        # 자기 자신의 세션인지 확인 (현재 요청의 세션)
+        current_session_id = request.cookies.get("session_id")
+        if current_session_id == session_id:
+            raise HTTPException(
+                status_code=400,
+                detail="자신의 현재 세션은 무효화할 수 없습니다"
+            )
+
         # 세션 존재 확인
         session_data = redis.hgetall(f"session:{session_id}")
         if not session_data:
@@ -1348,19 +1363,23 @@ async def revoke_session(
 
         # 세션에서 user_id 추출
         decoded_session = decode_redis_hash(session_data)
-        user_id = decoded_session.get("user_id")
+        target_user_id = decoded_session.get("user_id")
+        target_email = decoded_session.get("email", "unknown")
 
         # 세션 삭제
         redis.delete(f"session:{session_id}")
 
         # user:sessions 세트에서도 제거
-        if user_id:
-            redis.srem(f"user:sessions:{user_id}", session_id)
+        if target_user_id:
+            redis.srem(f"user:sessions:{target_user_id}", session_id)
 
         # 대시보드 캐시 무효화 (세션 수 변경)
         await invalidate_dashboard_cache(redis)
 
-        logger.info(f"관리자 {user['email']}가 세션 {session_id}를 무효화했습니다 (user_id: {user_id})")
+        logger.info(
+            f"관리자 {user['email']}가 세션을 무효화했습니다 "
+            f"(session_id: {session_id[:8]}..., target_user: {target_email})"
+        )
 
         return RevokeSessionResponse(
             success=True,
@@ -1395,6 +1414,13 @@ async def revoke_user_sessions(
     try:
         redis = request.app.state.cache_manager.redis
 
+        # 자기 자신의 세션을 무효화하려는 경우 경고
+        if user.get("user_id") == user_id:
+            raise HTTPException(
+                status_code=400,
+                detail="자신의 세션을 모두 무효화할 수 없습니다. 개별 세션을 삭제하세요."
+            )
+
         # 사용자 존재 확인
         user_data = redis.hgetall(f"user:{user_id}")
         if not user_data:
@@ -1402,6 +1428,10 @@ async def revoke_user_sessions(
                 status_code=404,
                 detail="사용자를 찾을 수 없습니다"
             )
+
+        # 사용자 이메일 추출
+        decoded_user = decode_redis_hash(user_data)
+        target_email = decoded_user.get("email", "unknown")
 
         # 사용자의 모든 세션 가져오기
         session_ids = redis.smembers(f"user:sessions:{user_id}")
@@ -1421,12 +1451,8 @@ async def revoke_user_sessions(
         # 대시보드 캐시 무효화 (세션 수 변경)
         await invalidate_dashboard_cache(redis)
 
-        # 사용자 이메일 추출
-        decoded_user = decode_redis_hash(user_data)
-        user_email = decoded_user.get("email")
-
         logger.info(
-            f"관리자 {user['email']}가 사용자 {user_email}의 모든 세션을 무효화했습니다 "
+            f"관리자 {user['email']}가 사용자 {target_email}의 모든 세션을 무효화했습니다 "
             f"(무효화된 세션: {revoked_count}개)"
         )
 
@@ -1758,9 +1784,14 @@ async def delete_tavily_api_key(
 async def reveal_tavily_api_key(
     request: Request,
     user: dict = Depends(require_admin),
+    full: bool = False,
     _rate_limit=Depends(create_rate_limit_dependency(5, 60, "admin_api_key_reveal"))
 ):
-    """Tavily API 키 전체 내용 조회 (관리자 전용, 보안 주의)"""
+    """Tavily API 키 조회 (관리자 전용)
+    
+    Args:
+        full: True면 전체 키 반환 (보안 주의), False면 마스킹된 키 반환
+    """
     try:
         cache_manager = request.app.state.cache_manager
 
@@ -1769,23 +1800,46 @@ async def reveal_tavily_api_key(
 
         if stored_key:
             full_key = stored_key.decode()
-            logger.warning(f"⚠️ Tavily API 키 전체 내용 조회됨 (관리자: {user.get('username')})")
-
-            return {
-                "success": True,
-                "api_key": full_key,
-                "source": "redis"
-            }
+            if full:
+                logger.warning(
+                    f"🔐 Tavily API 키 전체 조회 (관리자: {user.get('username')}, "
+                    f"IP: {request.client.host if request.client else 'unknown'})"
+                )
+                return {
+                    "success": True,
+                    "api_key": full_key,
+                    "masked": False,
+                    "source": "redis"
+                }
+            else:
+                return {
+                    "success": True,
+                    "api_key": mask_api_key(full_key),
+                    "masked": True,
+                    "source": "redis"
+                }
         else:
             # 환경 변수 확인
             env_key = os.getenv('TAVILY_API_KEY')
             if env_key:
-                logger.warning(f"⚠️ Tavily API 키 전체 내용 조회됨 - 환경 변수 (관리자: {user.get('username')})")
-                return {
-                    "success": True,
-                    "api_key": env_key,
-                    "source": "environment"
-                }
+                if full:
+                    logger.warning(
+                        f"🔐 Tavily API 키 전체 조회 - 환경변수 (관리자: {user.get('username')}, "
+                        f"IP: {request.client.host if request.client else 'unknown'})"
+                    )
+                    return {
+                        "success": True,
+                        "api_key": env_key,
+                        "masked": False,
+                        "source": "environment"
+                    }
+                else:
+                    return {
+                        "success": True,
+                        "api_key": mask_api_key(env_key),
+                        "masked": True,
+                        "source": "environment"
+                    }
 
             raise HTTPException(
                 status_code=404,
@@ -1995,9 +2049,14 @@ async def delete_context7_api_key(
 async def reveal_context7_api_key(
     request: Request,
     user: dict = Depends(require_admin),
+    full: bool = False,
     _rate_limit=Depends(create_rate_limit_dependency(5, 60, "admin_api_key_reveal"))
 ):
-    """Context7 API 키 전체 내용 조회 (관리자 전용, 보안 주의)"""
+    """Context7 API 키 조회 (관리자 전용)
+    
+    Args:
+        full: True면 전체 키 반환 (보안 주의), False면 마스킹된 키 반환
+    """
     try:
         cache_manager = request.app.state.cache_manager
 
@@ -2006,23 +2065,46 @@ async def reveal_context7_api_key(
 
         if stored_key:
             full_key = stored_key.decode()
-            logger.warning(f"⚠️ Context7 API 키 전체 내용 조회됨 (관리자: {user.get('username')})")
-
-            return {
-                "success": True,
-                "api_key": full_key,
-                "source": "redis"
-            }
+            if full:
+                logger.warning(
+                    f"🔐 Context7 API 키 전체 조회 (관리자: {user.get('username')}, "
+                    f"IP: {request.client.host if request.client else 'unknown'})"
+                )
+                return {
+                    "success": True,
+                    "api_key": full_key,
+                    "masked": False,
+                    "source": "redis"
+                }
+            else:
+                return {
+                    "success": True,
+                    "api_key": mask_api_key(full_key),
+                    "masked": True,
+                    "source": "redis"
+                }
         else:
             # 환경 변수 확인
             env_key = os.getenv('CONTEXT7_API_KEY')
             if env_key:
-                logger.warning(f"⚠️ Context7 API 키 전체 내용 조회됨 - 환경 변수 (관리자: {user.get('username')})")
-                return {
-                    "success": True,
-                    "api_key": env_key,
-                    "source": "environment"
-                }
+                if full:
+                    logger.warning(
+                        f"🔐 Context7 API 키 전체 조회 - 환경변수 (관리자: {user.get('username')}, "
+                        f"IP: {request.client.host if request.client else 'unknown'})"
+                    )
+                    return {
+                        "success": True,
+                        "api_key": env_key,
+                        "masked": False,
+                        "source": "environment"
+                    }
+                else:
+                    return {
+                        "success": True,
+                        "api_key": mask_api_key(env_key),
+                        "masked": True,
+                        "source": "environment"
+                    }
 
             raise HTTPException(
                 status_code=404,
@@ -2043,18 +2125,75 @@ async def reveal_context7_api_key(
 # 시스템 통계 API
 # ============================================================================
 
-def invalidate_stats_cache(redis_client):
-    """통계 캐시 무효화
 
-    문서 업로드/삭제, 대화 생성 등 통계에 영향을 주는 작업 후 호출합니다.
+
+def count_redis_keys(redis_client, pattern: str, max_count: int = 100000) -> int:
+    """Redis 키 개수를 메모리 효율적으로 카운트
+
+    모든 키를 메모리에 로드하지 않고 스캔하면서 카운트합니다.
+    max_count에 도달하면 조기 종료합니다.
 
     Args:
         redis_client: Redis 클라이언트
+        pattern: 매칭할 키 패턴 (예: "doc:group:*")
+        max_count: 최대 카운트 제한 (메모리 보호)
+
+    Returns:
+        매칭된 키 개수 (max_count 이상이면 max_count 반환)
+    """
+    count = 0
+    for _ in redis_client.scan_iter(match=pattern, count=1000):
+        count += 1
+        if count >= max_count:
+            logger.warning(f"키 카운트가 최대값 {max_count}에 도달: {pattern}")
+            break
+    return count
+
+
+def mask_api_key(key: str, show_chars: int = 4) -> str:
+    """API 키를 마스킹하여 보안 강화
+
+    Args:
+        key: 원본 API 키
+        show_chars: 앞뒤로 보여줄 문자 수 (기본값: 4)
+
+    Returns:
+        마스킹된 키 (예: "tvly-****...****")
+    """
+    if not key:
+        return ""
+    if len(key) <= show_chars * 2:
+        return "*" * len(key)
+    return f"{key[:show_chars]}{'*' * 8}...{'*' * 8}{key[-show_chars:]}"
+
+
+def invalidate_stats_cache(redis_client, include_dashboard: bool = True):
+    """통계 캐시 무효화
+
+    문서 업로드/삭제, 대화 생성 등 통계에 영향을 주는 작업 후 호출합니다.
+    Pipeline을 사용하여 원자적으로 여러 캐시를 삭제합니다.
+
+    Args:
+        redis_client: Redis 클라이언트
+        include_dashboard: 대시보드 캐시도 함께 무효화할지 여부
     """
     try:
-        redis_client.delete("cache:stats:documents")
-        redis_client.delete("cache:stats:redis")
-        logger.debug("통계 캐시 무효화 완료")
+        pipe = redis_client.pipeline()
+        
+        # 통계 관련 캐시
+        pipe.delete("cache:stats:documents")
+        pipe.delete("cache:stats:redis")
+        
+        # 대시보드 캐시 (선택적)
+        if include_dashboard:
+            pipe.delete("cache:admin:dashboard")
+            pipe.delete("cache:admin:dashboard:stats")
+        
+        results = pipe.execute()
+        deleted_count = sum(1 for r in results if r)
+        
+        if deleted_count > 0:
+            logger.debug(f"통계 캐시 무효화 완료: {deleted_count}개 키 삭제")
     except Exception as e:
         logger.warning(f"통계 캐시 무효화 실패: {e}")
 
@@ -2140,9 +2279,8 @@ async def get_document_stats(
             logger.debug("문서 통계 캐시 히트")
             return json.loads(cached_stats)
 
-        # 문서 개수 (doc:group:* 패턴)
-        doc_keys = list(redis_client.scan_iter(match="doc:group:*", count=1000))
-        total_documents = len(doc_keys)
+        # 문서 개수 (메모리 효율적 카운팅)
+        total_documents = count_redis_keys(redis_client, "doc:group:*", max_count=100000)
 
         # RediSearch 인덱스에서 청크 개수
         total_chunks = 0
@@ -2157,9 +2295,8 @@ async def get_document_stats(
             logger.warning(f"RediSearch 인덱스 정보 조회 실패: {e}")
             total_chunks = 0
 
-        # 대화 개수 (conversation:* 패턴)
-        conv_keys = list(redis_client.scan_iter(match="conversation:*", count=1000))
-        total_conversations = len(conv_keys)
+        # 대화 개수 (메모리 효율적 카운팅)
+        total_conversations = count_redis_keys(redis_client, "conversation:*", max_count=100000)
 
         stats = {
             "total_documents": total_documents,
