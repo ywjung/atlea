@@ -32,6 +32,7 @@ from ..cache_manager import CacheManager
 from ..document_tracker import DocumentTracker
 from ..embeddings import EmbeddingModel
 from .admin import invalidate_stats_cache
+from ..utils.pagination import calculate_total_pages
 
 # Create router
 router = APIRouter(prefix="/api", tags=["Documents"])
@@ -897,10 +898,10 @@ async def list_documents(
 
         return {
             "documents": paginated_documents,
-            "total_count": total_count,
+            "total": total_count,
             "page": page,
             "page_size": page_size,
-            "total_pages": (total_count + page_size - 1) // page_size  # ceiling division
+            "total_pages": calculate_total_pages(total_count, page_size)
         }
     except Exception as e:
         # Security: Use sanitized error message (prevents information disclosure)

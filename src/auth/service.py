@@ -22,6 +22,7 @@ from .brute_force_protection import BruteForceProtection
 from .security_logger import SecurityLogger
 from .password_reset import PasswordResetService
 from src.redis_helpers import decode_bytes, decode_redis_hash
+from src.utils.pagination import calculate_total_pages
 
 
 class AuthService:
@@ -1027,7 +1028,7 @@ class AuthService:
             "total": total_users,
             "page": page,
             "page_size": page_size,
-            "total_pages": (total_users + page_size - 1) // page_size
+            "total_pages": calculate_total_pages(total_users, page_size)
         }
 
     async def update_user_status(
@@ -1285,7 +1286,7 @@ class AuthService:
                 "total": total_logs,
                 "page": page,
                 "page_size": page_size,
-                "total_pages": (total_logs + page_size - 1) // page_size if page_size > 0 else 0
+                "total_pages": calculate_total_pages(total_logs, page_size)
             }
 
         except Exception as e:
@@ -1387,7 +1388,7 @@ class AuthService:
                 "total": total_records,
                 "page": page,
                 "page_size": page_size,
-                "total_pages": (total_records + page_size - 1) // page_size if page_size > 0 else 0
+                "total_pages": calculate_total_pages(total_records, page_size)
             }
 
         except Exception as e:

@@ -21,6 +21,15 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 # Pydantic Models
 # ============================================================================
 
+class ConfigResponseBase(BaseModel):
+    """설정 응답 공통 베이스 클래스
+
+    모든 설정 응답 모델에서 사용되는 공통 필드를 정의합니다.
+    새로운 설정 응답 모델은 이 클래스를 상속받아 사용하세요.
+    """
+    message: str = "설정 조회 성공"
+
+
 class RateLimitConfig(BaseModel):
     """Rate Limit 설정 모델"""
     enabled: bool
@@ -56,12 +65,11 @@ class TotpConfig(BaseModel):
     enabled: bool
 
 
-class TotpConfigResponse(BaseModel):
+class TotpConfigResponse(ConfigResponseBase):
     """2FA 설정 응답 모델"""
     enabled: bool
     type: str  # "totp"
     configured: bool
-    message: str
 
 
 class UserTotpResponse(BaseModel):
@@ -80,13 +88,12 @@ class BruteForceConfig(BaseModel):
     ip_lockout_duration: int  # IP 차단 시간 (초)
 
 
-class BruteForceConfigResponse(BaseModel):
+class BruteForceConfigResponse(ConfigResponseBase):
     """브루트 포스 보호 설정 응답 모델"""
     max_attempts: int
     lockout_duration: int
     ip_max_attempts: int
     ip_lockout_duration: int
-    message: str
 
 
 class HybridRAGConfig(BaseModel):
@@ -96,13 +103,12 @@ class HybridRAGConfig(BaseModel):
     doc_search_enabled: Optional[bool] = None
 
 
-class HybridRAGConfigResponse(BaseModel):
+class HybridRAGConfigResponse(ConfigResponseBase):
     """하이브리드 RAG 설정 응답 모델"""
     enabled: bool
     web_search_enabled: bool
     doc_search_enabled: bool
     tavily_configured: bool
-    message: str
 
 
 class PasswordResetRequest(BaseModel):
@@ -124,11 +130,10 @@ class PasswordResetMethodConfig(BaseModel):
     method: str  # "email" 또는 "admin"
 
 
-class PasswordResetMethodResponse(BaseModel):
+class PasswordResetMethodResponse(ConfigResponseBase):
     """비밀번호 재설정 방식 설정 응답 모델"""
     method: str
     email_configured: bool
-    message: str
 
 
 class SessionInfo(BaseModel):
