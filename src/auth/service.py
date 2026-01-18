@@ -1000,11 +1000,16 @@ class AuthService:
         end = start + page_size
         page_user_ids = all_user_ids[start:end]
 
-        users = []
-        for user_id in page_user_ids:
-            user_id_str = decode_bytes(user_id)
-            user_data = self.redis.hgetall(f"user:{user_id_str}")
+        # Pipeline으로 배치 조회 (N+1 쿼리 방지)
+        user_id_strs = [decode_bytes(user_id) for user_id in page_user_ids]
+        
+        pipe = self.redis.pipeline()
+        for user_id_str in user_id_strs:
+            pipe.hgetall(f"user:{user_id_str}")
+        user_data_list = pipe.execute()
 
+        users = []
+        for user_data in user_data_list:
             if user_data:
                 decoded_data = decode_redis_hash(user_data)
                 user_dict = {}

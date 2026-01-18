@@ -3,6 +3,7 @@
 FastAPI router for user registration, login, logout, and user management.
 """
 
+import os
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from pydantic import BaseModel
 from typing import Optional, List
@@ -31,29 +32,28 @@ async def invalidate_dashboard_cache(redis):
     """대시보드 캐시 무효화
 
     사용자 데이터가 변경되었을 때 모든 대시보드 캐시를 삭제합니다.
+    동기 Redis 클라이언트를 사용하며, Pipeline으로 배치 삭제합니다.
 
     Args:
-        redis: Redis 클라이언트
+        redis: Redis 클라이언트 (동기)
     """
     try:
         from loguru import logger
         pattern = "dashboard_cache:*"
-        cursor = 0
-        invalidated_count = 0
 
-        # 모든 대시보드 캐시 키 찾아서 삭제
-        while True:
-            cursor, keys = await redis.scan(cursor, match=pattern, count=100)
+        # scan_iter로 키 수집 (동기 호출)
+        keys_to_delete = list(redis.scan_iter(match=pattern, count=100))
 
-            for key in keys:
-                await redis.delete(key)
-                invalidated_count += 1
+        if not keys_to_delete:
+            return
 
-            if cursor == 0:
-                break
+        # Pipeline으로 배치 삭제
+        pipe = redis.pipeline()
+        for key in keys_to_delete:
+            pipe.delete(key)
+        pipe.execute()
 
-        if invalidated_count > 0:
-            logger.info(f"🗑️  Invalidated {invalidated_count} dashboard cache entries")
+        logger.info(f"🗑️  Invalidated {len(keys_to_delete)} dashboard cache entries")
     except Exception as e:
         from loguru import logger
         logger.error(f"Failed to invalidate dashboard cache: {e}")
@@ -72,8 +72,8 @@ async def send_password_reset_email(email_service, to_email: str, reset_token: s
     """
     try:
         # 비밀번호 재설정 링크 생성
-        # 프로덕션에서는 실제 도메인으로 변경 필요
-        reset_link = f"http://localhost:8000/static/reset-password.html?token={reset_token}"
+        base_url = os.getenv("BASE_URL", "http://localhost:8000")
+        reset_link = f"{base_url}/static/reset-password.html?token={reset_token}"
 
         subject = "비밀번호 재설정 안내"
         html_body = f"""

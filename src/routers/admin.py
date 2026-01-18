@@ -2206,7 +2206,8 @@ def invalidate_stats_cache(redis_client, include_dashboard: bool = True):
 @router.get("/redis-stats")
 async def get_redis_stats(
     request: Request,
-    user: dict = Depends(require_admin)
+    user: dict = Depends(require_admin),
+    _rate_limit=Depends(create_rate_limit_dependency(30, 60, "admin_redis_stats"))
 ):
     """Redis 통계 조회 (관리자 전용)
 
@@ -2258,7 +2259,8 @@ async def get_redis_stats(
 @router.get("/document-stats")
 async def get_document_stats(
     request: Request,
-    user: dict = Depends(require_admin)
+    user: dict = Depends(require_admin),
+    _rate_limit=Depends(create_rate_limit_dependency(30, 60, "admin_document_stats"))
 ):
     """문서 및 대화 통계 조회 (관리자 전용)
 
