@@ -4480,6 +4480,234 @@
                 </div>
             </div>
 
+            <!-- Security Settings Help -->
+            <div class="card" style="margin-bottom: 20px;">
+                <div class="card-header" style="cursor: pointer;" onclick="toggleHelpSection('securityHelp')">
+                    <h3 style="margin: 0; display: flex; justify-content: space-between; align-items: center;">
+                        🔐 보안 설정
+                        <span id="securityHelpToggle">▼</span>
+                    </h3>
+                </div>
+                <div id="securityHelp" class="card-body" style="display: none;">
+                    <h4 style="color: #667eea; margin-bottom: 15px;">🚦 Rate Limiting (요청 제한)</h4>
+                    <ul style="line-height: 1.8; color: #444;">
+                        <li><strong>기능:</strong> 일정 시간 내 API 요청 수를 제한하여 서버 과부하 방지</li>
+                        <li><strong>설정 항목:</strong>
+                            <ul style="margin: 5px 0 0 20px;">
+                                <li>요청 제한 수: 시간당 허용되는 최대 요청 수</li>
+                                <li>시간 창(Window): 제한이 적용되는 시간 범위</li>
+                                <li>차단 시간: 제한 초과 시 차단되는 시간</li>
+                            </ul>
+                        </li>
+                        <li><strong>용도:</strong> DDoS 방어, API 남용 방지, 서버 안정성 확보</li>
+                    </ul>
+
+                    <h4 style="color: #667eea; margin: 20px 0 15px 0;">🛡️ Brute Force 보호</h4>
+                    <ul style="line-height: 1.8; color: #444;">
+                        <li><strong>기능:</strong> 반복적인 로그인 시도 차단으로 무차별 대입 공격 방어</li>
+                        <li><strong>설정 항목:</strong>
+                            <ul style="margin: 5px 0 0 20px;">
+                                <li>최대 시도 횟수: 차단 전 허용되는 실패 횟수</li>
+                                <li>잠금 시간: 계정 잠금 유지 시간</li>
+                                <li>시도 창: 실패 횟수 계산 기간</li>
+                            </ul>
+                        </li>
+                        <li><strong>계정 잠금:</strong> 설정된 횟수 초과 시 자동으로 계정이 일시 잠금</li>
+                        <li><strong>관리자 해제:</strong> 잠긴 계정은 관리자가 수동으로 해제 가능</li>
+                    </ul>
+
+                    <h4 style="color: #667eea; margin: 20px 0 15px 0;">🤖 CAPTCHA 설정</h4>
+                    <ul style="line-height: 1.8; color: #444;">
+                        <li><strong>기능:</strong> 봇에 의한 자동화된 로그인/회원가입 시도 차단</li>
+                        <li><strong>적용 위치:</strong> 로그인, 회원가입, 비밀번호 재설정 페이지</li>
+                        <li><strong>설정:</strong> 활성화/비활성화 토글로 간편하게 제어</li>
+                        <li><strong>사용자 경험:</strong> 활성화 시 간단한 이미지 인증 필요</li>
+                    </ul>
+
+                    <div style="margin-top: 20px; padding: 15px; background: #e7f3ff; border-left: 4px solid #2196f3; border-radius: 4px;">
+                        <p style="margin: 0; color: #0d47a1;"><strong>💡 팁:</strong> 보안과 사용자 편의성 사이에서 균형을 맞추세요. 내부 사용자만 있는 환경에서는 Rate Limiting을 완화하고, 외부 공개 시스템에서는 모든 보안 기능을 활성화하세요.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 2FA/TOTP Help -->
+            <div class="card" style="margin-bottom: 20px;">
+                <div class="card-header" style="cursor: pointer;" onclick="toggleHelpSection('totpHelp')">
+                    <h3 style="margin: 0; display: flex; justify-content: space-between; align-items: center;">
+                        🔑 2단계 인증 (2FA/TOTP)
+                        <span id="totpHelpToggle">▼</span>
+                    </h3>
+                </div>
+                <div id="totpHelp" class="card-body" style="display: none;">
+                    <h4 style="color: #667eea; margin-bottom: 15px;">📱 2FA란?</h4>
+                    <ul style="line-height: 1.8; color: #444;">
+                        <li><strong>정의:</strong> 비밀번호 외에 추가 인증 수단을 요구하는 보안 방식</li>
+                        <li><strong>TOTP:</strong> Time-based One-Time Password - 시간 기반 일회용 비밀번호</li>
+                        <li><strong>인증 앱:</strong> Google Authenticator, Microsoft Authenticator 등 지원</li>
+                    </ul>
+
+                    <h4 style="color: #667eea; margin: 20px 0 15px 0;">⚙️ 시스템 설정</h4>
+                    <ul style="line-height: 1.8; color: #444;">
+                        <li><strong>2FA 활성화:</strong> 시스템 전체에서 2FA 기능 사용 여부 설정</li>
+                        <li><strong>강제 적용:</strong> 모든 사용자에게 2FA를 의무화할지 선택</li>
+                        <li><strong>발급 제어:</strong> 관리자가 사용자별 2FA 상태 관리</li>
+                    </ul>
+
+                    <h4 style="color: #667eea; margin: 20px 0 15px 0;">👤 사용자별 관리</h4>
+                    <ul style="line-height: 1.8; color: #444;">
+                        <li><strong>상태 확인:</strong> 사용자 목록에서 2FA 활성화 상태 확인</li>
+                        <li><strong>초기화:</strong> 사용자가 기기를 분실한 경우 관리자가 TOTP 초기화</li>
+                        <li><strong>재설정:</strong> 초기화 후 사용자가 새로운 QR 코드로 재등록</li>
+                    </ul>
+
+                    <h4 style="color: #667eea; margin: 20px 0 15px 0;">🔄 사용자 등록 과정</h4>
+                    <ol style="line-height: 1.8; color: #444;">
+                        <li>프로필 메뉴에서 "2FA 설정" 선택</li>
+                        <li>QR 코드를 인증 앱으로 스캔</li>
+                        <li>앱에서 생성된 6자리 코드 입력하여 확인</li>
+                        <li>이후 로그인 시 비밀번호 + TOTP 코드 함께 입력</li>
+                    </ol>
+
+                    <div style="margin-top: 20px; padding: 15px; background: #fff3cd; border-left: 4px solid #ffc107; border-radius: 4px;">
+                        <p style="margin: 0; color: #856404;"><strong>⚠️ 주의:</strong> 2FA를 초기화하면 사용자는 다시 QR 코드를 스캔하여 새로 등록해야 합니다. 초기화 전 사용자에게 미리 안내하세요.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- API Key Management Help -->
+            <div class="card" style="margin-bottom: 20px;">
+                <div class="card-header" style="cursor: pointer;" onclick="toggleHelpSection('apiKeyHelp')">
+                    <h3 style="margin: 0; display: flex; justify-content: space-between; align-items: center;">
+                        🔌 API 키 관리
+                        <span id="apiKeyHelpToggle">▼</span>
+                    </h3>
+                </div>
+                <div id="apiKeyHelp" class="card-body" style="display: none;">
+                    <h4 style="color: #667eea; margin-bottom: 15px;">🌐 Tavily API (웹 검색)</h4>
+                    <ul style="line-height: 1.8; color: #444;">
+                        <li><strong>용도:</strong> 실시간 웹 검색으로 최신 정보 제공</li>
+                        <li><strong>획득:</strong> <a href="https://tavily.com" target="_blank" style="color: #667eea;">tavily.com</a>에서 무료/유료 API 키 발급</li>
+                        <li><strong>설정:</strong> 시스템 설정 → Hybrid RAG → Tavily API 키 입력</li>
+                        <li><strong>무료 제한:</strong> 월 1,000회 검색 (유료 플랜으로 확장 가능)</li>
+                        <li><strong>보안:</strong> API 키는 암호화되어 저장되며, 마스킹 표시</li>
+                    </ul>
+
+                    <h4 style="color: #667eea; margin: 20px 0 15px 0;">📚 Context7 API (공식 문서)</h4>
+                    <ul style="line-height: 1.8; color: #444;">
+                        <li><strong>용도:</strong> React, Vue, Spring Boot 등 프레임워크 공식 문서 검색</li>
+                        <li><strong>획득:</strong> <a href="https://context7.com" target="_blank" style="color: #667eea;">context7.com</a>에서 API 키 발급</li>
+                        <li><strong>설정:</strong> 시스템 설정 → Hybrid RAG → Context7 API 키 입력</li>
+                        <li><strong>지원 문서:</strong> 주요 프로그래밍 언어 및 프레임워크 공식 문서</li>
+                    </ul>
+
+                    <h4 style="color: #667eea; margin: 20px 0 15px 0;">🔒 API 키 보안</h4>
+                    <ul style="line-height: 1.8; color: #444;">
+                        <li><strong>암호화 저장:</strong> 모든 API 키는 서버에 암호화되어 저장</li>
+                        <li><strong>마스킹 표시:</strong> UI에서 API 키는 일부만 표시 (예: sk-****1234)</li>
+                        <li><strong>전체 보기:</strong> "키 보기" 버튼으로 임시로 전체 키 확인 가능</li>
+                        <li><strong>삭제:</strong> 필요시 API 키 삭제하여 해당 기능 비활성화</li>
+                    </ul>
+
+                    <div style="margin-top: 20px; padding: 15px; background: #e8f5e9; border-left: 4px solid #4caf50; border-radius: 4px;">
+                        <p style="margin: 0; color: #2e7d32;"><strong>💡 팁:</strong> API 키가 없어도 시스템은 정상 작동합니다. Hybrid RAG 기능이 필요한 경우에만 해당 API 키를 설정하세요. 외부 검색이 불필요하면 로컬 문서 검색만으로 충분합니다.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Session Management Help -->
+            <div class="card" style="margin-bottom: 20px;">
+                <div class="card-header" style="cursor: pointer;" onclick="toggleHelpSection('sessionHelp')">
+                    <h3 style="margin: 0; display: flex; justify-content: space-between; align-items: center;">
+                        📊 세션 관리
+                        <span id="sessionHelpToggle">▼</span>
+                    </h3>
+                </div>
+                <div id="sessionHelp" class="card-body" style="display: none;">
+                    <h4 style="color: #667eea; margin-bottom: 15px;">📋 세션 목록</h4>
+                    <ul style="line-height: 1.8; color: #444;">
+                        <li><strong>활성 세션:</strong> 현재 로그인된 모든 사용자 세션 목록</li>
+                        <li><strong>세션 정보:</strong> 사용자명, IP 주소, 접속 시간, 브라우저 정보</li>
+                        <li><strong>실시간 업데이트:</strong> 세션 목록은 자동으로 갱신</li>
+                    </ul>
+
+                    <h4 style="color: #667eea; margin: 20px 0 15px 0;">🔄 세션 관리 기능</h4>
+                    <ul style="line-height: 1.8; color: #444;">
+                        <li><strong>개별 세션 종료:</strong> 특정 사용자의 세션만 강제 종료</li>
+                        <li><strong>사용자별 전체 종료:</strong> 특정 사용자의 모든 세션 일괄 종료</li>
+                        <li><strong>전체 세션 종료:</strong> 모든 사용자의 세션 일괄 종료 (비상 시 사용)</li>
+                    </ul>
+
+                    <h4 style="color: #667eea; margin: 20px 0 15px 0;">⏰ 자동 로그아웃 설정</h4>
+                    <ul style="line-height: 1.8; color: #444;">
+                        <li><strong>비활성 타임아웃:</strong> 일정 시간 활동 없으면 자동 로그아웃 (5-120분)</li>
+                        <li><strong>경고 시간:</strong> 로그아웃 전 경고 표시 시간 설정</li>
+                        <li><strong>세션 갱신:</strong> 사용자 활동 시 자동으로 세션 연장</li>
+                    </ul>
+
+                    <h4 style="color: #667eea; margin: 20px 0 15px 0;">🔐 보안 활용</h4>
+                    <ul style="line-height: 1.8; color: #444;">
+                        <li><strong>의심 활동 감지:</strong> 비정상적인 IP 주소에서 접속 시 세션 종료</li>
+                        <li><strong>비밀번호 유출:</strong> 계정 침해 의심 시 해당 사용자 전체 세션 종료</li>
+                        <li><strong>퇴사자 처리:</strong> 퇴사자 계정의 모든 세션 즉시 종료</li>
+                    </ul>
+
+                    <div style="margin-top: 20px; padding: 15px; background: #fff3cd; border-left: 4px solid #ffc107; border-radius: 4px;">
+                        <p style="margin: 0; color: #856404;"><strong>⚠️ 주의:</strong> 전체 세션 종료 시 모든 사용자가 재로그인해야 합니다. 긴급 상황에서만 사용하고, 사전에 공지하는 것을 권장합니다.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- User Management Help -->
+            <div class="card" style="margin-bottom: 20px;">
+                <div class="card-header" style="cursor: pointer;" onclick="toggleHelpSection('userMgmtHelp')">
+                    <h3 style="margin: 0; display: flex; justify-content: space-between; align-items: center;">
+                        👥 사용자 관리
+                        <span id="userMgmtHelpToggle">▼</span>
+                    </h3>
+                </div>
+                <div id="userMgmtHelp" class="card-body" style="display: none;">
+                    <h4 style="color: #667eea; margin-bottom: 15px;">📋 사용자 목록</h4>
+                    <ul style="line-height: 1.8; color: #444;">
+                        <li><strong>전체 사용자:</strong> 등록된 모든 사용자 조회 및 검색</li>
+                        <li><strong>사용자 정보:</strong> 이메일, 이름, 역할, 조직, 마지막 로그인 시간</li>
+                        <li><strong>상태 표시:</strong> 활성, 비활성, 잠금 상태 확인</li>
+                    </ul>
+
+                    <h4 style="color: #667eea; margin: 20px 0 15px 0;">🔧 사용자 관리 기능</h4>
+                    <ul style="line-height: 1.8; color: #444;">
+                        <li><strong>역할 변경:</strong> 일반 사용자 ↔ 관리자 역할 전환</li>
+                        <li><strong>조직 이동:</strong> 사용자를 다른 조직으로 이동</li>
+                        <li><strong>계정 잠금/해제:</strong> Brute Force 방지로 잠긴 계정 수동 해제</li>
+                        <li><strong>계정 비활성화:</strong> 휴직자, 장기 부재자 계정 일시 중지</li>
+                    </ul>
+
+                    <h4 style="color: #667eea; margin: 20px 0 15px 0;">🔑 비밀번호 관리</h4>
+                    <ul style="line-height: 1.8; color: #444;">
+                        <li><strong>비밀번호 재설정:</strong>
+                            <ul style="margin: 5px 0 0 20px;">
+                                <li><strong>OTP 방식:</strong> 이메일로 6자리 인증 코드 전송 (SMTP 설정 필요)</li>
+                                <li><strong>직접 설정:</strong> 관리자가 새 비밀번호 직접 지정</li>
+                            </ul>
+                        </li>
+                        <li><strong>SMTP 설정:</strong> 시스템 설정에서 이메일 서버 구성</li>
+                        <li><strong>비밀번호 정책:</strong> 최소 8자, 대/소문자, 숫자, 특수문자 포함 권장</li>
+                    </ul>
+
+                    <h4 style="color: #667eea; margin: 20px 0 15px 0;">📧 이메일(SMTP) 설정</h4>
+                    <ul style="line-height: 1.8; color: #444;">
+                        <li><strong>용도:</strong> 비밀번호 재설정 OTP 이메일 발송</li>
+                        <li><strong>설정 항목:</strong> SMTP 서버, 포트, 사용자명, 비밀번호, 발신자 정보</li>
+                        <li><strong>테스트:</strong> 설정 후 "연결 테스트" 버튼으로 확인</li>
+                        <li><strong>Gmail 예시:</strong> smtp.gmail.com, 포트 587, 앱 비밀번호 사용</li>
+                        <li><strong>캐싱:</strong> SMTP 설정은 5분간 캐시되어 성능 최적화</li>
+                    </ul>
+
+                    <div style="margin-top: 20px; padding: 15px; background: #e8f5e9; border-left: 4px solid #4caf50; border-radius: 4px;">
+                        <p style="margin: 0; color: #2e7d32;"><strong>💡 팁:</strong> Gmail을 SMTP로 사용할 경우, 일반 비밀번호가 아닌 "앱 비밀번호"를 생성하여 사용해야 합니다. Google 계정 → 보안 → 2단계 인증 → 앱 비밀번호에서 생성할 수 있습니다.</p>
+                    </div>
+                </div>
+            </div>
+
             <!-- FAQ -->
             <div class="card">
                 <div class="card-header" style="cursor: pointer;" onclick="toggleHelpSection('faqHelp')">
