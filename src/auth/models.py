@@ -8,7 +8,73 @@ from typing import Optional, List
 from datetime import datetime
 from enum import Enum
 import re
+import socket
+import ipaddress
+from urllib.parse import urlparse
 from .password_policy import validate_password_strength
+
+
+def is_safe_url(url: str) -> bool:
+    """URL이 SSRF 공격에 안전한지 확인
+
+    내부 네트워크, 로컬호스트, 사설 IP 등에 대한 요청을 차단합니다.
+
+    Args:
+        url: 검증할 URL
+
+    Returns:
+        안전하면 True, 그렇지 않으면 False
+    """
+    try:
+        parsed = urlparse(url)
+        hostname = parsed.hostname
+
+        if not hostname:
+            return False
+
+        # 로컬호스트 차단
+        if hostname.lower() in ('localhost', '127.0.0.1', '::1', '0.0.0.0'):
+            return False
+
+        # 특수 도메인 차단
+        if hostname.lower().endswith(('.local', '.internal', '.localhost')):
+            return False
+
+        # IP 주소인 경우 사설/예약 IP 차단
+        try:
+            ip = ipaddress.ip_address(hostname)
+
+            # 사설 IP 범위 차단
+            if ip.is_private:
+                return False
+
+            # 예약된 IP 차단 (링크-로컬, 루프백 등)
+            if ip.is_reserved or ip.is_loopback or ip.is_link_local:
+                return False
+
+            # 멀티캐스트, 미지정 주소 차단
+            if ip.is_multicast or ip.is_unspecified:
+                return False
+
+        except ValueError:
+            # IP가 아닌 도메인인 경우 DNS 확인
+            try:
+                resolved_ips = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+                for family, _, _, _, sockaddr in resolved_ips:
+                    ip_str = sockaddr[0]
+                    ip = ipaddress.ip_address(ip_str)
+
+                    if ip.is_private or ip.is_reserved or ip.is_loopback or ip.is_link_local:
+                        return False
+
+            except socket.gaierror:
+                # DNS 확인 실패 시 허용 (나중에 요청 시 실패)
+                pass
+
+        return True
+
+    except Exception:
+        return False
 
 
 class UserCreate(BaseModel):
@@ -262,9 +328,14 @@ class WebhookCreate(BaseModel):
     @field_validator('url')
     @classmethod
     def validate_url(cls, v: str) -> str:
-        """URL 검증"""
+        """URL 검증 (SSRF 방지 포함)"""
         if not v.startswith(('http://', 'https://')):
             raise ValueError('URL은 http:// 또는 https://로 시작해야 합니다')
+
+        # SSRF 방지: 내부 네트워크/사설 IP 차단
+        if not is_safe_url(v):
+            raise ValueError('보안상의 이유로 내부 네트워크 또는 사설 IP로의 웹훅 URL은 허용되지 않습니다')
+
         return v
 
 
@@ -281,9 +352,17 @@ class WebhookUpdate(BaseModel):
     @field_validator('url')
     @classmethod
     def validate_url(cls, v: Optional[str]) -> Optional[str]:
-        """URL 검증"""
-        if v is not None and not v.startswith(('http://', 'https://')):
+        """URL 검증 (SSRF 방지 포함)"""
+        if v is None:
+            return v
+
+        if not v.startswith(('http://', 'https://')):
             raise ValueError('URL은 http:// 또는 https://로 시작해야 합니다')
+
+        # SSRF 방지: 내부 네트워크/사설 IP 차단
+        if not is_safe_url(v):
+            raise ValueError('보안상의 이유로 내부 네트워크 또는 사설 IP로의 웹훅 URL은 허용되지 않습니다')
+
         return v
 
 

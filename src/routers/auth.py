@@ -4,6 +4,7 @@ FastAPI router for user registration, login, logout, and user management.
 """
 
 import os
+import asyncio
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from pydantic import BaseModel
 from typing import Optional, List
@@ -314,7 +315,7 @@ async def login(
         # 타이밍 공격 방지: 성공/실패 여부와 관계없이 최소 응답 시간 보장
         elapsed_ms = (time.time() - start_time) * 1000
         if elapsed_ms < min_response_time_ms:
-            time.sleep((min_response_time_ms - elapsed_ms) / 1000)
+            await asyncio.sleep((min_response_time_ms - elapsed_ms) / 1000)
 
 
 @router.post("/logout")
