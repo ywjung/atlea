@@ -18,6 +18,46 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 
 # ============================================================================
+# Helper Functions
+# ============================================================================
+
+def get_safe_error_message(error: Exception, context: str = "") -> str:
+    """
+    Get sanitized error message for user display
+
+    Prevents information disclosure by mapping exception types to
+    generic user-friendly messages while logging the full error.
+
+    Args:
+        error: The exception that occurred
+        context: Context string for logging (e.g., "rate limit endpoint")
+
+    Returns:
+        Safe error message suitable for user display
+    """
+    error_type = type(error).__name__
+
+    # Log full error for debugging
+    logger.error(f"Error in {context}: {error_type}: {str(error)}")
+
+    # Map exception types to safe messages
+    error_messages = {
+        "ValueError": "잘못된 입력값입니다.",
+        "KeyError": "요청한 리소스를 찾을 수 없습니다.",
+        "ConnectionError": "서비스 연결에 실패했습니다.",
+        "TimeoutError": "요청 시간이 초과되었습니다.",
+        "PermissionError": "접근 권한이 없습니다.",
+        "FileNotFoundError": "파일을 찾을 수 없습니다.",
+    }
+
+    # Return mapped message or generic message
+    return error_messages.get(
+        error_type,
+        "처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
+    )
+
+
+# ============================================================================
 # Pydantic Models
 # ============================================================================
 
@@ -209,7 +249,7 @@ async def get_rate_limit_config(
         logger.error(f"Rate limit 설정 조회 실패: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Rate limit 설정을 가져올 수 없습니다: {str(e)}"
+            detail=get_safe_error_message(e, "rate limit get")
         )
 
 
@@ -256,7 +296,7 @@ async def update_rate_limit_config(
         logger.error(f"Rate limit 설정 업데이트 실패: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Rate limit 설정을 업데이트할 수 없습니다: {str(e)}"
+            detail=get_safe_error_message(e, "rate limit update")
         )
 
 
@@ -296,7 +336,7 @@ async def get_captcha_config(
         logger.error(f"CAPTCHA 설정 조회 실패: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"CAPTCHA 설정을 가져올 수 없습니다: {str(e)}"
+            detail=get_safe_error_message(e, "captcha get")
         )
 
 
@@ -363,7 +403,7 @@ async def update_captcha_config(
         logger.error(f"CAPTCHA 설정 업데이트 실패: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"CAPTCHA 설정을 업데이트할 수 없습니다: {str(e)}"
+            detail=get_safe_error_message(e, "captcha update")
         )
 
 
@@ -447,7 +487,7 @@ async def get_totp_config(
         logger.error(f"2FA 설정 조회 실패: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"2FA 설정을 가져올 수 없습니다: {str(e)}"
+            detail=get_safe_error_message(e, "2fa get")
         )
 
 
@@ -505,7 +545,7 @@ async def update_totp_config(
         logger.error(f"2FA 설정 업데이트 실패: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"2FA 설정을 업데이트할 수 없습니다: {str(e)}"
+            detail=get_safe_error_message(e, "2fa update")
         )
 
 
@@ -570,7 +610,7 @@ async def get_user_totp_qr(
         logger.error(f"사용자 2FA QR 코드 조회 실패: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"QR 코드를 생성할 수 없습니다: {str(e)}"
+            detail=get_safe_error_message(e, "qr code generation")
         )
 
 
@@ -635,7 +675,7 @@ async def reset_user_totp(
         logger.error(f"사용자 2FA 재설정 실패: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"2FA를 재설정할 수 없습니다: {str(e)}"
+            detail=get_safe_error_message(e, "2fa reset")
         )
 
 
@@ -672,7 +712,7 @@ async def get_brute_force_config(
         logger.error(f"브루트 포스 보호 설정 조회 실패: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"브루트 포스 보호 설정을 가져올 수 없습니다: {str(e)}"
+            detail=get_safe_error_message(e, "brute force protection get")
         )
 
 
@@ -743,7 +783,7 @@ async def update_brute_force_config(
         logger.error(f"브루트 포스 보호 설정 업데이트 실패: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"브루트 포스 보호 설정을 업데이트할 수 없습니다: {str(e)}"
+            detail=get_safe_error_message(e, "brute force protection update")
         )
 
 
@@ -865,7 +905,7 @@ async def reset_user_password(
         logger.error(f"비밀번호 재설정 실패: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"비밀번호를 재설정할 수 없습니다: {str(e)}"
+            detail=get_safe_error_message(e, "password reset")
         )
 
 
@@ -899,7 +939,7 @@ async def get_password_reset_method(
         logger.error(f"비밀번호 재설정 방식 조회 실패: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"설정을 조회할 수 없습니다: {str(e)}"
+            detail=get_safe_error_message(e, "settings get")
         )
 
 
@@ -968,7 +1008,7 @@ async def update_password_reset_method(
         logger.error(f"비밀번호 재설정 방식 업데이트 실패: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"설정을 업데이트할 수 없습니다: {str(e)}"
+            detail=get_safe_error_message(e, "settings update")
         )
 
 
@@ -1002,7 +1042,7 @@ async def get_smtp_settings_endpoint(
         logger.error(f"SMTP 설정 조회 실패: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"SMTP 설정을 조회할 수 없습니다: {str(e)}"
+            detail=get_safe_error_message(e, "smtp get")
         )
 
 
@@ -1083,7 +1123,7 @@ async def save_smtp_settings_endpoint(
         logger.error(f"SMTP 설정 저장 실패: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"SMTP 설정을 저장할 수 없습니다: {str(e)}"
+            detail=get_safe_error_message(e, "smtp save")
         )
 
 
@@ -1136,7 +1176,7 @@ async def test_smtp_settings_endpoint(
         logger.error(f"SMTP 연결 테스트 실패: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"SMTP 연결 테스트 중 오류가 발생했습니다: {str(e)}"
+            detail=get_safe_error_message(e, "smtp test")
         )
 
 
@@ -1263,7 +1303,7 @@ async def list_all_sessions(
         logger.error(f"세션 목록 조회 실패: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"세션 목록을 조회할 수 없습니다: {str(e)}"
+            detail=get_safe_error_message(e, "sessions list")
         )
 
 
@@ -1321,7 +1361,7 @@ async def revoke_all_sessions(
         logger.error(f"전체 세션 무효화 실패: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"전체 세션을 무효화할 수 없습니다: {str(e)}"
+            detail=get_safe_error_message(e, "sessions revoke all")
         )
 
 
@@ -1399,7 +1439,7 @@ async def revoke_session(
         logger.error(f"세션 무효화 실패: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"세션을 무효화할 수 없습니다: {str(e)}"
+            detail=get_safe_error_message(e, "session revoke")
         )
 
 
@@ -1474,7 +1514,7 @@ async def revoke_user_sessions(
         logger.error(f"사용자 세션 무효화 실패: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"사용자 세션을 무효화할 수 없습니다: {str(e)}"
+            detail=get_safe_error_message(e, "user sessions revoke")
         )
 
 
@@ -1528,7 +1568,7 @@ async def get_hybrid_rag_config(
         logger.error(f"하이브리드 RAG 설정 조회 실패: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"하이브리드 RAG 설정을 조회할 수 없습니다: {str(e)}"
+            detail=get_safe_error_message(e, "hybrid rag get")
         )
 
 
@@ -1611,7 +1651,7 @@ async def update_hybrid_rag_config(
         logger.error(f"하이브리드 RAG 설정 업데이트 실패: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"하이브리드 RAG 설정을 업데이트할 수 없습니다: {str(e)}"
+            detail=get_safe_error_message(e, "hybrid rag update")
         )
 
 
@@ -1678,7 +1718,7 @@ async def get_tavily_api_key(
         logger.error(f"Tavily API 키 조회 실패: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Tavily API 키를 조회할 수 없습니다: {str(e)}"
+            detail=get_safe_error_message(e, "tavily key get")
         )
 
 
@@ -1737,7 +1777,7 @@ async def update_tavily_api_key(
             logger.error(f"❌ Tavily API key validation failed: {e}")
             raise HTTPException(
                 status_code=400,
-                detail=f"API 키가 유효하지 않습니다: {str(e)}"
+                detail="API 키가 유효하지 않습니다. 키를 확인해주세요."
             )
 
         # Redis에 저장
@@ -1773,7 +1813,7 @@ async def update_tavily_api_key(
         logger.error(f"Tavily API 키 업데이트 실패: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Tavily API 키를 저장할 수 없습니다: {str(e)}"
+            detail=get_safe_error_message(e, "tavily key save")
         )
 
 
@@ -1800,7 +1840,7 @@ async def delete_tavily_api_key(
         logger.error(f"Tavily API 키 삭제 실패: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Tavily API 키를 삭제할 수 없습니다: {str(e)}"
+            detail=get_safe_error_message(e, "tavily key delete")
         )
 
 
@@ -1874,7 +1914,7 @@ async def reveal_tavily_api_key(
         logger.error(f"Tavily API 키 조회 실패: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"API 키를 조회할 수 없습니다: {str(e)}"
+            detail=get_safe_error_message(e, "api key get")
         )
 
 
@@ -1941,7 +1981,7 @@ async def get_context7_api_key(
         logger.error(f"Context7 API 키 조회 실패: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Context7 API 키를 조회할 수 없습니다: {str(e)}"
+            detail=get_safe_error_message(e, "context7 key get")
         )
 
 
@@ -2000,7 +2040,7 @@ async def update_context7_api_key(
             logger.error(f"❌ Context7 API key validation failed: {e}")
             raise HTTPException(
                 status_code=400,
-                detail=f"API 키가 유효하지 않습니다: {str(e)}"
+                detail="API 키가 유효하지 않습니다. 키를 확인해주세요."
             )
 
         # Redis에 저장
@@ -2036,7 +2076,7 @@ async def update_context7_api_key(
         logger.error(f"Context7 API 키 업데이트 실패: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Context7 API 키를 저장할 수 없습니다: {str(e)}"
+            detail=get_safe_error_message(e, "context7 key save")
         )
 
 
@@ -2063,7 +2103,7 @@ async def delete_context7_api_key(
         logger.error(f"Context7 API 키 삭제 실패: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Context7 API 키를 삭제할 수 없습니다: {str(e)}"
+            detail=get_safe_error_message(e, "context7 key delete")
         )
 
 
@@ -2137,7 +2177,7 @@ async def reveal_context7_api_key(
         logger.error(f"Context7 API 키 조회 실패: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"API 키를 조회할 수 없습니다: {str(e)}"
+            detail=get_safe_error_message(e, "api key get")
         )
 
 
@@ -2267,7 +2307,7 @@ async def get_redis_stats(
         logger.error(f"Redis 통계 조회 실패: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Redis 통계를 조회할 수 없습니다: {str(e)}"
+            detail=get_safe_error_message(e, "redis stats")
         )
 
 
@@ -2336,5 +2376,5 @@ async def get_document_stats(
         logger.error(f"문서 통계 조회 실패: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"문서 통계를 조회할 수 없습니다: {str(e)}"
+            detail=get_safe_error_message(e, "document stats")
         )

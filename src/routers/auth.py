@@ -72,6 +72,27 @@ async def invalidate_dashboard_cache(redis):
         logger.error(f"Failed to invalidate dashboard cache: {e}")
 
 
+def get_safe_error_message(error: Exception, context: str = "") -> str:
+    """
+    Get sanitized error message for user display
+    """
+    error_type = type(error).__name__
+    logger.error(f"Error in {context}: {error_type}: {str(error)}")
+
+    error_messages = {
+        "ValueError": "잘못된 입력값입니다.",
+        "KeyError": "요청한 리소스를 찾을 수 없습니다.",
+        "ConnectionError": "서비스 연결에 실패했습니다.",
+        "TimeoutError": "요청 시간이 초과되었습니다.",
+        "PermissionError": "접근 권한이 없습니다.",
+    }
+
+    return error_messages.get(
+        error_type,
+        "처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
+    )
+
+
 async def send_password_reset_email(email_service, to_email: str, reset_token: str) -> bool:
     """비밀번호 재설정 이메일 발송
 
@@ -656,7 +677,7 @@ async def reset_password_with_otp(
         logger.error(f"OTP password reset error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"비밀번호 재설정 중 오류가 발생했습니다: {str(e)}"
+            detail=get_safe_error_message(e, "password reset")
         )
 
 
@@ -754,7 +775,7 @@ async def verify_otp_for_reset(
         logger.error(f"OTP verification error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"OTP 검증 중 오류가 발생했습니다: {str(e)}"
+            detail=get_safe_error_message(e, "otp verification")
         )
 
 
@@ -827,7 +848,7 @@ async def confirm_password_reset_otp(
         logger.error(f"OTP token password reset error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"비밀번호 재설정 중 오류가 발생했습니다: {str(e)}"
+            detail=get_safe_error_message(e, "password reset")
         )
 
 

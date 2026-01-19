@@ -13,8 +13,34 @@ from ..auth.middleware import (
     require_org_admin_or_system_admin
 )
 from ..organization_manager import OrganizationManager
+from loguru import logger
 
 router = APIRouter(prefix="/api/organizations", tags=["organizations"])
+
+
+# ============================================================================
+# Helper Functions
+# ============================================================================
+
+def get_safe_error_message(error: Exception, context: str = "") -> str:
+    """
+    Get sanitized error message for user display
+    """
+    error_type = type(error).__name__
+    logger.error(f"Error in {context}: {error_type}: {str(error)}")
+
+    error_messages = {
+        "ValueError": "잘못된 입력값입니다.",
+        "KeyError": "요청한 리소스를 찾을 수 없습니다.",
+        "ConnectionError": "서비스 연결에 실패했습니다.",
+        "TimeoutError": "요청 시간이 초과되었습니다.",
+        "PermissionError": "접근 권한이 없습니다.",
+    }
+
+    return error_messages.get(
+        error_type,
+        "처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
+    )
 
 
 # ============================================================================
@@ -98,7 +124,7 @@ async def create_organization(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"조직 생성 실패: {str(e)}")
+        raise HTTPException(status_code=500, detail=get_safe_error_message(e, "create organization"))
 
 
 @router.get("", response_model=Dict)
@@ -216,7 +242,7 @@ async def update_organization(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"조직 업데이트 실패: {str(e)}")
+        raise HTTPException(status_code=500, detail=get_safe_error_message(e, "update organization"))
 
 
 @router.delete("/{org_id}", response_model=Dict, dependencies=[Depends(require_admin)])
@@ -261,7 +287,7 @@ async def delete_organization(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"조직 삭제 실패: {str(e)}")
+        raise HTTPException(status_code=500, detail=get_safe_error_message(e, "delete organization"))
 
 
 # ============================================================================
@@ -422,7 +448,7 @@ async def add_organization_member(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"멤버 추가 실패: {str(e)}")
+        raise HTTPException(status_code=500, detail=get_safe_error_message(e, "add member"))
 
 
 @router.delete("/{org_id}/members/{user_id}", response_model=Dict)
@@ -501,7 +527,7 @@ async def remove_organization_member(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"멤버 제거 실패: {str(e)}")
+        raise HTTPException(status_code=500, detail=get_safe_error_message(e, "remove member"))
 
 
 # ============================================================================
@@ -580,7 +606,7 @@ async def get_organization_groups(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"그룹 목록 조회 실패: {str(e)}")
+        raise HTTPException(status_code=500, detail=get_safe_error_message(e, "list groups"))
 
 
 @router.post("/{org_id}/groups/{group_id}", response_model=Dict, dependencies=[Depends(require_admin)])
@@ -660,7 +686,7 @@ async def assign_group_to_organization(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"그룹 할당 실패: {str(e)}")
+        raise HTTPException(status_code=500, detail=get_safe_error_message(e, "assign group"))
 
 
 @router.delete("/{org_id}/groups/{group_id}", response_model=Dict, dependencies=[Depends(require_admin)])
@@ -723,7 +749,7 @@ async def remove_group_from_organization(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"그룹 제거 실패: {str(e)}")
+        raise HTTPException(status_code=500, detail=get_safe_error_message(e, "remove group"))
 
 
 # ============================================================================
@@ -773,7 +799,7 @@ async def promote_to_org_admin(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"조직 관리자 승격 실패: {str(e)}")
+        raise HTTPException(status_code=500, detail=get_safe_error_message(e, "promote org admin"))
 
 
 @router.delete("/{org_id}/admins/{user_id}", response_model=Dict)
@@ -818,7 +844,7 @@ async def demote_from_org_admin(
     except HTTPException:
         raise  # HTTPException은 그대로 전달 (400 에러 등)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"조직 관리자 해제 실패: {str(e)}")
+        raise HTTPException(status_code=500, detail=get_safe_error_message(e, "demote org admin"))
 
 
 @router.post("/maintenance/cleanup-stale-refs", response_model=Dict, dependencies=[Depends(require_admin)])
@@ -848,4 +874,4 @@ async def cleanup_stale_org_references(
         }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"정리 작업 실패: {str(e)}")
+        raise HTTPException(status_code=500, detail=get_safe_error_message(e, "cleanup stale refs"))

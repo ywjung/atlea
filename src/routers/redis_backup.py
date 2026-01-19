@@ -35,6 +35,28 @@ def inject_dependencies(cache_mgr):
     cache_manager = cache_mgr
 
 
+def get_safe_error_message(error: Exception, context: str = "") -> str:
+    """
+    Get sanitized error message for user display
+    """
+    error_type = type(error).__name__
+    logger.error(f"Error in {context}: {error_type}: {str(error)}")
+
+    error_messages = {
+        "ValueError": "잘못된 입력값입니다.",
+        "FileNotFoundError": "파일을 찾을 수 없습니다.",
+        "PermissionError": "파일 접근 권한이 없습니다.",
+        "ConnectionError": "Redis 연결에 실패했습니다.",
+        "TimeoutError": "작업 시간이 초과되었습니다.",
+        "subprocess.CalledProcessError": "명령 실행에 실패했습니다.",
+    }
+
+    return error_messages.get(
+        error_type,
+        "백업 작업 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
+    )
+
+
 # ==================== Pydantic Models ====================
 
 class BackupCreateRequest(BaseModel):
@@ -188,7 +210,7 @@ async def create_redis_backup(
             except subprocess.TimeoutExpired:
                 raise HTTPException(status_code=500, detail="Docker copy timed out")
             except Exception as e:
-                raise HTTPException(status_code=500, detail=f"Docker copy failed: {str(e)}")
+                raise HTTPException(status_code=500, detail=get_safe_error_message(e, "docker copy"))
         else:
             # Copy from local filesystem
             source_dump = Path(redis_dir) / redis_dbfilename
@@ -223,7 +245,7 @@ async def create_redis_backup(
         import traceback
         error_detail = traceback.format_exc()
         logger.error(f"Failed to create backup: {e}\n{error_detail}")
-        raise HTTPException(status_code=500, detail=f"백업 생성 실패: {str(e)}")
+        raise HTTPException(status_code=500, detail=get_safe_error_message(e, "backup create"))
 
 
 @router.get("/list")
@@ -325,7 +347,7 @@ async def restore_redis_backup(
         except Exception as e:
             raise HTTPException(
                 status_code=500,
-                detail=f"Docker 환경 확인 실패: {str(e)}"
+                detail=get_safe_error_message(e, "docker check")
             )
 
         # STEP 3: Get current DBSIZE for validation
@@ -335,7 +357,7 @@ async def restore_redis_backup(
         except Exception as e:
             raise HTTPException(
                 status_code=500,
-                detail=f"Redis DBSIZE 확인 실패: {str(e)}"
+                detail=get_safe_error_message(e, "redis dbsize")
             )
 
         # STEP 4: MANDATORY pre-restore backup
@@ -351,7 +373,7 @@ async def restore_redis_backup(
             except Exception as e:
                 raise HTTPException(
                     status_code=500,
-                    detail=f"Redis SAVE 실패 - 복원을 중단합니다: {str(e)}"
+                    detail=f"Redis SAVE 실패 - 복원을 중단합니다. {get_safe_error_message(e, 'redis save')}"
                 )
 
             # Copy current dump from container - MUST succeed
@@ -390,7 +412,7 @@ async def restore_redis_backup(
             except Exception as e:
                 raise HTTPException(
                     status_code=500,
-                    detail=f"현재 상태 백업 실패 - 복원을 중단합니다: {str(e)}"
+                    detail=f"현재 상태 백업 실패 - 복원을 중단합니다. {get_safe_error_message(e, 'pre-restore backup')}"
                 )
 
             # STEP 5: Copy backup file into Docker container
@@ -419,7 +441,7 @@ async def restore_redis_backup(
                 raise
             except Exception as e:
                 restore_failed = True
-                raise HTTPException(status_code=500, detail=f"백업 복사 실패: {str(e)}")
+                raise HTTPException(status_code=500, detail=get_safe_error_message(e, "backup copy"))
 
             # STEP 6: Restart Redis container
             try:
@@ -455,7 +477,7 @@ async def restore_redis_backup(
                             restore_failed = True
                             raise HTTPException(
                                 status_code=500,
-                                detail=f"Redis 재시작 후 연결 실패: {str(e)}"
+                                detail=f"Redis 재시작 후 연결 실패. {get_safe_error_message(e, 'redis reconnect')}"
                             )
                         await asyncio.sleep(1)
 
@@ -466,7 +488,7 @@ async def restore_redis_backup(
                 raise
             except Exception as e:
                 restore_failed = True
-                raise HTTPException(status_code=500, detail=f"Redis 재시작 실패: {str(e)}")
+                raise HTTPException(status_code=500, detail=get_safe_error_message(e, "redis restart"))
 
             # STEP 7: Verify restore succeeded
             try:
@@ -484,7 +506,7 @@ async def restore_redis_backup(
                 restore_failed = True
                 raise HTTPException(
                     status_code=500,
-                    detail=f"복원 후 검증 실패: {str(e)}"
+                    detail=get_safe_error_message(e, "restore verification")
                 )
 
         else:
@@ -511,7 +533,7 @@ async def restore_redis_backup(
             except Exception as e:
                 raise HTTPException(
                     status_code=500,
-                    detail=f"현재 상태 백업 실패 - 복원을 중단합니다: {str(e)}"
+                    detail=f"현재 상태 백업 실패 - 복원을 중단합니다. {get_safe_error_message(e, 'pre-restore backup local')}"
                 )
 
             # STEP 5: Copy backup file
@@ -522,7 +544,7 @@ async def restore_redis_backup(
                 restore_failed = True
                 raise HTTPException(
                     status_code=500,
-                    detail=f"백업 파일 복사 실패: {str(e)}"
+                    detail=get_safe_error_message(e, "backup file copy")
                 )
 
             logger.warning("⚠️ Step 6/7: Redis needs manual restart to load the backup")
@@ -573,7 +595,7 @@ async def restore_redis_backup(
         raise
     except Exception as e:
         logger.error(f"Unexpected error during restore: {e}")
-        raise HTTPException(status_code=500, detail=f"복원 중 예기치 않은 오류: {str(e)}")
+        raise HTTPException(status_code=500, detail=get_safe_error_message(e, "restore unexpected"))
 
 
 @router.get("/download/{filename}")
