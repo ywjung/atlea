@@ -4,6 +4,10 @@ Hybrid RAG Orchestrator - 다중 소스 RAG 시스템
 로컬 문서 + 웹 검색 + 공식 문서를 결합하여 더 완벽한 답변 제공
 
 📝 Changelog:
+- 2025-01-19: 스마트 검색 모드 개선
+  - benefits_from_web 분석 필드 활용
+  - 웹 검색 트리거 조건 확장 (비교, 추천, 설명 질문 등)
+  - 검색 요약에 benefits_from_web 정보 추가
 - 2025-01-05: 성능 모니터링 시스템 통합
   - MetricsCollector 통합
   - 검색 응답 시간 추적
@@ -210,7 +214,8 @@ class HybridRAGOrchestrator:
         analysis = self.analyzer.analyze(query)
         logger.info(f"📊 Query analysis: time={analysis['time_sensitivity']}, "
                    f"internal={analysis['is_internal']}, "
-                   f"fresh={analysis['needs_fresh_info']}")
+                   f"fresh={analysis['needs_fresh_info']}, "
+                   f"web_beneficial={analysis.get('benefits_from_web', False)}")
 
         # 2. 검색 소스 결정
         sources_to_use = self._select_sources(analysis, search_mode)
@@ -264,7 +269,8 @@ class HybridRAGOrchestrator:
             'analysis': {
                 'time_sensitivity': analysis['time_sensitivity'],
                 'needs_fresh_info': analysis['needs_fresh_info'],
-                'is_internal': analysis['is_internal']
+                'is_internal': analysis['is_internal'],
+                'benefits_from_web': analysis.get('benefits_from_web', False)
             }
         }
 
@@ -332,9 +338,18 @@ class HybridRAGOrchestrator:
         # 기본적으로 로컬 검색
         sources.append('local')
 
-        # 최신 정보 필요 시 웹 검색 추가
-        if analysis['needs_fresh_info'] and self.web_search_enabled:
+        # 웹 검색 추가 조건:
+        # 1. 최신 정보 필요
+        # 2. 웹 검색이 도움되는 질문 유형
+        needs_web = (
+            analysis['needs_fresh_info'] or
+            analysis.get('benefits_from_web', False)
+        )
+
+        if needs_web and self.web_search_enabled:
             sources.append('web')
+            logger.info(f"🌐 Web search added: needs_fresh={analysis['needs_fresh_info']}, "
+                       f"benefits_from_web={analysis.get('benefits_from_web', False)}")
 
         # 기술 스택 명시 시 공식 문서 추가
         if analysis['tech_stack'] and self.doc_search_enabled:
