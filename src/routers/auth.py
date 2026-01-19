@@ -42,19 +42,31 @@ async def invalidate_dashboard_cache(redis):
         from loguru import logger
         pattern = "dashboard_cache:*"
 
-        # scan_iter로 키 수집 (동기 호출)
-        keys_to_delete = list(redis.scan_iter(match=pattern, count=100))
+        # scan_iter로 키를 배치 단위로 삭제 (메모리 효율적)
+        deleted_count = 0
+        batch = []
+        batch_size = 100
 
-        if not keys_to_delete:
-            return
+        for key in redis.scan_iter(match=pattern, count=100):
+            batch.append(key)
+            if len(batch) >= batch_size:
+                pipe = redis.pipeline()
+                for k in batch:
+                    pipe.delete(k)
+                pipe.execute()
+                deleted_count += len(batch)
+                batch = []
 
-        # Pipeline으로 배치 삭제
-        pipe = redis.pipeline()
-        for key in keys_to_delete:
-            pipe.delete(key)
-        pipe.execute()
+        # 남은 키 삭제
+        if batch:
+            pipe = redis.pipeline()
+            for k in batch:
+                pipe.delete(k)
+            pipe.execute()
+            deleted_count += len(batch)
 
-        logger.info(f"🗑️  Invalidated {len(keys_to_delete)} dashboard cache entries")
+        if deleted_count > 0:
+            logger.info(f"🗑️  Invalidated {deleted_count} dashboard cache entries")
     except Exception as e:
         from loguru import logger
         logger.error(f"Failed to invalidate dashboard cache: {e}")

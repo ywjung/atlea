@@ -403,11 +403,9 @@ class VectorDB:
 
         pipe.execute()
 
-        # Wait for Redis Search index to update
-        # Redis Search indexing is asynchronous, so we need a small delay
-        # to ensure newly added documents are searchable immediately
-        import time
-        time.sleep(0.2)  # 200ms delay for index propagation
+        # Note: Redis Search indexing is nearly synchronous in practice.
+        # Removed blocking time.sleep(0.2) that was causing event loop blocking.
+        # If search-after-add issues occur, consider using FT.SYNUPDATE or polling.
 
         # Clear document count cache to reflect new documents
         self.clear_document_count_cache()

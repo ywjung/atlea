@@ -1343,8 +1343,10 @@ async def revoke_session(
     try:
         redis = request.app.state.cache_manager.redis
 
-        # 세션 ID 형식 검증
-        if not session_id or len(session_id) < 10:
+        # 세션 ID 형식 검증 (UUID 형식)
+        import re
+        uuid_pattern = re.compile(r'^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$', re.IGNORECASE)
+        if not session_id or not uuid_pattern.match(session_id):
             raise HTTPException(
                 status_code=400,
                 detail="유효하지 않은 세션 ID 형식입니다"
@@ -1495,18 +1497,22 @@ async def get_hybrid_rag_config(
         import os
         cache_manager = request.app.state.cache_manager
 
-        # Redis에서 설정 가져오기
-        enabled = cache_manager.redis.get("config:hybrid_rag_enabled")
-        web_search_enabled = cache_manager.redis.get("config:hybrid_rag_web_search")
-        doc_search_enabled = cache_manager.redis.get("config:hybrid_rag_doc_search")
+        # Redis에서 설정 가져오기 (Pipeline으로 배치 조회)
+        pipe = cache_manager.redis.pipeline()
+        pipe.get("config:hybrid_rag_enabled")
+        pipe.get("config:hybrid_rag_web_search")
+        pipe.get("config:hybrid_rag_doc_search")
+        pipe.get("config:tavily_api_key")
+        results = pipe.execute()
+
+        enabled_raw, web_search_raw, doc_search_raw, redis_key = results
 
         # 기본값 설정
-        enabled = enabled.decode() == "true" if enabled else False
-        web_search_enabled = web_search_enabled.decode() == "true" if web_search_enabled else False
-        doc_search_enabled = doc_search_enabled.decode() == "true" if doc_search_enabled else False
+        enabled = enabled_raw.decode() == "true" if enabled_raw else False
+        web_search_enabled = web_search_raw.decode() == "true" if web_search_raw else False
+        doc_search_enabled = doc_search_raw.decode() == "true" if doc_search_raw else False
 
         # Tavily API 키 설정 여부 확인 (Redis 우선, 환경 변수 대체)
-        redis_key = cache_manager.redis.get("config:tavily_api_key")
         env_key = os.getenv('TAVILY_API_KEY')
         tavily_configured = bool(redis_key or env_key)
 
@@ -1695,11 +1701,24 @@ async def update_tavily_api_key(
                 detail="API 키를 입력해주세요"
             )
 
-        # Tavily API 키 형식 검증 (tvly-로 시작하는지 확인)
+        # Tavily API 키 형식 검증
+        if len(api_key) > 200:
+            raise HTTPException(
+                status_code=400,
+                detail="API 키가 너무 깁니다 (최대 200자)"
+            )
+
         if not api_key.startswith('tvly-'):
             raise HTTPException(
                 status_code=400,
                 detail="올바른 Tavily API 키 형식이 아닙니다 (tvly-로 시작해야 합니다)"
+            )
+
+        # 최소 길이 검증 (tvly- + 최소 30자)
+        if len(api_key) < 35:
+            raise HTTPException(
+                status_code=400,
+                detail="올바른 Tavily API 키 형식이 아닙니다 (키가 너무 짧습니다)"
             )
 
         # 🆕 API 키 유효성 테스트
@@ -1807,8 +1826,7 @@ async def reveal_tavily_api_key(
             full_key = stored_key.decode()
             if full:
                 logger.warning(
-                    f"🔐 Tavily API 키 전체 조회 (관리자: {user.get('username')}, "
-                    f"IP: {request.client.host if request.client else 'unknown'})"
+                    f"🔐 Tavily API 키 전체 조회 (관리자: {user.get('username')})"
                 )
                 return {
                     "success": True,
@@ -1829,8 +1847,7 @@ async def reveal_tavily_api_key(
             if env_key:
                 if full:
                     logger.warning(
-                        f"🔐 Tavily API 키 전체 조회 - 환경변수 (관리자: {user.get('username')}, "
-                        f"IP: {request.client.host if request.client else 'unknown'})"
+                        f"🔐 Tavily API 키 전체 조회 - 환경변수 (관리자: {user.get('username')})"
                     )
                     return {
                         "success": True,
@@ -2072,8 +2089,7 @@ async def reveal_context7_api_key(
             full_key = stored_key.decode()
             if full:
                 logger.warning(
-                    f"🔐 Context7 API 키 전체 조회 (관리자: {user.get('username')}, "
-                    f"IP: {request.client.host if request.client else 'unknown'})"
+                    f"🔐 Context7 API 키 전체 조회 (관리자: {user.get('username')})"
                 )
                 return {
                     "success": True,
@@ -2094,8 +2110,7 @@ async def reveal_context7_api_key(
             if env_key:
                 if full:
                     logger.warning(
-                        f"🔐 Context7 API 키 전체 조회 - 환경변수 (관리자: {user.get('username')}, "
-                        f"IP: {request.client.host if request.client else 'unknown'})"
+                        f"🔐 Context7 API 키 전체 조회 - 환경변수 (관리자: {user.get('username')})"
                     )
                     return {
                         "success": True,
