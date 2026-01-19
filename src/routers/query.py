@@ -557,8 +557,12 @@ async def query_stream(
             # Query result cache HIT - return immediately
             logger.info(f"🎯 Query result cache HIT (exact match): '{request.question[:50]}...'")
 
-            # Generate follow-up questions for cached response (with answer for context)
-            cached_follow_up = _generate_context_aware_fallback(request.question, [], query_result_cached["response"])
+            # Generate follow-up questions for cached response (LLM 기반)
+            cached_follow_up = _generate_llm_follow_up_questions(request.question, query_result_cached["response"])
+            if len(cached_follow_up) < 3:
+                cached_follow_up = _generate_context_aware_fallback(
+                    request.question, cached_follow_up, query_result_cached["response"]
+                )
 
             # Save to conversation history with follow-up questions
             if request.session_id and conversation_manager:
@@ -611,8 +615,12 @@ async def query_stream(
             # Cache HIT - return cached response as stream
             logger.info(f"✅ Cache HIT (similarity: {cached_response['similarity']:.4f})")
 
-            # Generate follow-up questions for cached response (with answer for context)
-            semantic_follow_up = _generate_context_aware_fallback(request.question, [], cached_response["response"])
+            # Generate follow-up questions for cached response (LLM 기반)
+            semantic_follow_up = _generate_llm_follow_up_questions(request.question, cached_response["response"])
+            if len(semantic_follow_up) < 3:
+                semantic_follow_up = _generate_context_aware_fallback(
+                    request.question, semantic_follow_up, cached_response["response"]
+                )
 
             context_data = {
                 "sources": cached_response["sources"],
@@ -938,8 +946,13 @@ async def query_stream(
             )
             logger.info(f"📊 스트리밍 신뢰도 점수: {confidence_result['percentage']}% ({confidence_result['level']})")
 
-            # 🔄 후속 질문 생성 (스트리밍 응답에 포함, 답변 내용 기반 컨텍스트 인식)
-            follow_up_questions = _generate_context_aware_fallback(request.question, [], complete_response)
+            # 🔄 후속 질문 생성 (LLM 기반, 질문+답변 종합 분석)
+            follow_up_questions = _generate_llm_follow_up_questions(request.question, complete_response)
+            if len(follow_up_questions) < 3:
+                # LLM 생성 실패 또는 부족 시 패턴 기반 fallback
+                follow_up_questions = _generate_context_aware_fallback(
+                    request.question, follow_up_questions, complete_response
+                )
             logger.debug(f"Generated follow-up questions: {follow_up_questions}")
 
             # Calculate statistics
@@ -1045,6 +1058,114 @@ async def query_stream(
         # Security: Use sanitized error message (prevents information disclosure)
         safe_message = get_safe_error_message(e, "query/stream endpoint")
         raise HTTPException(status_code=500, detail=safe_message)
+
+
+def _generate_llm_follow_up_questions(question: str, answer: str) -> list:
+    """
+    Generate follow-up questions using LLM by analyzing both question and answer.
+
+    Args:
+        question: Original user question
+        answer: Generated answer
+
+    Returns:
+        List of 3 relevant follow-up questions, or empty list on failure
+    """
+    if not llm:
+        logger.warning("LLM not available for follow-up question generation")
+        return []
+
+    try:
+        # Truncate answer if too long (keep first 500 chars for context)
+        answer_truncated = answer[:500] if len(answer) > 500 else answer
+
+        # Create prompt for LLM
+        prompt = f"""다음 질문과 답변을 분석하여, 사용자가 추가로 궁금해할 만한 관련 질문 3개를 생성하세요.
+
+규칙:
+- 질문은 반드시 한국어로 작성
+- 질문은 '?'로 끝나야 함
+- 원래 질문/답변과 직접 관련된 구체적인 후속 질문
+- 일반적인 질문이 아닌, 해당 주제에 특화된 질문
+
+질문: {question}
+답변: {answer_truncated}
+
+관련 질문 3개:
+-"""
+
+        # Check LLM type and use appropriate generation method
+        from ..llm_ollama import OllamaLLM
+
+        if isinstance(llm, OllamaLLM):
+            messages = [{"role": "user", "content": prompt}]
+            response = llm._generate_response(
+                messages=messages,
+                max_tokens=200,
+                temperature=0.3
+            )
+        else:
+            # Use MLX generate
+            from mlx_lm import generate as mlx_generate
+
+            messages = [
+                {"role": "system", "content": "당신은 한국어로 관련 질문을 생성하는 도우미입니다."},
+                {"role": "user", "content": prompt}
+            ]
+
+            formatted_prompt = llm.tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True
+            )
+
+            response = mlx_generate(
+                llm.model,
+                llm.tokenizer,
+                prompt=formatted_prompt,
+                max_tokens=200,
+                verbose=False
+            )
+
+        # Clean response - remove <think> tags if present
+        response = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL)
+
+        # Parse response into questions
+        lines = response.strip().split('\n')
+        questions = []
+
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+
+            # Remove bullet points, numbering, and markdown
+            line = re.sub(r'^[\-\*\•\d\.\)\]]+\s*', '', line)
+            line = re.sub(r'^\*\*|\*\*$', '', line)
+            line = line.strip()
+
+            # Skip metadata lines
+            skip_patterns = ['질문:', '답변:', '예시:', '관련 질문:']
+            if any(line.startswith(p) or line == p.rstrip(':') for p in skip_patterns):
+                continue
+
+            # Skip if line is too short
+            if len(line) < 5:
+                continue
+
+            # Validate: must end with ?, contain Korean
+            if line.endswith('?') and re.search(r'[가-힣]', line):
+                questions.append(line)
+
+            if len(questions) >= 3:
+                break
+
+        logger.debug(f"LLM generated {len(questions)} follow-up questions")
+        return questions[:3]
+
+    except Exception as e:
+        logger.warning(f"Failed to generate LLM follow-up questions: {e}")
+        return []
 
 
 def _generate_context_aware_fallback(question: str, partial_questions: list, answer: str = "") -> list:
