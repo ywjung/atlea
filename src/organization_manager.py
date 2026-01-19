@@ -235,6 +235,10 @@ class OrganizationManager:
         if member_count > 0:
             raise ValueError(f"멤버가 있는 조직은 삭제할 수 없습니다. (멤버 수: {member_count})")
 
+        # Get all groups belonging to this organization before deletion
+        group_ids_bytes = self.client.smembers(f'org:groups:{org_id}')
+        group_ids = [gid.decode('utf-8') if isinstance(gid, bytes) else gid for gid in group_ids_bytes]
+
         # Delete organization and indexes
         pipe = self.client.pipeline()
         pipe.delete(f'org:{org_id}')
@@ -243,6 +247,11 @@ class OrganizationManager:
         pipe.delete(f'org:members:{org_id}')
         pipe.delete(f'org:admins:{org_id}')
         pipe.delete(f'org:groups:{org_id}')
+
+        # Clean up group:orgs:{group_id} references (fix stale count bug)
+        for group_id in group_ids:
+            pipe.srem(f'group:orgs:{group_id}', org_id)
+
         pipe.execute()
 
         logger.info(f"Deleted organization: {org_id} ({org['name']})")
@@ -471,4 +480,62 @@ class OrganizationManager:
             'members': self.get_member_count(org_id),
             'admins': self.client.scard(f'org:admins:{org_id}'),
             'groups': self.client.scard(f'org:groups:{org_id}')
+        }
+
+
+    def cleanup_stale_group_org_references(self) -> Dict[str, int]:
+        """
+        Clean up stale organization references in group:orgs sets.
+
+        This fixes the bug where deleted organizations still count in group org_count.
+        Scans all group:orgs:* sets and removes references to non-existent organizations.
+
+        Returns:
+            Dict with cleanup statistics:
+                - groups_scanned: Number of groups checked
+                - stale_refs_removed: Number of stale references removed
+                - affected_groups: Number of groups that had stale references
+        """
+        # Get all existing organization IDs
+        existing_orgs = set()
+        for org_id_bytes in self.client.smembers('orgs:all'):
+            org_id = org_id_bytes.decode('utf-8') if isinstance(org_id_bytes, bytes) else org_id_bytes
+            existing_orgs.add(org_id)
+
+        groups_scanned = 0
+        stale_refs_removed = 0
+        affected_groups = 0
+
+        # Scan all group:orgs:* keys
+        for key in self.client.scan_iter(match='group:orgs:*', count=100):
+            key_str = key.decode('utf-8') if isinstance(key, bytes) else key
+            group_id = key_str.replace('group:orgs:', '')
+            groups_scanned += 1
+
+            # Get all org IDs in this group's set
+            org_ids_bytes = self.client.smembers(key_str)
+            stale_in_group = []
+
+            for org_id_bytes in org_ids_bytes:
+                org_id = org_id_bytes.decode('utf-8') if isinstance(org_id_bytes, bytes) else org_id_bytes
+                if org_id not in existing_orgs:
+                    stale_in_group.append(org_id)
+
+            # Remove stale references
+            if stale_in_group:
+                pipe = self.client.pipeline()
+                for org_id in stale_in_group:
+                    pipe.srem(key_str, org_id)
+                pipe.execute()
+
+                affected_groups += 1
+                stale_refs_removed += len(stale_in_group)
+                logger.info(f"Cleaned up {len(stale_in_group)} stale org refs from group {group_id}: {stale_in_group}")
+
+        logger.info(f"Cleanup complete: {groups_scanned} groups scanned, {stale_refs_removed} stale refs removed, {affected_groups} groups affected")
+
+        return {
+            'groups_scanned': groups_scanned,
+            'stale_refs_removed': stale_refs_removed,
+            'affected_groups': affected_groups
         }

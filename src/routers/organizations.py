@@ -819,3 +819,33 @@ async def demote_from_org_admin(
         raise  # HTTPException은 그대로 전달 (400 에러 등)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"조직 관리자 해제 실패: {str(e)}")
+
+
+@router.post("/maintenance/cleanup-stale-refs", response_model=Dict, dependencies=[Depends(require_admin)])
+async def cleanup_stale_org_references(
+    request: Request,
+    current_user: dict = Depends(get_current_active_user)
+):
+    """
+    Clean up stale organization references in group:orgs sets (Admin only)
+
+    Fixes the bug where deleted organizations still count in group org_count.
+    This scans all groups and removes references to non-existent organizations.
+
+    Returns:
+        Cleanup statistics including groups scanned, stale refs removed, etc.
+    """
+    cache_manager = request.app.state.cache_manager
+    org_manager = OrganizationManager(cache_manager.redis)
+
+    try:
+        result = org_manager.cleanup_stale_group_org_references()
+
+        return {
+            "success": True,
+            "message": f"정리 완료: {result['stale_refs_removed']}개의 잘못된 참조가 삭제되었습니다",
+            "details": result
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"정리 작업 실패: {str(e)}")
