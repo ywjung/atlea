@@ -557,8 +557,8 @@ async def query_stream(
             # Query result cache HIT - return immediately
             logger.info(f"🎯 Query result cache HIT (exact match): '{request.question[:50]}...'")
 
-            # Generate follow-up questions for cached response
-            cached_follow_up = _generate_context_aware_fallback(request.question, [])
+            # Generate follow-up questions for cached response (with answer for context)
+            cached_follow_up = _generate_context_aware_fallback(request.question, [], query_result_cached["response"])
 
             # Save to conversation history with follow-up questions
             if request.session_id and conversation_manager:
@@ -611,8 +611,8 @@ async def query_stream(
             # Cache HIT - return cached response as stream
             logger.info(f"✅ Cache HIT (similarity: {cached_response['similarity']:.4f})")
 
-            # Generate follow-up questions for cached response
-            semantic_follow_up = _generate_context_aware_fallback(request.question, [])
+            # Generate follow-up questions for cached response (with answer for context)
+            semantic_follow_up = _generate_context_aware_fallback(request.question, [], cached_response["response"])
 
             context_data = {
                 "sources": cached_response["sources"],
@@ -938,8 +938,8 @@ async def query_stream(
             )
             logger.info(f"📊 스트리밍 신뢰도 점수: {confidence_result['percentage']}% ({confidence_result['level']})")
 
-            # 🔄 후속 질문 생성 (스트리밍 응답에 포함)
-            follow_up_questions = _generate_context_aware_fallback(request.question, [])
+            # 🔄 후속 질문 생성 (스트리밍 응답에 포함, 답변 내용 기반 컨텍스트 인식)
+            follow_up_questions = _generate_context_aware_fallback(request.question, [], complete_response)
             logger.debug(f"Generated follow-up questions: {follow_up_questions}")
 
             # Calculate statistics
@@ -1047,13 +1047,14 @@ async def query_stream(
         raise HTTPException(status_code=500, detail=safe_message)
 
 
-def _generate_context_aware_fallback(question: str, partial_questions: list) -> list:
+def _generate_context_aware_fallback(question: str, partial_questions: list, answer: str = "") -> list:
     """
-    Generate context-aware fallback questions based on the original question.
+    Generate context-aware fallback questions based on the original question and answer.
 
     Args:
         question: Original user question
         partial_questions: Any questions that were successfully parsed
+        answer: The generated answer (used for topic extraction)
 
     Returns:
         List of 3 relevant follow-up questions
@@ -1061,19 +1062,102 @@ def _generate_context_aware_fallback(question: str, partial_questions: list) -> 
     # Start with any partial questions that were generated
     result = partial_questions[:3] if partial_questions else []
 
-    # Extract key topics from the question for context
-    # Common topic patterns in Korean business/document queries
+    # Combine question and answer for topic detection
+    combined_text = f"{question} {answer}".lower()
+
+    # Extended topic patterns with related keywords
+    # Each topic maps to trigger keywords AND follow-up questions
     topic_patterns = {
-        '절차': ['구체적인 단계는 어떻게 되나요?', '필요한 서류는 무엇인가요?', '처리 기간은 얼마나 걸리나요?'],
-        '방법': ['다른 방법도 있나요?', '주의사항은 무엇인가요?', '예외 상황은 어떻게 처리하나요?'],
-        '규정': ['관련 법규는 무엇인가요?', '위반 시 제재는 어떻게 되나요?', '예외 조항이 있나요?'],
-        '신청': ['신청 자격 조건은 무엇인가요?', '신청 기한이 있나요?', '온라인 신청이 가능한가요?'],
-        '비용': ['비용 산정 기준은 무엇인가요?', '할인이나 감면 혜택이 있나요?', '지불 방법은 어떻게 되나요?'],
-        '기간': ['연장이 가능한가요?', '기간 내 완료하지 못하면 어떻게 되나요?', '시작일은 언제부터인가요?'],
-        '조건': ['필수 조건과 선택 조건이 있나요?', '조건 미충족 시 대안은 있나요?', '조건 확인 방법은 무엇인가요?'],
-        '담당': ['담당 부서 연락처는 어떻게 되나요?', '담당자가 부재 시 누구에게 문의하나요?', '업무 처리 시간은 언제인가요?'],
-        '서류': ['서류 양식은 어디서 받나요?', '서류 제출 방법은 무엇인가요?', '필수 서류와 선택 서류가 있나요?'],
-        '승인': ['승인 권한은 누구에게 있나요?', '승인 소요 시간은 얼마인가요?', '승인 거부 시 이의제기가 가능한가요?'],
+        # 신청/요청 관련
+        '신청': {
+            'triggers': ['신청', '요청', '접수', '제출', '등록', '지원'],
+            'questions': ['신청 자격 조건은 무엇인가요?', '신청 기한이 있나요?', '온라인 신청이 가능한가요?']
+        },
+        # 절차/프로세스 관련
+        '절차': {
+            'triggers': ['절차', '과정', '단계', '순서', '프로세스'],
+            'questions': ['구체적인 단계는 어떻게 되나요?', '필요한 서류는 무엇인가요?', '처리 기간은 얼마나 걸리나요?']
+        },
+        # 방법 관련
+        '방법': {
+            'triggers': ['방법', '하는 법', '하려면', '가능한가요', '할 수 있'],
+            'questions': ['다른 방법도 있나요?', '주의사항은 무엇인가요?', '예외 상황은 어떻게 처리하나요?']
+        },
+        # 규정/정책 관련
+        '규정': {
+            'triggers': ['규정', '정책', '규칙', '기준', '원칙', '법규', '지침'],
+            'questions': ['관련 법규는 무엇인가요?', '위반 시 제재는 어떻게 되나요?', '예외 조항이 있나요?']
+        },
+        # 비용/금액 관련
+        '비용': {
+            'triggers': ['비용', '금액', '요금', '수수료', '지불', '결제', '가격', '원'],
+            'questions': ['비용 산정 기준은 무엇인가요?', '할인이나 감면 혜택이 있나요?', '지불 방법은 어떻게 되나요?']
+        },
+        # 기간/일정 관련
+        '기간': {
+            'triggers': ['기간', '일정', '날짜', '시간', '일', '주', '월', '년'],
+            'questions': ['연장이 가능한가요?', '기간 내 완료하지 못하면 어떻게 되나요?', '시작일은 언제부터인가요?']
+        },
+        # 조건/자격 관련
+        '조건': {
+            'triggers': ['조건', '자격', '요건', '필수', '해당', '대상'],
+            'questions': ['필수 조건과 선택 조건이 있나요?', '조건 미충족 시 대안은 있나요?', '조건 확인 방법은 무엇인가요?']
+        },
+        # 담당/연락처 관련
+        '담당': {
+            'triggers': ['담당', '연락처', '문의', '부서', '팀', '담당자'],
+            'questions': ['담당 부서 연락처는 어떻게 되나요?', '담당자가 부재 시 누구에게 문의하나요?', '업무 처리 시간은 언제인가요?']
+        },
+        # 서류/문서 관련
+        '서류': {
+            'triggers': ['서류', '문서', '양식', '첨부', '제출물', '증빙'],
+            'questions': ['서류 양식은 어디서 받나요?', '서류 제출 방법은 무엇인가요?', '필수 서류와 선택 서류가 있나요?']
+        },
+        # 승인/결재 관련
+        '승인': {
+            'triggers': ['승인', '결재', '허가', '검토', '확인', '반려'],
+            'questions': ['승인 권한은 누구에게 있나요?', '승인 소요 시간은 얼마인가요?', '승인 거부 시 이의제기가 가능한가요?']
+        },
+        # 휴가/휴직 관련
+        '휴가': {
+            'triggers': ['휴가', '연차', '휴직', '병가', '경조사', '출산', '육아'],
+            'questions': ['휴가 잔여일수 확인은 어떻게 하나요?', '휴가 신청 마감 기한이 있나요?', '휴가 취소나 변경은 가능한가요?']
+        },
+        # 급여/복지 관련
+        '급여': {
+            'triggers': ['급여', '월급', '상여', '보너스', '수당', '복지', '혜택'],
+            'questions': ['급여 지급일은 언제인가요?', '관련 세금 처리는 어떻게 되나요?', '추가 수당 신청 방법은 무엇인가요?']
+        },
+        # 교육/연수 관련
+        '교육': {
+            'triggers': ['교육', '연수', '훈련', '강의', '세미나', '워크샵', '학습'],
+            'questions': ['교육 수료 기준은 무엇인가요?', '교육비 지원은 어떻게 받나요?', '필수 교육과 선택 교육이 있나요?']
+        },
+        # 시스템/IT 관련
+        '시스템': {
+            'triggers': ['시스템', '프로그램', '앱', '로그인', '비밀번호', '접속', 'it'],
+            'questions': ['시스템 접속이 안 될 때 어떻게 하나요?', '비밀번호 초기화는 어떻게 하나요?', 'IT 지원 요청은 어디로 하나요?']
+        },
+    }
+
+    # Question type based patterns (applied only to question, not answer)
+    question_type_patterns = {
+        'how_to': {
+            'triggers': ['어떻게', '하는 방법', '하려면', 'how'],
+            'questions': ['단계별로 설명해 주세요', '필요한 준비물이 있나요?', '주의할 점은 무엇인가요?']
+        },
+        'definition': {
+            'triggers': ['무엇', '뭐', '정의', '의미', 'what'],
+            'questions': ['구체적인 예시가 있나요?', '관련된 다른 개념이 있나요?', '실제 적용 사례는 어떤 것이 있나요?']
+        },
+        'comparison': {
+            'triggers': ['차이', '비교', '다른 점', '구분'],
+            'questions': ['각각의 장단점은 무엇인가요?', '어떤 상황에서 어떤 것을 선택해야 하나요?', '실제 적용 예시가 있나요?']
+        },
+        'reason': {
+            'triggers': ['왜', '이유', '원인', '때문'],
+            'questions': ['다른 원인은 없나요?', '해결 방법은 무엇인가요?', '예방할 수 있는 방법이 있나요?']
+        },
     }
 
     # Default fallback questions (more specific than before)
@@ -1085,15 +1169,35 @@ def _generate_context_aware_fallback(question: str, partial_questions: list) -> 
         '실제 사례나 적용 예시가 있나요?',
     ]
 
-    # Find matching topics in the question
+    # Find matching topics in combined text (question + answer)
     matched_questions = []
-    for topic, questions in topic_patterns.items():
-        if topic in question:
-            matched_questions.extend(questions)
+
+    # Check topic patterns against combined text
+    for topic, data in topic_patterns.items():
+        for trigger in data['triggers']:
+            if trigger in combined_text:
+                matched_questions.extend(data['questions'])
+                break  # Avoid duplicates from same topic
+
+    # Check question type patterns (only on question, not answer)
+    question_lower = question.lower()
+    for qtype, data in question_type_patterns.items():
+        for trigger in data['triggers']:
+            if trigger in question_lower:
+                matched_questions.extend(data['questions'])
+                break
+
+    # Remove duplicates while preserving order
+    seen = set()
+    unique_matched = []
+    for q in matched_questions:
+        if q not in seen:
+            seen.add(q)
+            unique_matched.append(q)
 
     # If we found topic matches, use them
-    if matched_questions:
-        for q in matched_questions:
+    if unique_matched:
+        for q in unique_matched:
             if q not in result and len(result) < 3:
                 result.append(q)
 
@@ -1219,9 +1323,9 @@ async def generate_follow_up_questions(
             final_questions = questions[:3]
         else:
             logger.warning(f"Only generated {len(questions)} questions from response, generating context-aware fallback")
-            # Generate context-aware fallback based on original question
+            # Generate context-aware fallback based on original question and answer
             original_q = request.question
-            final_questions = _generate_context_aware_fallback(original_q, questions)
+            final_questions = _generate_context_aware_fallback(original_q, questions, request.answer)
 
         # Save follow-up questions to conversation history
         if request.session_id and conversation_manager:
@@ -1235,8 +1339,8 @@ async def generate_follow_up_questions(
 
     except Exception as e:
         logger.error(f"Failed to generate follow-up questions: {e}", exc_info=True)
-        # Generate context-aware fallback on error
-        fallback_questions = _generate_context_aware_fallback(request.question, [])
+        # Generate context-aware fallback on error (with answer for context)
+        fallback_questions = _generate_context_aware_fallback(request.question, [], request.answer)
 
         # Still try to save to history on error
         if request.session_id and conversation_manager:
