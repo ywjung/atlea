@@ -51,7 +51,7 @@ from .config.prompts import (
 )
 from .utils.validation import validate_filename, validate_file_content
 from .utils.error_handling import get_safe_error_message
-from .middleware import RateLimitMiddleware, AuditMiddleware
+from .middleware import RateLimitMiddleware, AuditMiddleware, CSRFProtectionMiddleware, get_csrf_token_endpoint
 from .middleware.csp_nonce import CSPNonceMiddleware
 from .audit import AuditLogger, AuditAction
 from .exceptions import (
@@ -261,6 +261,10 @@ app.add_middleware(
     ],
     expose_headers=["X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset"]
 )
+
+# Add CSRF protection middleware (protects cookie-based auth from CSRF attacks)
+# Requests with Authorization header are exempt (header-based auth is CSRF-safe)
+app.add_middleware(CSRFProtectionMiddleware, enabled=True)
 
 # Add rate limiting middleware
 app.add_middleware(

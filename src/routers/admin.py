@@ -4,7 +4,7 @@ Admin API Router
 """
 import os
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 from typing import Optional
 from loguru import logger
 
@@ -153,7 +153,7 @@ class HybridRAGConfigResponse(ConfigResponseBase):
 
 class PasswordResetRequest(BaseModel):
     """비밀번호 재설정 요청 모델"""
-    email: str
+    email: EmailStr
     new_password: Optional[str] = None  # None이면 자동 생성
 
 

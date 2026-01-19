@@ -183,7 +183,7 @@ class PasswordResetConfirm(BaseModel):
 
 class PasswordResetOTP(BaseModel):
     """OTP 기반 비밀번호 재설정"""
-    email: str
+    email: EmailStr
     otp_code: str = Field(..., min_length=6, max_length=6)
     new_password: str = Field(..., min_length=8)
 

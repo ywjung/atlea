@@ -5,7 +5,7 @@ FastAPI router for user registration, login, logout, and user management.
 
 import os
 import asyncio
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Response
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime, timezone
@@ -162,6 +162,39 @@ async def send_password_reset_email(email_service, to_email: str, reset_token: s
 class RefreshTokenRequest(BaseModel):
     """토큰 갱신 요청"""
     refresh_token: str
+
+
+# ============= CSRF Protection =============
+
+CSRF_COOKIE_NAME = "csrf_token"
+CSRF_COOKIE_MAX_AGE = 3600  # 1 hour
+
+
+@router.get("/csrf-token")
+async def get_csrf_token(request: Request, response: Response):
+    """
+    CSRF 토큰 조회/생성
+
+    쿠키 기반 인증 사용 시 CSRF 공격 방지를 위해 이 토큰을
+    X-CSRF-Token 헤더에 포함하여 요청해야 합니다.
+
+    Returns:
+        {"csrf_token": str}
+    """
+    import secrets
+
+    token = request.cookies.get(CSRF_COOKIE_NAME)
+    if not token:
+        token = secrets.token_urlsafe(32)
+        response.set_cookie(
+            key=CSRF_COOKIE_NAME,
+            value=token,
+            max_age=CSRF_COOKIE_MAX_AGE,
+            httponly=False,  # JavaScript에서 읽을 수 있어야 함
+            samesite="strict",
+            secure=True,
+        )
+    return {"csrf_token": token}
 
 
 @router.get("/totp/status")
