@@ -1001,6 +1001,64 @@ async def query_stream(
         raise HTTPException(status_code=500, detail=safe_message)
 
 
+def _generate_context_aware_fallback(question: str, partial_questions: list) -> list:
+    """
+    Generate context-aware fallback questions based on the original question.
+
+    Args:
+        question: Original user question
+        partial_questions: Any questions that were successfully parsed
+
+    Returns:
+        List of 3 relevant follow-up questions
+    """
+    # Start with any partial questions that were generated
+    result = partial_questions[:3] if partial_questions else []
+
+    # Extract key topics from the question for context
+    # Common topic patterns in Korean business/document queries
+    topic_patterns = {
+        '절차': ['구체적인 단계는 어떻게 되나요?', '필요한 서류는 무엇인가요?', '처리 기간은 얼마나 걸리나요?'],
+        '방법': ['다른 방법도 있나요?', '주의사항은 무엇인가요?', '예외 상황은 어떻게 처리하나요?'],
+        '규정': ['관련 법규는 무엇인가요?', '위반 시 제재는 어떻게 되나요?', '예외 조항이 있나요?'],
+        '신청': ['신청 자격 조건은 무엇인가요?', '신청 기한이 있나요?', '온라인 신청이 가능한가요?'],
+        '비용': ['비용 산정 기준은 무엇인가요?', '할인이나 감면 혜택이 있나요?', '지불 방법은 어떻게 되나요?'],
+        '기간': ['연장이 가능한가요?', '기간 내 완료하지 못하면 어떻게 되나요?', '시작일은 언제부터인가요?'],
+        '조건': ['필수 조건과 선택 조건이 있나요?', '조건 미충족 시 대안은 있나요?', '조건 확인 방법은 무엇인가요?'],
+        '담당': ['담당 부서 연락처는 어떻게 되나요?', '담당자가 부재 시 누구에게 문의하나요?', '업무 처리 시간은 언제인가요?'],
+        '서류': ['서류 양식은 어디서 받나요?', '서류 제출 방법은 무엇인가요?', '필수 서류와 선택 서류가 있나요?'],
+        '승인': ['승인 권한은 누구에게 있나요?', '승인 소요 시간은 얼마인가요?', '승인 거부 시 이의제기가 가능한가요?'],
+    }
+
+    # Default fallback questions (more specific than before)
+    default_fallbacks = [
+        '이 내용의 적용 범위는 어디까지인가요?',
+        '관련 담당 부서나 문의처는 어디인가요?',
+        '예외 사항이나 특별 규정이 있나요?',
+        '최근 변경된 내용이 있나요?',
+        '실제 사례나 적용 예시가 있나요?',
+    ]
+
+    # Find matching topics in the question
+    matched_questions = []
+    for topic, questions in topic_patterns.items():
+        if topic in question:
+            matched_questions.extend(questions)
+
+    # If we found topic matches, use them
+    if matched_questions:
+        for q in matched_questions:
+            if q not in result and len(result) < 3:
+                result.append(q)
+
+    # Fill remaining slots with default fallbacks
+    for q in default_fallbacks:
+        if q not in result and len(result) < 3:
+            result.append(q)
+
+    return result[:3]
+
+
 @router.post("/api/follow-up-questions", tags=["Query"])
 async def generate_follow_up_questions(
     request: FollowUpRequest,
@@ -1048,18 +1106,35 @@ async def generate_follow_up_questions(
                 temperature=0.3  # Lower temperature for more focused output
             )
         else:
-            # Use MLX generate for MLX-based LLM
+            # Use MLX generate for MLX-based LLM with proper chat template
             from mlx_lm import generate as mlx_generate
+
+            # Build messages for chat template
+            messages = [
+                {"role": "system", "content": "당신은 한국어로 관련 질문을 생성하는 도우미입니다. 질문만 생성하세요."},
+                {"role": "user", "content": prompt}
+            ]
+
+            # Apply chat template for proper model instruction
+            formatted_prompt = llm.tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True
+            )
+
             response = mlx_generate(
                 llm.model,
                 llm.tokenizer,
-                prompt=prompt,
+                prompt=formatted_prompt,
                 max_tokens=200,
                 verbose=False
             )
 
         # Clean response - remove <think> tags if present
         response = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL)
+
+        # Debug: log raw response for troubleshooting
+        logger.debug(f"LLM response for follow-up questions: {response[:500]}")
 
         # Parse response into questions - handle bullet point format
         lines = response.strip().split('\n')
@@ -1075,39 +1150,37 @@ async def generate_follow_up_questions(
             line = re.sub(r'^\*\*|\*\*$', '', line)  # Remove bold
             line = line.strip()
 
-            # Skip non-question lines (metadata, labels, etc.)
-            if not line or '질문' in line or '답변' in line or '예시' in line or '관련' in line:
+            # Skip metadata lines (exact matches or starting patterns)
+            skip_patterns = ['질문:', '답변:', '예시:', '관련 질문:']
+            if any(line.startswith(p) or line == p.rstrip(':') for p in skip_patterns):
                 continue
 
-            # Validate: must end with ?, contain Korean, min length 5
-            if (line.endswith('?') and
-                re.search(r'[가-힣]', line) and
-                len(line) >= 5):
+            # Skip if line is too short or doesn't look like a question
+            if len(line) < 5:
+                continue
+
+            # Validate: must end with ?, contain Korean
+            if (line.endswith('?') and re.search(r'[가-힣]', line)):
                 questions.append(line)
+                logger.debug(f"Extracted question: {line}")
 
             if len(questions) >= 3:
                 break
 
-        # Return questions or fallback
+        # Return questions or generate context-aware fallback
         if len(questions) >= 3:
             logger.info(f"Successfully generated {len(questions)} follow-up questions")
             return {"questions": questions[:3]}
         else:
-            logger.warning(f"Only generated {len(questions)} questions, using fallback")
-            return {
-                "questions": [
-                    "이 내용과 관련된 추가 정보가 있나요?",
-                    "다른 규정과의 차이점은 무엇인가요?",
-                    "실제 적용 사례는 어떻게 되나요?"
-                ]
-            }
+            logger.warning(f"Only generated {len(questions)} questions from response, generating context-aware fallback")
+
+            # Generate context-aware fallback based on original question
+            original_q = request.question
+            fallback_questions = _generate_context_aware_fallback(original_q, questions)
+            return {"questions": fallback_questions}
 
     except Exception as e:
         logger.error(f"Failed to generate follow-up questions: {e}", exc_info=True)
-        return {
-            "questions": [
-                "이 내용과 관련된 추가 정보가 있나요?",
-                "다른 규정과의 차이점은 무엇인가요?",
-                "실제 적용 사례는 어떻게 되나요?"
-            ]
-        }
+        # Generate context-aware fallback on error
+        fallback_questions = _generate_context_aware_fallback(request.question, [])
+        return {"questions": fallback_questions}
