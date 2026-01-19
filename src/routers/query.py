@@ -557,6 +557,21 @@ async def query_stream(
             # Query result cache HIT - return immediately
             logger.info(f"🎯 Query result cache HIT (exact match): '{request.question[:50]}...'")
 
+            # Generate follow-up questions for cached response
+            cached_follow_up = _generate_context_aware_fallback(request.question, [])
+
+            # Save to conversation history with follow-up questions
+            if request.session_id and conversation_manager:
+                metadata = query_result_cached.get('metadata', {}).copy()
+                metadata['follow_up_questions'] = cached_follow_up
+                metadata['cached'] = True
+                conversation_manager.add_message(
+                    session_id=request.session_id,
+                    role="assistant",
+                    content=query_result_cached["response"],
+                    metadata=metadata
+                )
+
             async def generate_exact_cached_stream():
                 # Send metadata
                 yield f"data: {json.dumps({'type': 'metadata', 'data': query_result_cached['metadata']})}\n\n"
@@ -568,6 +583,9 @@ async def query_stream(
                     chunk = response_text[i:i + chunk_size]
                     yield f"data: {json.dumps({'type': 'chunk', 'data': chunk})}\n\n"
                     await asyncio.sleep(0.01)
+
+                # Send follow-up questions
+                yield f"data: {json.dumps({'type': 'follow_up_questions', 'data': cached_follow_up})}\n\n"
 
                 yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
@@ -593,6 +611,9 @@ async def query_stream(
             # Cache HIT - return cached response as stream
             logger.info(f"✅ Cache HIT (similarity: {cached_response['similarity']:.4f})")
 
+            # Generate follow-up questions for cached response
+            semantic_follow_up = _generate_context_aware_fallback(request.question, [])
+
             context_data = {
                 "sources": cached_response["sources"],
                 "context": cached_response.get("context", []),  # Use cached context for source details
@@ -607,7 +628,8 @@ async def query_stream(
                     "sources": cached_response["sources"],
                     "context": cached_response.get("context", []),  # Save context for source details modal
                     "cached": True,
-                    "similarity": cached_response["similarity"]
+                    "similarity": cached_response["similarity"],
+                    "follow_up_questions": semantic_follow_up  # 후속 질문 저장
                 }
                 conversation_manager.add_message(
                     session_id=request.session_id,
@@ -629,6 +651,9 @@ async def query_stream(
                     yield f"data: {json.dumps({'type': 'chunk', 'data': chunk})}\n\n"
                     # Small delay to simulate streaming
                     await asyncio.sleep(0.01)
+
+                # Send follow-up questions
+                yield f"data: {json.dumps({'type': 'follow_up_questions', 'data': semantic_follow_up})}\n\n"
 
                 # Send completion message
                 yield f"data: {json.dumps({'type': 'done'})}\n\n"
@@ -913,6 +938,10 @@ async def query_stream(
             )
             logger.info(f"📊 스트리밍 신뢰도 점수: {confidence_result['percentage']}% ({confidence_result['level']})")
 
+            # 🔄 후속 질문 생성 (스트리밍 응답에 포함)
+            follow_up_questions = _generate_context_aware_fallback(request.question, [])
+            logger.debug(f"Generated follow-up questions: {follow_up_questions}")
+
             # Calculate statistics
             end_time = time.time()
             total_time = end_time - start_time
@@ -970,7 +999,8 @@ async def query_stream(
                             "tokens_per_second": round(tokens_per_second, 2),
                             "total_tokens": token_count,
                             "time_to_first_token": round(time_to_first_token, 2)
-                        }
+                        },
+                        "follow_up_questions": follow_up_questions  # 후속 질문 저장
                     }
                     conversation_manager.add_message(
                         session_id=request.session_id,
@@ -993,6 +1023,9 @@ async def query_stream(
 
             # Send confidence score
             yield f"data: {json.dumps({'type': 'confidence', 'data': confidence_result})}\n\n"
+
+            # Send follow-up questions
+            yield f"data: {json.dumps({'type': 'follow_up_questions', 'data': follow_up_questions})}\n\n"
 
             # Send completion message
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
