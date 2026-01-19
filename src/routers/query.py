@@ -1072,26 +1072,30 @@ def _generate_llm_follow_up_questions(question: str, answer: str) -> list:
         List of 3 relevant follow-up questions, or empty list on failure
     """
     if not llm:
-        logger.warning("LLM not available for follow-up question generation")
+        logger.warning("🔄 LLM not available for follow-up question generation")
         return []
 
     try:
+        logger.info(f"🔄 Generating LLM follow-up questions for: '{question[:50]}...'")
+
         # Truncate answer if too long (keep first 500 chars for context)
         answer_truncated = answer[:500] if len(answer) > 500 else answer
 
-        # Create prompt for LLM
-        prompt = f"""다음 질문과 답변을 분석하여, 사용자가 추가로 궁금해할 만한 관련 질문 3개를 생성하세요.
+        # Create prompt for LLM - more explicit format instructions
+        prompt = f"""질문과 답변을 분석하여 후속 질문 3개를 생성하세요.
 
-규칙:
-- 질문은 반드시 한국어로 작성
-- 질문은 '?'로 끝나야 함
-- 원래 질문/답변과 직접 관련된 구체적인 후속 질문
-- 일반적인 질문이 아닌, 해당 주제에 특화된 질문
+[원래 질문]
+{question}
 
-질문: {question}
-답변: {answer_truncated}
+[답변 내용]
+{answer_truncated}
 
-관련 질문 3개:
+[규칙]
+1. 위 답변 내용을 바탕으로 사용자가 더 알고 싶어할 구체적인 질문
+2. 한국어로 작성, 반드시 물음표(?)로 끝남
+3. 각 질문은 새 줄에 "-"로 시작
+
+[후속 질문 3개]
 -"""
 
         # Check LLM type and use appropriate generation method
@@ -1101,15 +1105,15 @@ def _generate_llm_follow_up_questions(question: str, answer: str) -> list:
             messages = [{"role": "user", "content": prompt}]
             response = llm._generate_response(
                 messages=messages,
-                max_tokens=200,
-                temperature=0.3
+                max_tokens=250,
+                temperature=0.5  # Slightly higher for variety
             )
         else:
             # Use MLX generate
             from mlx_lm import generate as mlx_generate
 
             messages = [
-                {"role": "system", "content": "당신은 한국어로 관련 질문을 생성하는 도우미입니다."},
+                {"role": "system", "content": "당신은 한국어로 후속 질문을 생성하는 도우미입니다. 답변 내용을 분석하여 관련된 구체적인 질문을 만드세요."},
                 {"role": "user", "content": prompt}
             ]
 
@@ -1123,9 +1127,12 @@ def _generate_llm_follow_up_questions(question: str, answer: str) -> list:
                 llm.model,
                 llm.tokenizer,
                 prompt=formatted_prompt,
-                max_tokens=200,
+                max_tokens=250,
                 verbose=False
             )
+
+        # Log raw response for debugging
+        logger.info(f"🔄 LLM raw response (first 300 chars): {response[:300]}")
 
         # Clean response - remove <think> tags if present
         response = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL)
@@ -1145,7 +1152,7 @@ def _generate_llm_follow_up_questions(question: str, answer: str) -> list:
             line = line.strip()
 
             # Skip metadata lines
-            skip_patterns = ['질문:', '답변:', '예시:', '관련 질문:']
+            skip_patterns = ['질문:', '답변:', '예시:', '관련 질문:', '후속 질문:', '[', ']']
             if any(line.startswith(p) or line == p.rstrip(':') for p in skip_patterns):
                 continue
 
@@ -1153,18 +1160,25 @@ def _generate_llm_follow_up_questions(question: str, answer: str) -> list:
             if len(line) < 5:
                 continue
 
-            # Validate: must end with ?, contain Korean
-            if line.endswith('?') and re.search(r'[가-힣]', line):
+            # Validate: must contain Korean and be a question-like sentence
+            has_korean = re.search(r'[가-힣]', line)
+            is_question = line.endswith('?') or '?' in line
+
+            if has_korean and is_question:
+                # Clean up: ensure ends with single ?
+                if not line.endswith('?'):
+                    line = line.split('?')[0] + '?'
                 questions.append(line)
+                logger.debug(f"🔄 Extracted question: {line}")
 
             if len(questions) >= 3:
                 break
 
-        logger.debug(f"LLM generated {len(questions)} follow-up questions")
+        logger.info(f"🔄 LLM generated {len(questions)} follow-up questions: {questions}")
         return questions[:3]
 
     except Exception as e:
-        logger.warning(f"Failed to generate LLM follow-up questions: {e}")
+        logger.error(f"🔄 Failed to generate LLM follow-up questions: {e}", exc_info=True)
         return []
 
 
