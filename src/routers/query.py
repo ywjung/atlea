@@ -257,6 +257,19 @@ class FollowUpRequest(BaseModel):
     question: str
     answer: str
     context: Optional[list] = []
+    session_id: Optional[str] = None  # Session ID for saving follow-up questions to history
+
+    @validator('session_id')
+    def validate_session_id(cls, v):
+        """Validate session_id format"""
+        if v is None:
+            return v
+        if len(v) > 100:
+            raise ValueError("session_id는 최대 100자까지 지정할 수 있습니다.")
+        # Only allow safe characters
+        if not re.match(r'^[a-zA-Z0-9_-]+$', v):
+            raise ValueError("session_id는 영문, 숫자, 대시, 언더스코어만 허용됩니다.")
+        return v
 
 
 # ============================================================================
@@ -1170,17 +1183,33 @@ async def generate_follow_up_questions(
         # Return questions or generate context-aware fallback
         if len(questions) >= 3:
             logger.info(f"Successfully generated {len(questions)} follow-up questions")
-            return {"questions": questions[:3]}
+            final_questions = questions[:3]
         else:
             logger.warning(f"Only generated {len(questions)} questions from response, generating context-aware fallback")
-
             # Generate context-aware fallback based on original question
             original_q = request.question
-            fallback_questions = _generate_context_aware_fallback(original_q, questions)
-            return {"questions": fallback_questions}
+            final_questions = _generate_context_aware_fallback(original_q, questions)
+
+        # Save follow-up questions to conversation history
+        if request.session_id and conversation_manager:
+            conversation_manager.update_last_message_metadata(
+                session_id=request.session_id,
+                metadata_update={"follow_up_questions": final_questions}
+            )
+            logger.debug(f"Saved follow-up questions to session {request.session_id}")
+
+        return {"questions": final_questions}
 
     except Exception as e:
         logger.error(f"Failed to generate follow-up questions: {e}", exc_info=True)
         # Generate context-aware fallback on error
         fallback_questions = _generate_context_aware_fallback(request.question, [])
+
+        # Still try to save to history on error
+        if request.session_id and conversation_manager:
+            conversation_manager.update_last_message_metadata(
+                session_id=request.session_id,
+                metadata_update={"follow_up_questions": fallback_questions}
+            )
+
         return {"questions": fallback_questions}

@@ -334,3 +334,48 @@ class ConversationManager:
             Number of bookmarked sessions
         """
         return self.client.zcard('conversations:bookmarked')
+
+    def update_last_message_metadata(self, session_id: str, metadata_update: Dict) -> bool:
+        """
+        Update the metadata of the last message in a session
+
+        Args:
+            session_id: Conversation session ID
+            metadata_update: Dictionary of metadata fields to add/update
+
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.client.exists(f'conversation:{session_id}'):
+            logger.warning(f"Session {session_id} does not exist")
+            return False
+
+        messages_key = f'conversation:{session_id}:messages'
+
+        # Get the last message
+        last_message_raw = self.client.lindex(messages_key, -1)
+        if not last_message_raw:
+            logger.warning(f"No messages in session {session_id}")
+            return False
+
+        try:
+            last_message = json.loads(last_message_raw.decode('utf-8'))
+
+            # Update metadata (merge with existing)
+            if 'metadata' not in last_message:
+                last_message['metadata'] = {}
+            last_message['metadata'].update(metadata_update)
+
+            # Replace the last message with updated version
+            self.client.lset(
+                messages_key,
+                -1,
+                json.dumps(last_message, ensure_ascii=False)
+            )
+
+            logger.debug(f"Updated last message metadata in session {session_id}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to update last message metadata: {e}")
+            return False
