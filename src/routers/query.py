@@ -13,6 +13,7 @@ from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, validator
 from typing import Optional
+from ..auth.rate_limiter import create_rate_limit_dependency
 import logging
 import json
 import asyncio
@@ -265,7 +266,8 @@ class FollowUpRequest(BaseModel):
 @router.post("/api/query", response_model=QueryResponse, tags=["Query"])
 async def query(
     request: QueryRequest,
-    current_user: dict = Depends(auth_get_current_active_user)
+    current_user: dict = Depends(auth_get_current_active_user),
+    _rate_limit=Depends(create_rate_limit_dependency(30, 60, "query"))
 ):
     """
     Query endpoint for chatbot (로그인 필요)
@@ -502,7 +504,8 @@ async def query(
 async def query_stream(
     request: QueryRequest,
     background_tasks: BackgroundTasks,
-    current_user: dict = Depends(auth_get_current_active_user)
+    current_user: dict = Depends(auth_get_current_active_user),
+    _rate_limit=Depends(create_rate_limit_dependency(30, 60, "query_stream"))
 ):
     """
     Streaming query endpoint for chatbot (로그인 필요)
@@ -1001,7 +1004,8 @@ async def query_stream(
 @router.post("/api/follow-up-questions", tags=["Query"])
 async def generate_follow_up_questions(
     request: FollowUpRequest,
-    current_user: dict = Depends(auth_get_current_active_user)
+    current_user: dict = Depends(auth_get_current_active_user),
+    _rate_limit=Depends(create_rate_limit_dependency(30, 60, "follow_up_questions"))
 ):
     """
     Generate smart follow-up questions (로그인 필요)

@@ -1175,10 +1175,8 @@ async def upload_document(
                     user_data = verify_token(token)
                     if user_data:
                         # Token contains: user_id (always), username (optional)
-                        logger.debug(f"Token data: {user_data}")
                         username = user_data.get("username")
                         user_id = user_data.get("user_id")
-                        logger.debug(f"Extracted username: {username}, user_id: {user_id}")
                         current_user = username or user_id or "system"
                         logger.info(f"Upload user identified: {current_user}")
                     else:
@@ -1913,10 +1911,8 @@ async def restore_document_version(
                     user_data = verify_token(token)
                     if user_data:
                         # Token contains: user_id (always), username (optional)
-                        logger.debug(f"Token data: {user_data}")
                         username = user_data.get("username")
                         user_id = user_data.get("user_id")
-                        logger.debug(f"Extracted username: {username}, user_id: {user_id}")
                         current_user = username or user_id or "system"
                         logger.info(f"Restore user identified: {current_user}")
                     else:

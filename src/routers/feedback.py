@@ -262,7 +262,7 @@ async def get_feedback_stats(
         recent_positive = redis.zcount("feedback:stats:positive", week_ago, "+inf")
         recent_negative = redis.zcount("feedback:stats:negative", week_ago, "+inf")
 
-        # 최근 피드백 목록 (최대 10개)
+        # 최근 피드백 목록 (최대 10개) - Pipeline으로 배치 조회 (N+1 방지)
         recent_feedback_keys = []
         recent_positive_keys = redis.zrevrange("feedback:stats:positive", 0, 4) or []
         recent_negative_keys = redis.zrevrange("feedback:stats:negative", 0, 4) or []
@@ -270,10 +270,17 @@ async def get_feedback_stats(
         recent_feedback_keys.extend(recent_negative_keys)
 
         recent_feedbacks = []
-        for key in recent_feedback_keys:
-            feedback_data = redis.get(key)
-            if feedback_data:
-                recent_feedbacks.append(json.loads(feedback_data))
+        if recent_feedback_keys:
+            # Pipeline으로 모든 키를 한 번에 조회
+            pipe = redis.pipeline()
+            for key in recent_feedback_keys:
+                key_str = key.decode('utf-8') if isinstance(key, bytes) else key
+                pipe.get(key_str)
+            results = pipe.execute()
+
+            for feedback_data in results:
+                if feedback_data:
+                    recent_feedbacks.append(json.loads(feedback_data))
 
         # 타임스탬프 기준으로 정렬
         recent_feedbacks.sort(key=lambda x: x['timestamp'], reverse=True)

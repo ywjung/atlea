@@ -374,31 +374,46 @@ class WebhookService:
         Returns:
             전송 기록 목록
         """
-        # 모든 웹훅 조회
-        webhook_keys = self.redis.keys("webhook:*")
-        deliveries = []
-
-        for key in webhook_keys:
+        # 모든 웹훅 조회 (scan_iter 사용 - 블로킹 방지)
+        webhook_keys = []
+        for key in self.redis.scan_iter(match="webhook:*", count=100):
             key_str = key.decode() if isinstance(key, bytes) else key
-
             # delivery 키는 제외
-            if ":delivery:" in key_str:
+            if ":delivery:" not in key_str:
+                webhook_keys.append(key_str)
+
+        deliveries = []
+        if not webhook_keys:
+            return deliveries
+
+        # Pipeline으로 모든 웹훅 데이터를 배치 조회 (N+1 방지)
+        pipe = self.redis.pipeline()
+        for key in webhook_keys:
+            pipe.get(key)
+        webhook_data_list = pipe.execute()
+
+        # 웹훅 처리
+        for key, webhook_data in zip(webhook_keys, webhook_data_list):
+            if not webhook_data:
                 continue
 
-            # webhook_id 추출
-            webhook_id = key_str.replace("webhook:", "")
+            try:
+                data = json.loads(webhook_data)
+                webhook = Webhook(**data)
 
-            webhook = await self.get_webhook(webhook_id)
-            if not webhook or not webhook.is_active:
+                if not webhook.is_active:
+                    continue
+
+                # 이벤트 구독 확인
+                if event_type.value not in webhook.events:
+                    continue
+
+                # 비동기로 웹훅 전송 (재시도 로직 포함)
+                delivery = await self._deliver_with_retry(webhook, event_type, payload)
+                deliveries.append(delivery)
+            except Exception as e:
+                logger.error(f"Failed to process webhook {key}: {e}")
                 continue
-
-            # 이벤트 구독 확인
-            if event_type.value not in webhook.events:
-                continue
-
-            # 비동기로 웹훅 전송 (재시도 로직 포함)
-            delivery = await self._deliver_with_retry(webhook, event_type, payload)
-            deliveries.append(delivery)
 
         return deliveries
 

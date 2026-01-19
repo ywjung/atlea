@@ -11,6 +11,7 @@ Handles Redis backup operations including:
 from fastapi import APIRouter, HTTPException, Request, Depends
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from ..auth.rate_limiter import create_rate_limit_dependency
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional
@@ -109,7 +110,11 @@ def get_redis_backup_info():
 # ==================== Endpoints ====================
 
 @router.post("/create")
-async def create_redis_backup(request: Request, backup_request: BackupCreateRequest):
+async def create_redis_backup(
+    request: Request,
+    backup_request: BackupCreateRequest,
+    _rate_limit=Depends(create_rate_limit_dependency(5, 60, "redis_backup_create"))
+):
     """Redis 백업 생성
 
     Request body:
@@ -222,7 +227,10 @@ async def create_redis_backup(request: Request, backup_request: BackupCreateRequ
 
 
 @router.get("/list")
-async def list_redis_backups(request: Request):
+async def list_redis_backups(
+    request: Request,
+    _rate_limit=Depends(create_rate_limit_dependency(30, 60, "redis_backup_list"))
+):
     """Redis 백업 목록 조회"""
     try:
         # Admin permission check
@@ -254,7 +262,11 @@ async def list_redis_backups(request: Request):
 
 
 @router.post("/restore")
-async def restore_redis_backup(request: Request, restore_request: BackupRestoreRequest):
+async def restore_redis_backup(
+    request: Request,
+    restore_request: BackupRestoreRequest,
+    _rate_limit=Depends(create_rate_limit_dependency(3, 60, "redis_backup_restore"))
+):
     """Redis 백업 복원 (안전성 강화)
 
     Request body:
@@ -565,7 +577,11 @@ async def restore_redis_backup(request: Request, restore_request: BackupRestoreR
 
 
 @router.get("/download/{filename}")
-async def download_redis_backup(request: Request, filename: str):
+async def download_redis_backup(
+    request: Request,
+    filename: str,
+    _rate_limit=Depends(create_rate_limit_dependency(10, 60, "redis_backup_download"))
+):
     """Redis 백업 파일 다운로드"""
     try:
         # Admin permission check
@@ -596,7 +612,11 @@ async def download_redis_backup(request: Request, filename: str):
 
 
 @router.post("/delete")
-async def delete_redis_backup(request: Request, delete_request: BackupDeleteRequest):
+async def delete_redis_backup(
+    request: Request,
+    delete_request: BackupDeleteRequest,
+    _rate_limit=Depends(create_rate_limit_dependency(10, 60, "redis_backup_delete"))
+):
     """Redis 백업 파일 삭제
 
     Request body:
@@ -633,7 +653,10 @@ async def delete_redis_backup(request: Request, delete_request: BackupDeleteRequ
 
 
 @router.get("/schedule")
-async def get_backup_schedule(request: Request):
+async def get_backup_schedule(
+    request: Request,
+    _rate_limit=Depends(create_rate_limit_dependency(30, 60, "redis_backup_schedule"))
+):
     """자동 백업 스케줄 조회"""
     try:
         # Admin permission check
@@ -670,6 +693,7 @@ async def get_backup_schedule(request: Request):
 async def update_backup_schedule(
     request: Request,
     schedule_request: BackupScheduleRequest,
+    _rate_limit=Depends(create_rate_limit_dependency(10, 60, "redis_backup_schedule_update"))
 ):
     """자동 백업 스케줄 업데이트
 
