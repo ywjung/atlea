@@ -84,7 +84,14 @@ engines:
     shortcut: wp
     disabled: false
 
-  # Tech documentation (stackoverflow removed - not available in this SearXNG version)
+  # Tech documentation
+  - name: stackoverflow
+    engine: stackexchange
+    shortcut: so
+    site: stackoverflow
+    categories: [general, it]
+    disabled: false
+
   - name: github
     engine: github
     shortcut: gh
