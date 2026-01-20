@@ -9,12 +9,35 @@ services:
       - searxng_data:/etc/searxng
     environment:
       - SEARXNG_BASE_URL=http://localhost:8888/
-      - SEARXNG_SECRET_KEY=${SEARXNG_SECRET_KEY:-ultrasecretkey}
+      - SEARXNG_SECRET_KEY=${SEARXNG_SECRET_KEY:-47d2ce3c064f6cccf72ba8cc44d102f213a8016e6642fffa5df21ed50c8a9a04}
     restart: unless-stopped
     networks:
       - chatbot_network
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  crawl4ai:
+    image: unclecode/crawl4ai:latest
+    container_name: crawl4ai
+    ports:
+      - "11235:11235"
+    environment:
+      - CRAWL4AI_API_TOKEN=${CRAWL4AI_API_TOKEN:-}
+      - MAX_CONCURRENT_TASKS=5
+    restart: unless-stopped
+    networks:
+      - chatbot_network
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 1G
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11235/health"]
       interval: 30s
       timeout: 10s
       retries: 3

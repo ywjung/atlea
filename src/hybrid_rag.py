@@ -4,6 +4,9 @@ Hybrid RAG Orchestrator - 다중 소스 RAG 시스템
 로컬 문서 + 웹 검색 + 공식 문서를 결합하여 더 완벽한 답변 제공
 
 📝 Changelog:
+- 2026-01-20: Crawl4AI 통합으로 SearXNG 콘텐츠 품질 개선
+  - SearXNG 검색 결과 URL에서 Crawl4AI로 전체 콘텐츠 추출
+  - 짧은 스니펫 대신 풍부한 페이지 콘텐츠 제공
 - 2026-01-20: SearXNG 웹 검색 프로바이더 추가
   - Tavily와 SearXNG 중 선택 가능
   - Docker Compose로 SearXNG 로컬 구동 지원
@@ -88,6 +91,11 @@ class HybridRAGOrchestrator:
         self.searxng_client = None
         if enable_web_search and self.web_search_provider == 'searxng':
             self.searxng_client = self._init_searxng()
+
+        # Crawl4AI 클라이언트 (SearXNG 콘텐츠 추출용)
+        self.crawl4ai_client = None
+        if enable_web_search and self.web_search_provider == 'searxng':
+            self.crawl4ai_client = self._init_crawl4ai()
 
         # Context7 클라이언트 (추후 구현)
         self.context7_client = None
@@ -184,6 +192,56 @@ class HybridRAGOrchestrator:
         except Exception as e:
             logger.error(f"❌ Failed to initialize SearXNG: {e}")
             self.web_search_enabled = False
+            return None
+
+    def _init_crawl4ai(self):
+        """Crawl4AI 콘텐츠 추출 클라이언트 초기화"""
+        try:
+            import httpx
+
+            # Crawl4AI URL 가져오기: Redis 우선, 환경 변수 대체
+            crawl4ai_url = None
+
+            # 1. Redis에서 확인
+            try:
+                redis_url = self.cache.redis.get("config:crawl4ai_url")
+                if redis_url:
+                    crawl4ai_url = redis_url.decode()
+                    logger.info("🔑 Using Crawl4AI URL from Redis")
+            except Exception as e:
+                logger.debug(f"Failed to get Crawl4AI URL from Redis: {e}")
+
+            # 2. 환경 변수 확인
+            if not crawl4ai_url:
+                crawl4ai_url = os.getenv('CRAWL4AI_URL', 'http://localhost:11235')
+                logger.info(f"🔑 Using Crawl4AI URL from environment: {crawl4ai_url}")
+
+            # API 토큰 (선택적)
+            api_token = os.getenv('CRAWL4AI_API_TOKEN', '')
+
+            headers = {
+                'Content-Type': 'application/json',
+            }
+            if api_token:
+                headers['Authorization'] = f'Bearer {api_token}'
+
+            # Crawl4AI 클라이언트 설정
+            client = {
+                'base_url': crawl4ai_url.rstrip('/'),
+                'http_client': httpx.AsyncClient(
+                    timeout=30.0,  # 크롤링은 시간이 걸릴 수 있음
+                    headers=headers
+                )
+            }
+
+            logger.info(f"✅ Crawl4AI client initialized: {crawl4ai_url}")
+            return client
+
+        except ImportError:
+            logger.warning("⚠️  httpx not installed, Crawl4AI disabled")
+            return None
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize Crawl4AI: {e}")
             return None
 
     def _init_context7(self):
@@ -538,7 +596,7 @@ class HybridRAGOrchestrator:
             return []
 
     async def _search_web_searxng(self, query: str, analysis: Dict) -> List[Dict]:
-        """웹 검색 (SearXNG)"""
+        """웹 검색 (SearXNG + Crawl4AI 콘텐츠 추출)"""
         if not self.searxng_client:
             return []
 
@@ -561,9 +619,18 @@ class HybridRAGOrchestrator:
             response.raise_for_status()
             search_results = response.json()
 
-            web_chunks = []
             results = search_results.get('results', [])[:5]  # 상위 5개만
+            logger.info(f"🌐 SearXNG search found {len(results)} results")
 
+            # Crawl4AI로 콘텐츠 추출 시도
+            if self.crawl4ai_client and results:
+                web_chunks = await self._enrich_with_crawl4ai(results)
+                if web_chunks:
+                    return web_chunks
+
+            # Crawl4AI 실패 시 기존 로직으로 폴백
+            logger.info("📝 Using SearXNG snippets (Crawl4AI unavailable or failed)")
+            web_chunks = []
             for i, result in enumerate(results):
                 content = result.get('content', '')
                 if not content:
@@ -588,11 +655,107 @@ class HybridRAGOrchestrator:
                     'freshness': 1.0  # 웹 정보는 항상 최신으로 간주
                 })
 
-            logger.info(f"🌐 SearXNG search found {len(web_chunks)} results")
             return web_chunks
 
         except Exception as e:
             logger.error(f"❌ SearXNG search error: {e}")
+            return []
+
+    async def _enrich_with_crawl4ai(self, searxng_results: List[Dict]) -> List[Dict]:
+        """Crawl4AI를 사용하여 SearXNG 검색 결과의 콘텐츠를 추출"""
+        if not self.crawl4ai_client:
+            return []
+
+        try:
+            http_client = self.crawl4ai_client['http_client']
+            base_url = self.crawl4ai_client['base_url']
+
+            # URL 목록 추출
+            urls = [r.get('url') for r in searxng_results if r.get('url')]
+            if not urls:
+                return []
+
+            logger.info(f"🕷️ Crawl4AI extracting content from {len(urls)} URLs")
+
+            # Crawl4AI API 호출 (배치 크롤링)
+            crawl_url = f"{base_url}/crawl"
+            payload = {
+                "urls": urls,
+                "word_count_threshold": 50,
+                "extraction_config": {
+                    "type": "basic"
+                }
+            }
+
+            response = await http_client.post(crawl_url, json=payload)
+
+            if response.status_code != 200:
+                logger.warning(f"⚠️ Crawl4AI request failed: {response.status_code}")
+                return []
+
+            crawl_results = response.json()
+
+            # 크롤링 결과를 URL 기준으로 매핑
+            content_map = {}
+            results_list = crawl_results.get('results', [])
+
+            # results가 리스트인 경우
+            if isinstance(results_list, list):
+                for cr in results_list:
+                    url = cr.get('url', '')
+                    if cr.get('success') and cr.get('markdown'):
+                        content_map[url] = cr.get('markdown', '')[:2000]  # 최대 2000자
+                    elif cr.get('success') and cr.get('cleaned_html'):
+                        content_map[url] = cr.get('cleaned_html', '')[:2000]
+            # results가 딕셔너리인 경우 (단일 URL 요청)
+            elif isinstance(results_list, dict):
+                url = results_list.get('url', '')
+                if results_list.get('success') and results_list.get('markdown'):
+                    content_map[url] = results_list.get('markdown', '')[:2000]
+
+            # 결과가 없으면 빈 리스트 반환
+            if not content_map:
+                logger.warning("⚠️ Crawl4AI returned no content")
+                return []
+
+            logger.info(f"✅ Crawl4AI extracted content from {len(content_map)} URLs")
+
+            # SearXNG 결과와 Crawl4AI 콘텐츠 결합
+            web_chunks = []
+            for i, result in enumerate(searxng_results):
+                url = result.get('url', '')
+                content = content_map.get(url, result.get('content', ''))
+
+                if not content:
+                    content = result.get('title', '')
+
+                if not content:
+                    continue
+
+                # SearXNG는 score가 없으므로 순위 기반 점수 부여
+                score = 1.0 - (i * 0.1)  # 1.0, 0.9, 0.8, 0.7, 0.6
+
+                web_chunks.append({
+                    'content': content,
+                    'source_type': 'web',
+                    'metadata': {
+                        'url': url,
+                        'title': result.get('title', ''),
+                        'published_date': result.get('publishedDate', '최근'),
+                        'engine': result.get('engine', 'searxng'),
+                        'content_source': 'crawl4ai' if url in content_map else 'snippet',
+                    },
+                    'score': score,
+                    'freshness': 1.0  # 웹 정보는 항상 최신으로 간주
+                })
+
+            return web_chunks
+
+        except asyncio.TimeoutError:
+            logger.warning("⚠️ Crawl4AI request timed out")
+            return []
+        except Exception as e:
+            logger.error(f"❌ Crawl4AI extraction error: {e}")
             return []
 
     @log_slow_query(threshold_seconds=3.0)
