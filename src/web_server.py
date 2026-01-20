@@ -528,8 +528,22 @@ async def get_hybrid_rag_orchestrator():
     if not is_enabled:
         return None  # Hybrid RAG disabled
 
+    # Check if config has changed and needs reinitialization
+    needs_reinit = False
+    if hybrid_rag_orchestrator is not None:
+        current_provider = getattr(hybrid_rag_orchestrator, 'web_search_provider', 'tavily')
+        current_web_enabled = getattr(hybrid_rag_orchestrator, 'web_search_enabled', False)
+        current_doc_enabled = getattr(hybrid_rag_orchestrator, 'doc_search_enabled', False)
+
+        if (current_provider != web_search_provider or
+            current_web_enabled != enable_web or
+            current_doc_enabled != enable_docs):
+            logger.info(f"🔄 Config changed: provider={current_provider}→{web_search_provider}, "
+                       f"web={current_web_enabled}→{enable_web}, docs={current_doc_enabled}→{enable_docs}")
+            needs_reinit = True
+
     # Initialize if not already created or if config changed
-    if hybrid_rag_orchestrator is None:
+    if hybrid_rag_orchestrator is None or needs_reinit:
         logger.info("⚡ Initializing Hybrid RAG orchestrator...")
         rag_instance = await get_rag_system()
         hybrid_rag_orchestrator = HybridRAGOrchestrator(
