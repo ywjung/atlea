@@ -661,6 +661,33 @@ class HybridRAGOrchestrator:
             logger.error(f"❌ SearXNG search error: {e}")
             return []
 
+    def _html_to_text(self, html: str) -> str:
+        """HTML을 텍스트로 변환 (간단한 태그 제거)"""
+        import re
+
+        if not html:
+            return ""
+
+        # script, style 태그와 내용 제거
+        text = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.DOTALL | re.IGNORECASE)
+
+        # HTML 태그 제거
+        text = re.sub(r'<[^>]+>', ' ', text)
+
+        # HTML 엔티티 디코딩
+        text = text.replace('&nbsp;', ' ')
+        text = text.replace('&amp;', '&')
+        text = text.replace('&lt;', '<')
+        text = text.replace('&gt;', '>')
+        text = text.replace('&quot;', '"')
+        text = text.replace('&#39;', "'")
+
+        # 연속 공백을 하나로
+        text = re.sub(r'\s+', ' ', text)
+
+        return text.strip()
+
     async def _enrich_with_crawl4ai(self, searxng_results: List[Dict]) -> List[Dict]:
         """Crawl4AI를 사용하여 SearXNG 검색 결과의 콘텐츠를 추출"""
         if not self.crawl4ai_client:
@@ -680,11 +707,7 @@ class HybridRAGOrchestrator:
             # Crawl4AI API 호출 (배치 크롤링)
             crawl_url = f"{base_url}/crawl"
             payload = {
-                "urls": urls,
-                "word_count_threshold": 50,
-                "extraction_config": {
-                    "type": "basic"
-                }
+                "urls": urls
             }
 
             response = await http_client.post(crawl_url, json=payload)
@@ -703,15 +726,34 @@ class HybridRAGOrchestrator:
             if isinstance(results_list, list):
                 for cr in results_list:
                     url = cr.get('url', '')
-                    if cr.get('success') and cr.get('markdown'):
-                        content_map[url] = cr.get('markdown', '')[:2000]  # 최대 2000자
-                    elif cr.get('success') and cr.get('cleaned_html'):
-                        content_map[url] = cr.get('cleaned_html', '')[:2000]
+                    if not cr.get('success'):
+                        continue
+
+                    # markdown이 충분히 길면 사용, 아니면 cleaned_html을 텍스트로 변환
+                    markdown = cr.get('markdown', '') or ''
+                    cleaned_html = cr.get('cleaned_html', '') or ''
+
+                    if len(markdown.strip()) > 100:
+                        content_map[url] = markdown[:2000]
+                    elif cleaned_html:
+                        text_content = self._html_to_text(cleaned_html)
+                        if len(text_content) > 100:
+                            content_map[url] = text_content[:2000]
+
             # results가 딕셔너리인 경우 (단일 URL 요청)
             elif isinstance(results_list, dict):
-                url = results_list.get('url', '')
-                if results_list.get('success') and results_list.get('markdown'):
-                    content_map[url] = results_list.get('markdown', '')[:2000]
+                cr = results_list
+                url = cr.get('url', '')
+                if cr.get('success'):
+                    markdown = cr.get('markdown', '') or ''
+                    cleaned_html = cr.get('cleaned_html', '') or ''
+
+                    if len(markdown.strip()) > 100:
+                        content_map[url] = markdown[:2000]
+                    elif cleaned_html:
+                        text_content = self._html_to_text(cleaned_html)
+                        if len(text_content) > 100:
+                            content_map[url] = text_content[:2000]
 
             # 결과가 없으면 빈 리스트 반환
             if not content_map:
