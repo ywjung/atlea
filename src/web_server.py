@@ -517,11 +517,13 @@ async def get_hybrid_rag_orchestrator():
     hybrid_rag_enabled = cache_manager.redis.get("config:hybrid_rag_enabled")
     web_search_enabled = cache_manager.redis.get("config:hybrid_rag_web_search")
     doc_search_enabled = cache_manager.redis.get("config:hybrid_rag_doc_search")
+    web_search_provider_raw = cache_manager.redis.get("config:web_search_provider")
 
     # Decode Redis values (they're stored as bytes)
     is_enabled = hybrid_rag_enabled and hybrid_rag_enabled.decode() == "true"
     enable_web = web_search_enabled and web_search_enabled.decode() == "true"
     enable_docs = doc_search_enabled and doc_search_enabled.decode() == "true"
+    web_search_provider = web_search_provider_raw.decode() if web_search_provider_raw else 'tavily'
 
     if not is_enabled:
         return None  # Hybrid RAG disabled
@@ -534,9 +536,10 @@ async def get_hybrid_rag_orchestrator():
             local_rag=rag_instance,
             cache_manager=cache_manager,
             enable_web_search=enable_web,
-            enable_doc_search=enable_docs
+            enable_doc_search=enable_docs,
+            web_search_provider=web_search_provider
         )
-        logger.success(f"✅ Hybrid RAG ready! (Web: {enable_web}, Docs: {enable_docs})")
+        logger.success(f"✅ Hybrid RAG ready! (Web: {enable_web}, Provider: {web_search_provider}, Docs: {enable_docs})")
 
     return hybrid_rag_orchestrator
 

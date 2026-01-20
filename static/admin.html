@@ -3052,6 +3052,10 @@
                                 style="padding: 6px 12px; border-radius: 6px; font-size: 13px; background: #f3f4f6; color: #6b7280;">
                                 Context7: 미설정
                             </span>
+                            <span id="searxngConfigStatus"
+                                style="padding: 6px 12px; border-radius: 6px; font-size: 13px; background: #f3f4f6; color: #6b7280;">
+                                SearXNG: 미설정
+                            </span>
                         </div>
 
                         <!-- Sub Options -->
@@ -3081,13 +3085,28 @@
 
                             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
                                 <div>
-                                    <div style="font-weight: 600; margin-bottom: 3px;">🌐 웹 검색 (Tavily)</div>
+                                    <div style="font-weight: 600; margin-bottom: 3px;">🌐 웹 검색</div>
                                     <div style="font-size: 12px; color: #666;">최신 정보 및 뉴스 검색</div>
                                 </div>
                                 <label class="toggle-switch">
                                     <input type="checkbox" id="webSearchToggle" onchange="toggleWebSearch()">
                                     <span class="toggle-slider"></span>
                                 </label>
+                            </div>
+
+                            <!-- Web Search Provider Selection -->
+                            <div id="webSearchProviderOptions" style="margin-bottom: 15px; padding: 10px; background: #f9fafb; border-radius: 6px; border: 1px solid #e5e7eb;">
+                                <div style="font-weight: 600; margin-bottom: 8px; font-size: 13px; color: #374151;">웹 검색 제공자</div>
+                                <div style="display: flex; gap: 15px;">
+                                    <label style="display: flex; align-items: center; cursor: pointer;">
+                                        <input type="radio" name="webSearchProvider" value="tavily" id="providerTavily" onchange="changeWebSearchProvider()" style="margin-right: 6px;">
+                                        <span style="font-size: 13px;">🔍 Tavily (API 키 필요)</span>
+                                    </label>
+                                    <label style="display: flex; align-items: center; cursor: pointer;">
+                                        <input type="radio" name="webSearchProvider" value="searxng" id="providerSearxng" onchange="changeWebSearchProvider()" style="margin-right: 6px;">
+                                        <span style="font-size: 13px;">🔎 SearXNG (자체 호스팅)</span>
+                                    </label>
+                                </div>
                             </div>
 
                             <div style="display: flex; justify-content: space-between; align-items: center;">
@@ -3159,6 +3178,55 @@
                             </div>
                         </div>
 
+                        <!-- SearXNG URL Configuration -->
+                        <div id="searxngConfigSection" style="background: white; padding: 15px; border-radius: 6px; border: 1px solid #e5e7eb; margin-bottom: 15px; display: none;">
+                            <h5 style="margin: 0 0 15px 0; font-size: 14px; color: #374151;">🔎 SearXNG 설정</h5>
+
+                            <div style="margin-bottom: 15px;">
+                                <label for="searxngUrlInput" style="display: block; margin-bottom: 5px; font-weight: 600; font-size: 13px;">
+                                    SearXNG URL
+                                </label>
+                                <div style="display: flex; gap: 10px;">
+                                    <input
+                                        type="text"
+                                        id="searxngUrlInput"
+                                        placeholder="http://localhost:8888"
+                                        style="flex: 1; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-family: monospace; font-size: 13px;"
+                                    />
+                                    <button
+                                        onclick="testSearxngConnection()"
+                                        style="padding: 8px 16px; background: #f3f4f6; border: 1px solid #d1d5db; border-radius: 6px; cursor: pointer; transition: all 0.2s;"
+                                        onmouseover="this.style.background='#e5e7eb'"
+                                        onmouseout="this.style.background='#f3f4f6'"
+                                        title="연결 테스트">
+                                        🔗 테스트
+                                    </button>
+                                </div>
+                                <div style="margin-top: 8px;">
+                                    <div id="currentSearxngUrl" style="font-size: 12px; color: #666;">
+                                        현재 URL: 로딩 중...
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div style="display: flex; gap: 10px;">
+                                <button
+                                    onclick="saveSearxngUrl()"
+                                    style="padding: 8px 16px; background: #3b82f6; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">
+                                    💾 URL 저장
+                                </button>
+                                <button
+                                    onclick="deleteSearxngUrl()"
+                                    style="padding: 8px 16px; background: #dc2626; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">
+                                    🗑️ URL 삭제
+                                </button>
+                            </div>
+
+                            <div style="margin-top: 10px; padding: 10px; background: #f0f9ff; border-left: 3px solid #0ea5e9; border-radius: 4px; font-size: 12px; color: #0c4a6e;">
+                                <strong>💡 팁:</strong> SearXNG는 <code>docker-compose -f docker-compose.searxng.yml up -d</code>로 실행할 수 있습니다
+                            </div>
+                        </div>
+
                         <!-- Context7 API Key Configuration -->
                         <div style="background: white; padding: 15px; border-radius: 6px; border: 1px solid #e5e7eb; margin-bottom: 15px;">
                             <h5 style="margin: 0 0 15px 0; font-size: 14px; color: #374151;">📚 Context7 API 키 설정</h5>
@@ -3221,16 +3289,18 @@
                         <strong>ℹ️ 하이브리드 RAG 정보:</strong>
                         <ul style="margin: 10px 0 0 0; padding-left: 20px; font-size: 14px; color: #666;">
                             <li><strong>기능:</strong> 내부 문서와 외부 웹 정보를 결합하여 더 완벽한 답변 제공</li>
-                            <li><strong>웹 검색:</strong> Tavily API를 사용하여 최신 정보, 뉴스, 트렌드 검색</li>
+                            <li><strong>웹 검색 제공자:</strong>
+                                <ul style="margin: 5px 0 0 0; padding-left: 20px;">
+                                    <li><strong>Tavily:</strong> 클라우드 기반 AI 검색 API (<a href="https://tavily.com" target="_blank" style="color: #3b82f6;">tavily.com</a>에서 무료 API 키 발급)</li>
+                                    <li><strong>SearXNG:</strong> 자체 호스팅 메타검색 엔진 (<code>docker-compose -f docker-compose.searxng.yml up -d</code>로 실행)</li>
+                                </ul>
+                            </li>
                             <li><strong>스마트 선택:</strong> 질문 내용을 분석하여 자동으로 최적의 정보 소스 선택
                                 <ul style="margin: 5px 0 0 0; padding-left: 20px;">
                                     <li>"최신", "현재", "2024년" 등 → 웹 검색 활성화</li>
                                     <li>"우리 회사", "내부 정책" 등 → 로컬 문서만 사용</li>
                                     <li>기술 스택 언급 시 → 공식 문서 참조 (준비 중)</li>
                                 </ul>
-                            </li>
-                            <li><strong>Tavily 설정:</strong> TAVILY_API_KEY 환경 변수 설정 필요 (
-                                <a href="https://tavily.com" target="_blank" style="color: #3b82f6;">tavily.com</a>에서 무료 API 키 발급)
                             </li>
                             <li><strong>주의:</strong> 웹 검색 활성화 시 응답 시간이 2-3초 증가할 수 있음</li>
                         </ul>
@@ -11436,12 +11506,22 @@
                     document.getElementById('searchModeComprehensive').checked = true;
                 }
 
+                // Web search provider 라디오 버튼 업데이트
+                const provider = data.web_search_provider || 'tavily';
+                if (provider === 'tavily') {
+                    document.getElementById('providerTavily').checked = true;
+                } else {
+                    document.getElementById('providerSearxng').checked = true;
+                }
+                updateProviderSectionVisibility(provider);
+
                 // 상태 표시 업데이트
                 updateHybridRagStatus(data.enabled);
 
                 // API 키 로드
                 await loadTavilyApiKey();
                 await loadContext7ApiKey();
+                await loadSearxngUrl();
 
                 // 옵션 영역 표시/숨김
                 document.getElementById('hybridRagOptions').style.display =
@@ -11862,6 +11942,7 @@
 
             try {
                 const searchMode = document.querySelector('input[name="searchMode"]:checked')?.value || 'smart';
+                const webSearchProvider = document.querySelector('input[name="webSearchProvider"]:checked')?.value || 'tavily';
 
                 const data = await Auth.apiCall('/api/admin/hybrid-rag', {
                     method: 'PUT',
@@ -11869,7 +11950,8 @@
                         enabled: enabled,
                         web_search: document.getElementById('webSearchToggle').checked,
                         doc_search: document.getElementById('docSearchToggle').checked,
-                        search_mode: searchMode
+                        search_mode: searchMode,
+                        web_search_provider: webSearchProvider
                     })
                 });
 
@@ -11901,6 +11983,7 @@
 
             try {
                 const searchMode = document.querySelector('input[name="searchMode"]:checked')?.value || 'smart';
+                const webSearchProvider = document.querySelector('input[name="webSearchProvider"]:checked')?.value || 'tavily';
 
                 const data = await Auth.apiCall('/api/admin/hybrid-rag', {
                     method: 'PUT',
@@ -11908,7 +11991,8 @@
                         enabled: document.getElementById('hybridRagToggle').checked,
                         web_search: enabled,
                         doc_search: document.getElementById('docSearchToggle').checked,
-                        search_mode: searchMode
+                        search_mode: searchMode,
+                        web_search_provider: webSearchProvider
                     })
                 });
 
@@ -11931,6 +12015,7 @@
 
             try {
                 const searchMode = document.querySelector('input[name="searchMode"]:checked')?.value || 'smart';
+                const webSearchProvider = document.querySelector('input[name="webSearchProvider"]:checked')?.value || 'tavily';
 
                 const data = await Auth.apiCall('/api/admin/hybrid-rag', {
                     method: 'PUT',
@@ -11938,7 +12023,8 @@
                         enabled: document.getElementById('hybridRagToggle').checked,
                         web_search: document.getElementById('webSearchToggle').checked,
                         doc_search: enabled,
-                        search_mode: searchMode
+                        search_mode: searchMode,
+                        web_search_provider: webSearchProvider
                     })
                 });
 
@@ -11984,6 +12070,220 @@
                 statusEl.textContent = 'Tavily: ⚠️ API Key 미설정';
                 statusEl.style.color = '#dc2626';
             }
+        }
+
+        /**
+         * SearXNG 상태 업데이트
+         * @param {boolean} configured - SearXNG URL 설정 여부
+         */
+        function updateSearxngStatus(configured) {
+            const statusEl = document.getElementById('searxngConfigStatus');
+
+            if (configured) {
+                statusEl.textContent = 'SearXNG: ✅ 설정 완료';
+                statusEl.style.color = '#166534';
+            } else {
+                statusEl.textContent = 'SearXNG: ⚠️ URL 미설정';
+                statusEl.style.color = '#dc2626';
+            }
+        }
+
+        /**
+         * 웹 검색 제공자 섹션 표시/숨김
+         * @param {string} provider - 'tavily' 또는 'searxng'
+         */
+        function updateProviderSectionVisibility(provider) {
+            const tavilySection = document.querySelector('[id^="tavilyApiKey"]')?.closest('div[style*="background: white"]');
+            const searxngSection = document.getElementById('searxngConfigSection');
+
+            // 간단히 display로 처리
+            if (provider === 'tavily') {
+                if (searxngSection) searxngSection.style.display = 'none';
+            } else {
+                if (searxngSection) searxngSection.style.display = 'block';
+            }
+        }
+
+        /**
+         * 웹 검색 제공자 변경
+         */
+        async function changeWebSearchProvider() {
+            const provider = document.querySelector('input[name="webSearchProvider"]:checked')?.value || 'tavily';
+
+            updateProviderSectionVisibility(provider);
+
+            try {
+                const searchMode = document.querySelector('input[name="searchMode"]:checked')?.value || 'smart';
+
+                const data = await Auth.apiCall('/api/admin/hybrid-rag', {
+                    method: 'PUT',
+                    body: JSON.stringify({
+                        enabled: document.getElementById('hybridRagToggle').checked,
+                        web_search: document.getElementById('webSearchToggle').checked,
+                        doc_search: document.getElementById('docSearchToggle').checked,
+                        search_mode: searchMode,
+                        web_search_provider: provider
+                    })
+                });
+
+                showHybridRagSuccess(`웹 검색 제공자가 ${provider === 'tavily' ? 'Tavily' : 'SearXNG'}로 변경되었습니다`);
+                setTimeout(() => hideHybridRagMessages(), 3000);
+
+            } catch (error) {
+                logger.error('Error changing web search provider:', error);
+                showHybridRagError('웹 검색 제공자 변경 실패: ' + error.message);
+            }
+        }
+
+        /**
+         * SearXNG URL 로드
+         */
+        async function loadSearxngUrl() {
+            try {
+                const data = await Auth.apiCall('/api/admin/hybrid-rag');
+
+                const currentUrlEl = document.getElementById('currentSearxngUrl');
+                const searxngUrl = data.searxng_url;
+
+                if (searxngUrl) {
+                    currentUrlEl.textContent = `현재 URL: ${searxngUrl}`;
+                    currentUrlEl.style.color = '#166534';
+                    updateSearxngStatus(true);
+                } else {
+                    currentUrlEl.textContent = '현재 URL: 설정되지 않음 (기본값: http://localhost:8888)';
+                    currentUrlEl.style.color = '#6b7280';
+                    updateSearxngStatus(false);
+                }
+            } catch (error) {
+                logger.error('Error loading SearXNG URL:', error);
+                document.getElementById('currentSearxngUrl').textContent = '현재 URL: 로드 실패';
+            }
+        }
+
+        /**
+         * SearXNG URL 저장
+         */
+        async function saveSearxngUrl() {
+            const input = document.getElementById('searxngUrlInput');
+            const url = input.value.trim();
+
+            if (!url) {
+                showHybridRagError('SearXNG URL을 입력해주세요');
+                return;
+            }
+
+            try {
+                const data = await Auth.apiCall('/api/admin/hybrid-rag', {
+                    method: 'PUT',
+                    body: JSON.stringify({
+                        enabled: document.getElementById('hybridRagToggle').checked,
+                        web_search: document.getElementById('webSearchToggle').checked,
+                        doc_search: document.getElementById('docSearchToggle').checked,
+                        search_mode: document.querySelector('input[name="searchMode"]:checked')?.value || 'smart',
+                        web_search_provider: document.querySelector('input[name="webSearchProvider"]:checked')?.value || 'tavily',
+                        searxng_url: url
+                    })
+                });
+
+                // 성공 시 입력 필드 초기화
+                input.value = '';
+
+                // 현재 URL 표시 업데이트
+                await loadSearxngUrl();
+
+                showHybridRagSuccess('SearXNG URL이 저장되었습니다');
+                setTimeout(() => hideHybridRagMessages(), 3000);
+
+            } catch (error) {
+                logger.error('Error saving SearXNG URL:', error);
+                showHybridRagError('SearXNG URL 저장 실패: ' + error.message);
+            }
+        }
+
+        /**
+         * SearXNG URL 삭제
+         */
+        async function deleteSearxngUrl() {
+            if (!confirm('SearXNG URL을 삭제하시겠습니까?')) {
+                return;
+            }
+
+            try {
+                const data = await Auth.apiCall('/api/admin/hybrid-rag', {
+                    method: 'PUT',
+                    body: JSON.stringify({
+                        enabled: document.getElementById('hybridRagToggle').checked,
+                        web_search: document.getElementById('webSearchToggle').checked,
+                        doc_search: document.getElementById('docSearchToggle').checked,
+                        search_mode: document.querySelector('input[name="searchMode"]:checked')?.value || 'smart',
+                        web_search_provider: document.querySelector('input[name="webSearchProvider"]:checked')?.value || 'tavily',
+                        searxng_url: ''
+                    })
+                });
+
+                // 현재 URL 표시 업데이트
+                await loadSearxngUrl();
+
+                showHybridRagSuccess('SearXNG URL이 삭제되었습니다');
+                setTimeout(() => hideHybridRagMessages(), 3000);
+
+            } catch (error) {
+                logger.error('Error deleting SearXNG URL:', error);
+                showHybridRagError('SearXNG URL 삭제 실패: ' + error.message);
+            }
+        }
+
+        /**
+         * SearXNG 연결 테스트
+         */
+        async function testSearxngConnection() {
+            const input = document.getElementById('searxngUrlInput');
+            let url = input.value.trim();
+
+            // 입력이 없으면 현재 저장된 URL 사용
+            if (!url) {
+                const currentUrlEl = document.getElementById('currentSearxngUrl');
+                const match = currentUrlEl.textContent.match(/현재 URL: (http[^\s]+)/);
+                if (match) {
+                    url = match[1];
+                } else {
+                    url = 'http://localhost:8888';
+                }
+            }
+
+            showHybridRagSuccess(`SearXNG 연결 테스트 중... (${url})`);
+
+            try {
+                // 간단한 healthz 체크
+                const response = await fetch(`${url}/healthz`, {
+                    method: 'GET',
+                    mode: 'cors'
+                });
+
+                if (response.ok) {
+                    showHybridRagSuccess(`✅ SearXNG 연결 성공! (${url})`);
+                } else {
+                    showHybridRagError(`❌ SearXNG 응답 오류: ${response.status}`);
+                }
+            } catch (error) {
+                // CORS 오류 등의 경우 search 엔드포인트 시도
+                try {
+                    const searchResponse = await fetch(`${url}/search?q=test&format=json`, {
+                        method: 'GET',
+                        mode: 'cors'
+                    });
+
+                    if (searchResponse.ok) {
+                        showHybridRagSuccess(`✅ SearXNG 연결 성공! (${url})`);
+                    } else {
+                        showHybridRagError(`❌ SearXNG 연결 실패: 서버에 연결할 수 없습니다`);
+                    }
+                } catch (e) {
+                    showHybridRagError(`❌ SearXNG 연결 실패: ${error.message} (CORS 또는 네트워크 오류)`);
+                }
+            }
+
+            setTimeout(() => hideHybridRagMessages(), 5000);
         }
 
         /**

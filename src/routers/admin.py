@@ -4,7 +4,7 @@ Admin API Router
 """
 import os
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from typing import Optional
 from loguru import logger
 
@@ -139,8 +139,13 @@ class BruteForceConfigResponse(ConfigResponseBase):
 class HybridRAGConfig(BaseModel):
     """하이브리드 RAG 설정 모델"""
     enabled: bool
-    web_search_enabled: Optional[bool] = None
-    doc_search_enabled: Optional[bool] = None
+    web_search_enabled: Optional[bool] = Field(None, alias='web_search')
+    doc_search_enabled: Optional[bool] = Field(None, alias='doc_search')
+    web_search_provider: Optional[str] = None  # 'tavily' 또는 'searxng'
+    searxng_url: Optional[str] = None  # SearXNG URL
+
+    class Config:
+        populate_by_name = True  # Pydantic v2: allow both field name and alias
 
 
 class HybridRAGConfigResponse(ConfigResponseBase):
@@ -149,6 +154,9 @@ class HybridRAGConfigResponse(ConfigResponseBase):
     web_search_enabled: bool
     doc_search_enabled: bool
     tavily_configured: bool
+    web_search_provider: str  # 'tavily' 또는 'searxng'
+    searxng_url: Optional[str] = None
+    searxng_configured: bool = False
 
 
 class PasswordResetRequest(BaseModel):
@@ -1543,24 +1551,36 @@ async def get_hybrid_rag_config(
         pipe.get("config:hybrid_rag_web_search")
         pipe.get("config:hybrid_rag_doc_search")
         pipe.get("config:tavily_api_key")
+        pipe.get("config:web_search_provider")
+        pipe.get("config:searxng_url")
         results = pipe.execute()
 
-        enabled_raw, web_search_raw, doc_search_raw, redis_key = results
+        enabled_raw, web_search_raw, doc_search_raw, tavily_key, provider_raw, searxng_url_raw = results
 
         # 기본값 설정
         enabled = enabled_raw.decode() == "true" if enabled_raw else False
         web_search_enabled = web_search_raw.decode() == "true" if web_search_raw else False
         doc_search_enabled = doc_search_raw.decode() == "true" if doc_search_raw else False
 
+        # 웹 검색 프로바이더 설정 (기본값: tavily)
+        web_search_provider = provider_raw.decode() if provider_raw else 'tavily'
+        searxng_url = searxng_url_raw.decode() if searxng_url_raw else os.getenv('SEARXNG_URL', 'http://localhost:8888')
+
         # Tavily API 키 설정 여부 확인 (Redis 우선, 환경 변수 대체)
         env_key = os.getenv('TAVILY_API_KEY')
-        tavily_configured = bool(redis_key or env_key)
+        tavily_configured = bool(tavily_key or env_key)
+
+        # SearXNG 설정 여부 확인
+        searxng_configured = bool(searxng_url)
 
         return HybridRAGConfigResponse(
             enabled=enabled,
             web_search_enabled=web_search_enabled,
             doc_search_enabled=doc_search_enabled,
             tavily_configured=tavily_configured,
+            web_search_provider=web_search_provider,
+            searxng_url=searxng_url,
+            searxng_configured=searxng_configured,
             message="하이브리드 RAG 설정을 조회했습니다"
         )
 
@@ -1621,29 +1641,60 @@ async def update_hybrid_rag_config(
             doc_setting = cache_manager.redis.get("config:hybrid_rag_doc_search")
             doc_search_enabled = doc_setting.decode() == "true" if doc_setting else False
 
+        # 웹 검색 프로바이더 설정
+        if config_update.web_search_provider is not None:
+            provider = config_update.web_search_provider.lower()
+            if provider in ['tavily', 'searxng']:
+                cache_manager.redis.set("config:web_search_provider", provider)
+                web_search_provider = provider
+            else:
+                web_search_provider = 'tavily'
+        else:
+            # 기존 값 유지
+            provider_setting = cache_manager.redis.get("config:web_search_provider")
+            web_search_provider = provider_setting.decode() if provider_setting else 'tavily'
+
+        # SearXNG URL 설정
+        if config_update.searxng_url is not None:
+            cache_manager.redis.set("config:searxng_url", config_update.searxng_url)
+            searxng_url = config_update.searxng_url
+        else:
+            # 기존 값 유지
+            url_setting = cache_manager.redis.get("config:searxng_url")
+            searxng_url = url_setting.decode() if url_setting else os.getenv('SEARXNG_URL', 'http://localhost:8888')
+
         # Tavily API 키 설정 여부 확인 (Redis 우선, 환경 변수 대체)
         tavily_key_redis = cache_manager.redis.get("config:tavily_api_key")
         tavily_key_env = os.getenv('TAVILY_API_KEY')
         tavily_configured = bool(tavily_key_redis or tavily_key_env)
+
+        # SearXNG 설정 여부 확인
+        searxng_configured = bool(searxng_url)
 
         # HybridRAGOrchestrator 재초기화 필요 (실제 적용은 web_server.py에서)
         # 여기서는 설정만 저장
 
         logger.info(
             f"하이브리드 RAG 설정 업데이트: enabled={config_update.enabled}, "
-            f"web_search={web_search_enabled}, doc_search={doc_search_enabled} "
-            f"by user={user.get('email', 'unknown')}"
+            f"web_search={web_search_enabled}, doc_search={doc_search_enabled}, "
+            f"provider={web_search_provider} by user={user.get('email', 'unknown')}"
         )
 
         status_msg = f"하이브리드 RAG {'활성화' if config_update.enabled else '비활성화'}되었습니다"
-        if config_update.enabled and web_search_enabled and not tavily_configured:
-            status_msg += " (주의: TAVILY_API_KEY가 설정되지 않아 웹 검색이 작동하지 않습니다)"
+        if config_update.enabled and web_search_enabled:
+            if web_search_provider == 'tavily' and not tavily_configured:
+                status_msg += " (주의: TAVILY_API_KEY가 설정되지 않아 웹 검색이 작동하지 않습니다)"
+            elif web_search_provider == 'searxng':
+                status_msg += f" (SearXNG: {searxng_url})"
 
         return HybridRAGConfigResponse(
             enabled=config_update.enabled,
             web_search_enabled=web_search_enabled,
             doc_search_enabled=doc_search_enabled,
             tavily_configured=tavily_configured,
+            web_search_provider=web_search_provider,
+            searxng_url=searxng_url,
+            searxng_configured=searxng_configured,
             message=status_msg
         )
 

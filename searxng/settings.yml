@@ -1,0 +1,125 @@
+# SearXNG settings
+# Reference: https://docs.searxng.org/admin/settings/index.html
+
+use_default_settings: true
+
+general:
+  debug: false
+  instance_name: "SearXNG (Chatbot)"
+  privacypolicy_url: false
+  donation_url: false
+  contact_url: false
+  enable_metrics: true
+
+search:
+  # Enable both HTML and JSON output formats
+  formats:
+    - html
+    - json
+  safe_search: 0
+  autocomplete: "google"
+  default_lang: "ko-KR"
+  languages:
+    - all
+    - ko
+    - en
+  ban_time_on_fail: 5
+  max_ban_time_on_fail: 120
+
+server:
+  # Base URL for the instance
+  base_url: false
+  port: 8080
+  bind_address: "0.0.0.0"
+  secret_key: "ultrasecretkey"
+  limiter: false
+  image_proxy: true
+  http_protocol_version: "1.0"
+  method: "POST"
+
+ui:
+  default_locale: "ko"
+  query_in_title: true
+  infinite_scroll: false
+  center_alignment: false
+  default_theme: simple
+  theme_args:
+    simple_style: auto
+
+# Rate limiting
+outgoing:
+  request_timeout: 6.0
+  max_request_timeout: 15.0
+  useragent_suffix: ""
+  pool_connections: 100
+  pool_maxsize: 20
+  enable_http2: true
+
+# Enabled search engines
+engines:
+  # General search engines
+  - name: google
+    engine: google
+    shortcut: g
+    disabled: false
+
+  - name: bing
+    engine: bing
+    shortcut: bi
+    disabled: false
+
+  - name: duckduckgo
+    engine: duckduckgo
+    shortcut: ddg
+    disabled: false
+
+  - name: brave
+    engine: brave
+    shortcut: br
+    disabled: false
+
+  # Wikipedia
+  - name: wikipedia
+    engine: wikipedia
+    shortcut: wp
+    disabled: false
+
+  # Tech documentation
+  - name: stackoverflow
+    engine: stackoverflow
+    shortcut: st
+    disabled: false
+
+  - name: github
+    engine: github
+    shortcut: gh
+    disabled: false
+
+  # News
+  - name: google news
+    engine: google_news
+    shortcut: gn
+    disabled: false
+
+  # Disable some engines for performance
+  - name: yahoo
+    engine: yahoo
+    disabled: true
+
+  - name: qwant
+    engine: qwant
+    disabled: true
+
+# Categories
+categories_as_tabs:
+  general:
+  images:
+  videos:
+  news:
+  it:
+  science:
+
+# Result settings
+result_proxy:
+  url: ""
+  key: ""

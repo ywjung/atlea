@@ -4,6 +4,9 @@ Hybrid RAG Orchestrator - 다중 소스 RAG 시스템
 로컬 문서 + 웹 검색 + 공식 문서를 결합하여 더 완벽한 답변 제공
 
 📝 Changelog:
+- 2026-01-20: SearXNG 웹 검색 프로바이더 추가
+  - Tavily와 SearXNG 중 선택 가능
+  - Docker Compose로 SearXNG 로컬 구동 지원
 - 2025-01-19: 스마트 검색 모드 개선
   - benefits_from_web 분석 필드 활용
   - 웹 검색 트리거 조건 확장 (비교, 추천, 설명 질문 등)
@@ -34,16 +37,20 @@ class HybridRAGOrchestrator:
     """
     다중 소스 RAG 시스템
     - 로컬 문서 (기존 RAG)
-    - 웹 검색 (Tavily MCP)
+    - 웹 검색 (Tavily 또는 SearXNG)
     - 공식 문서 (Context7 MCP) - 추후 구현
     """
+
+    # 지원하는 웹 검색 프로바이더
+    WEB_SEARCH_PROVIDERS = ['tavily', 'searxng']
 
     def __init__(
         self,
         local_rag,
         cache_manager,
         enable_web_search: bool = True,
-        enable_doc_search: bool = False
+        enable_doc_search: bool = False,
+        web_search_provider: str = 'tavily'
     ):
         """
         하이브리드 RAG 오케스트레이터 초기화
@@ -53,6 +60,7 @@ class HybridRAGOrchestrator:
             cache_manager: 캐시 매니저
             enable_web_search: 웹 검색 활성화 여부
             enable_doc_search: 공식 문서 검색 활성화 여부
+            web_search_provider: 웹 검색 프로바이더 ('tavily' 또는 'searxng')
         """
         self.local_rag = local_rag
         self.cache = cache_manager
@@ -65,10 +73,21 @@ class HybridRAGOrchestrator:
         self.web_search_enabled = enable_web_search
         self.doc_search_enabled = enable_doc_search
 
+        # 웹 검색 프로바이더 설정
+        self.web_search_provider = web_search_provider.lower()
+        if self.web_search_provider not in self.WEB_SEARCH_PROVIDERS:
+            logger.warning(f"⚠️ Unknown web search provider: {web_search_provider}, defaulting to 'tavily'")
+            self.web_search_provider = 'tavily'
+
         # Tavily 클라이언트
         self.tavily_client = None
-        if enable_web_search:
+        if enable_web_search and self.web_search_provider == 'tavily':
             self.tavily_client = self._init_tavily()
+
+        # SearXNG 클라이언트
+        self.searxng_client = None
+        if enable_web_search and self.web_search_provider == 'searxng':
+            self.searxng_client = self._init_searxng()
 
         # Context7 클라이언트 (추후 구현)
         self.context7_client = None
@@ -76,7 +95,7 @@ class HybridRAGOrchestrator:
             self.context7_client = self._init_context7()
 
         logger.info("🔗 HybridRAGOrchestrator initialized")
-        logger.info(f"  - Web Search: {self.web_search_enabled}")
+        logger.info(f"  - Web Search: {self.web_search_enabled} (provider: {self.web_search_provider})")
         logger.info(f"  - Doc Search: {self.doc_search_enabled}")
 
     def _init_tavily(self):
@@ -117,6 +136,53 @@ class HybridRAGOrchestrator:
             return None
         except Exception as e:
             logger.error(f"❌ Failed to initialize Tavily: {e}")
+            self.web_search_enabled = False
+            return None
+
+    def _init_searxng(self):
+        """SearXNG 웹 검색 클라이언트 초기화 (Redis 우선, 환경 변수 대체)"""
+        try:
+            import httpx
+
+            # SearXNG URL 가져오기: Redis 우선, 환경 변수 대체
+            searxng_url = None
+
+            # 1. Redis에서 확인
+            try:
+                redis_url = self.cache.redis.get("config:searxng_url")
+                if redis_url:
+                    searxng_url = redis_url.decode()
+                    logger.info("🔑 Using SearXNG URL from Redis")
+            except Exception as e:
+                logger.debug(f"Failed to get SearXNG URL from Redis: {e}")
+
+            # 2. 환경 변수 확인
+            if not searxng_url:
+                searxng_url = os.getenv('SEARXNG_URL', 'http://localhost:8888')
+                logger.info(f"🔑 Using SearXNG URL from environment: {searxng_url}")
+
+            # SearXNG 클라이언트 설정
+            client = {
+                'base_url': searxng_url.rstrip('/'),
+                'http_client': httpx.AsyncClient(
+                    timeout=15.0,
+                    headers={
+                        'Accept': 'application/json',
+                        'User-Agent': 'ChatbotRAG/1.0'
+                    }
+                )
+            }
+
+            # 연결 테스트 (비동기이므로 실제 테스트는 첫 검색 시)
+            logger.info(f"✅ SearXNG client initialized: {searxng_url}")
+            return client
+
+        except ImportError:
+            logger.warning("⚠️  httpx not installed, SearXNG search disabled")
+            self.web_search_enabled = False
+            return None
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize SearXNG: {e}")
             self.web_search_enabled = False
             return None
 
@@ -425,6 +491,13 @@ class HybridRAGOrchestrator:
 
     @log_slow_query(threshold_seconds=3.0)
     async def _search_web(self, query: str, analysis: Dict) -> List[Dict]:
+        """웹 검색 (프로바이더에 따라 Tavily 또는 SearXNG 사용)"""
+        if self.web_search_provider == 'searxng':
+            return await self._search_web_searxng(query, analysis)
+        else:
+            return await self._search_web_tavily(query, analysis)
+
+    async def _search_web_tavily(self, query: str, analysis: Dict) -> List[Dict]:
         """웹 검색 (Tavily)"""
         if not self.tavily_client:
             return []
@@ -457,11 +530,69 @@ class HybridRAGOrchestrator:
                     'freshness': 1.0  # 웹 정보는 항상 최신으로 간주
                 })
 
-            logger.info(f"🌐 Web search found {len(web_chunks)} results")
+            logger.info(f"🌐 Tavily search found {len(web_chunks)} results")
             return web_chunks
 
         except Exception as e:
-            logger.error(f"❌ Web search error: {e}")
+            logger.error(f"❌ Tavily search error: {e}")
+            return []
+
+    async def _search_web_searxng(self, query: str, analysis: Dict) -> List[Dict]:
+        """웹 검색 (SearXNG)"""
+        if not self.searxng_client:
+            return []
+
+        try:
+            http_client = self.searxng_client['http_client']
+            base_url = self.searxng_client['base_url']
+
+            # SearXNG 검색 API 호출 (JSON 형식)
+            search_url = f"{base_url}/search"
+            params = {
+                'q': query,
+                'format': 'json',
+                'categories': 'general',
+                'language': 'ko-KR',
+                'safesearch': 0,
+                'pageno': 1
+            }
+
+            response = await http_client.get(search_url, params=params)
+            response.raise_for_status()
+            search_results = response.json()
+
+            web_chunks = []
+            results = search_results.get('results', [])[:5]  # 상위 5개만
+
+            for i, result in enumerate(results):
+                content = result.get('content', '')
+                if not content:
+                    content = result.get('title', '')
+
+                if not content:
+                    continue
+
+                # SearXNG는 score가 없으므로 순위 기반 점수 부여
+                score = 1.0 - (i * 0.1)  # 1.0, 0.9, 0.8, 0.7, 0.6
+
+                web_chunks.append({
+                    'content': content[:1000],  # 최대 1000자
+                    'source_type': 'web',
+                    'metadata': {
+                        'url': result.get('url', ''),
+                        'title': result.get('title', ''),
+                        'published_date': result.get('publishedDate', '최근'),
+                        'engine': result.get('engine', 'searxng'),
+                    },
+                    'score': score,
+                    'freshness': 1.0  # 웹 정보는 항상 최신으로 간주
+                })
+
+            logger.info(f"🌐 SearXNG search found {len(web_chunks)} results")
+            return web_chunks
+
+        except Exception as e:
+            logger.error(f"❌ SearXNG search error: {e}")
             return []
 
     @log_slow_query(threshold_seconds=3.0)
