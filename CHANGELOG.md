@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (2026-01-21)
+- **SearXNG 웹 검색 프로바이더 추가**: 자체 호스팅 메타 검색 엔진 지원
+  - `docker-compose.searxng.yml`: SearXNG + Crawl4AI Docker Compose 설정
+  - `searxng/settings.yml`: SearXNG 엔진 설정 (Google, Bing, DuckDuckGo, StackOverflow 등)
+  - `src/hybrid_rag.py`: SearXNG 클라이언트 통합
+    - `_init_searxng()`: SearXNG 클라이언트 초기화
+    - `_search_web_searxng()`: SearXNG 검색 API 호출
+    - Tavily/SearXNG 프로바이더 선택 가능
+  - `src/web_server.py`: 웹 검색 프로바이더 설정 변경 시 HybridRAG 재초기화
+  - `src/routers/query.py`: 실제 검색 엔진 이름 표시 (hardcoded Tavily 제거)
+  - `static/admin.html`: SearXNG 프로바이더 선택 UI 추가
+  - Redis 설정: `config:web_search_provider`, `config:searxng_url`
+
+- **Crawl4AI 콘텐츠 추출 통합**: SearXNG 검색 결과 품질 개선
+  - `docker-compose.searxng.yml`: Crawl4AI 서비스 추가 (port 11235)
+  - `src/hybrid_rag.py`: Crawl4AI 통합
+    - `_init_crawl4ai()`: Crawl4AI 클라이언트 초기화
+    - `_enrich_with_crawl4ai()`: URL에서 전체 페이지 콘텐츠 추출
+    - `_html_to_text()`: HTML → 텍스트 변환 (script/style 제거)
+  - **개선 효과**:
+    - 기존 SearXNG 스니펫: 86-318자
+    - Crawl4AI 추출: 페이지당 최대 2000자 (27-125배 개선)
+  - Crawl4AI 실패 시 기존 스니펫으로 폴백
+
+### Fixed (2026-01-21)
+- **SearXNG Startpage 엔진 에러 해결**: JSON 파싱 에러 발생 엔진 비활성화
+- **SearXNG StackOverflow 검색 추가**: stackexchange 엔진 사용 (`site: stackoverflow`)
+
 ### Changed (2025-12-28)
 - **LLM Prompt Engineering Enhancement**: Comprehensive prompt improvements for higher quality chatbot responses
   - **Enhanced System Prompt** (`src/llm.py`, lines 39-198):

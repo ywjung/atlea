@@ -648,6 +648,88 @@ class FollowUpQuestions {
 
 ---
 
+### 10. Hybrid RAG 시스템 (`src/hybrid_rag.py`)
+
+**역할**: 다중 소스(로컬 문서 + 웹 검색 + 공식 문서) RAG 오케스트레이션
+
+**주요 클래스**:
+```python
+class HybridRAGOrchestrator:
+    def __init__(local_rag, cache_manager, enable_web_search, web_search_provider)
+    async def answer(query, group_ids, search_mode) -> Dict
+    async def _search_local(query, group_ids, top_k) -> List[Dict]
+    async def _search_web(query, analysis) -> List[Dict]
+    async def _search_web_tavily(query, analysis) -> List[Dict]
+    async def _search_web_searxng(query, analysis) -> List[Dict]
+    async def _enrich_with_crawl4ai(searxng_results) -> List[Dict]
+```
+
+**웹 검색 프로바이더**:
+| 프로바이더 | 특징 | 설정 |
+|-----------|------|------|
+| Tavily | 클라우드 API, 전체 콘텐츠 추출 | `TAVILY_API_KEY` |
+| SearXNG | 자체 호스팅, 프라이버시 보호 | `config:searxng_url` |
+
+**검색 모드**:
+- `smart`: 질문 분석 기반 자동 소스 선택
+- `local-only`: 로컬 문서만 검색
+- `web-enhanced`: 로컬 + 웹 검색
+- `comprehensive`: 모든 소스 검색
+- `tools-only`: 외부 도구만 사용 (웹 + 공식 문서)
+
+---
+
+### 11. SearXNG 연동
+
+**아키텍처**:
+```
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│   HybridRAG     │────▶│    SearXNG      │────▶│   Crawl4AI      │
+│  Orchestrator   │     │  (검색 엔진)     │     │ (콘텐츠 추출)    │
+└─────────────────┘     └─────────────────┘     └─────────────────┘
+        │                       │                       │
+        │                       ▼                       ▼
+        │               ┌───────────────┐       ┌───────────────┐
+        │               │ Google, Bing  │       │ 전체 페이지    │
+        │               │ DuckDuckGo    │       │ HTML → Text   │
+        │               │ StackOverflow │       │ (최대 2000자)  │
+        │               └───────────────┘       └───────────────┘
+        │                       │                       │
+        └───────────────────────┴───────────────────────┘
+                                │
+                                ▼
+                    ┌─────────────────────────┐
+                    │     LLM에 컨텍스트 제공   │
+                    │  (풍부한 웹 콘텐츠 포함)  │
+                    └─────────────────────────┘
+```
+
+**Docker 서비스**:
+```yaml
+# docker-compose.searxng.yml
+services:
+  searxng:      # 메타 검색 엔진 (port 8888)
+  crawl4ai:     # 콘텐츠 추출 (port 11235)
+```
+
+**SearXNG 설정** (`searxng/settings.yml`):
+```yaml
+engines:
+  - name: google      # Google 검색
+  - name: bing        # Bing 검색
+  - name: duckduckgo  # DuckDuckGo 검색
+  - name: stackoverflow  # StackOverflow (stackexchange 엔진)
+```
+
+**콘텐츠 품질 개선**:
+| 단계 | 콘텐츠 길이 | 설명 |
+|------|------------|------|
+| SearXNG 스니펫 | 86-318자 | 검색 결과 요약 |
+| Crawl4AI 추출 | 최대 2000자 | 전체 페이지 텍스트 |
+| 개선율 | 27-125배 | LLM 컨텍스트 품질 향상 |
+
+---
+
 ## 데이터 플로우
 
 ### 1. 문서 업로드 플로우

@@ -200,6 +200,88 @@ docker exec chatbot-app nvidia-smi
 
 ---
 
+## SearXNG + Crawl4AI 배포
+
+SearXNG는 자체 호스팅 메타 검색 엔진으로, Tavily의 대안으로 사용할 수 있습니다.
+
+### 시작 방법
+
+```bash
+# SearXNG + Crawl4AI 시작
+docker compose -f docker-compose.searxng.yml up -d
+
+# 상태 확인
+docker ps | grep -E "searxng|crawl4ai"
+```
+
+### 서비스 정보
+
+| 서비스 | 포트 | 설명 |
+|--------|------|------|
+| SearXNG | 8888 | 메타 검색 엔진 (Google, Bing, DuckDuckGo 등) |
+| Crawl4AI | 11235 | 웹 페이지 콘텐츠 추출 |
+
+### 설정 방법
+
+1. **관리자 페이지 접속**: `http://localhost:8000/admin.html`
+
+2. **Hybrid RAG 설정**에서:
+   - 웹 검색 프로바이더: `SearXNG (자체 호스팅)` 선택
+   - SearXNG URL: `http://localhost:8888` 입력
+
+3. **설정 저장**
+
+### SearXNG 엔진 설정
+
+`searxng/settings.yml`에서 검색 엔진 활성화/비활성화:
+
+```yaml
+engines:
+  - name: google
+    disabled: false
+  - name: bing
+    disabled: false
+  - name: duckduckgo
+    disabled: false
+  - name: stackoverflow
+    engine: stackexchange
+    site: stackoverflow
+    categories: [general, it]
+    disabled: false
+```
+
+### 헬스 체크
+
+```bash
+# SearXNG 상태
+curl http://localhost:8888/healthz
+
+# Crawl4AI 상태
+curl http://localhost:11235/health
+```
+
+### 문제 해결
+
+**SearXNG 검색 에러**:
+```bash
+# 로그 확인
+docker logs searxng --tail 50
+
+# 특정 엔진 에러 시 settings.yml에서 비활성화
+# 예: startpage 에러 → disabled: true 설정
+```
+
+**Crawl4AI 메모리 부족**:
+```yaml
+# docker-compose.searxng.yml
+deploy:
+  resources:
+    limits:
+      memory: 4G  # 필요시 증가
+```
+
+---
+
 ## 플랫폼 자동 감지
 
 프로그램은 시작 시 자동으로 플랫폼을 감지하고 최적의 백엔드를 선택합니다:

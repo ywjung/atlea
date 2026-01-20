@@ -42,9 +42,35 @@
 
 ---
 
-## 🆕 최근 업데이트 (2026-01-02)
+## 🆕 최근 업데이트 (2026-01-21)
 
-### 🔐 인증 및 보안 시스템 (v2.4.0)
+### 🌐 SearXNG 웹 검색 통합 (v2.5.0)
+
+#### SearXNG 자체 호스팅 메타 검색
+- **다중 검색 엔진**: Google, Bing, DuckDuckGo, Brave, StackOverflow 동시 검색
+- **프라이버시 보호**: 자체 호스팅으로 검색 데이터 외부 유출 방지
+- **프로바이더 선택**: 관리자 페이지에서 Tavily/SearXNG 전환 가능
+- **Docker 배포**: `docker-compose.searxng.yml`로 간편 설치
+
+#### Crawl4AI 콘텐츠 추출
+- **전체 페이지 크롤링**: SearXNG 스니펫(86-318자) → 전체 콘텐츠(최대 2000자)
+- **27-125배 콘텐츠 증가**: LLM에 충분한 컨텍스트 제공
+- **HTML → 텍스트 변환**: script/style 태그 제거, 깔끔한 텍스트 추출
+- **자동 폴백**: Crawl4AI 실패 시 기존 스니펫 사용
+
+#### 설정 방법
+```bash
+# SearXNG + Crawl4AI 시작
+docker compose -f docker-compose.searxng.yml up -d
+
+# 관리자 페이지에서 설정
+# 1. 웹 검색 프로바이더: SearXNG (자체 호스팅) 선택
+# 2. SearXNG URL: http://localhost:8888 입력
+```
+
+---
+
+## 🔐 인증 및 보안 시스템 (v2.4.0)
 
 #### JWT 기반 인증
 - **Access/Refresh Token**: 15분 액세스 토큰 + 7일 리프레시 토큰
