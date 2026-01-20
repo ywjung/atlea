@@ -335,6 +335,26 @@ class ConversationManager:
         """
         return self.client.zcard('conversations:bookmarked')
 
+    def get_last_message(self, session_id: str) -> Optional[Dict]:
+        """
+        Get the last message in a session
+
+        Args:
+            session_id: Conversation session ID
+
+        Returns:
+            Last message as dict, or None if not found
+        """
+        messages_key = f'conversation:{session_id}:messages'
+        last_message_raw = self.client.lindex(messages_key, -1)
+        if not last_message_raw:
+            return None
+
+        try:
+            return json.loads(last_message_raw.decode('utf-8'))
+        except (json.JSONDecodeError, AttributeError):
+            return None
+
     def update_last_message_metadata(self, session_id: str, metadata_update: Dict) -> bool:
         """
         Update the metadata of the last message in a session

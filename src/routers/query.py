@@ -1475,13 +1475,32 @@ async def generate_follow_up_questions(
             final_questions = _generate_context_aware_fallback(original_q, questions, request.answer)
 
         # Save follow-up questions to conversation history
+        # Wait for assistant message to be saved (race condition fix)
         if request.session_id and conversation_manager:
             logger.info(f"💾 [API] Saving follow-up questions to session {request.session_id}: {final_questions}")
-            result = conversation_manager.update_last_message_metadata(
-                session_id=request.session_id,
-                metadata_update={"follow_up_questions": final_questions}
-            )
-            logger.info(f"💾 [API] Save result: {result}")
+
+            # Retry logic: wait for assistant message to be the last message
+            max_retries = 5
+            retry_delay = 0.3  # 300ms
+            result = False
+
+            for attempt in range(max_retries):
+                # Check if last message is from assistant
+                last_msg = conversation_manager.get_last_message(request.session_id)
+                if last_msg and last_msg.get('role') == 'assistant':
+                    result = conversation_manager.update_last_message_metadata(
+                        session_id=request.session_id,
+                        metadata_update={"follow_up_questions": final_questions}
+                    )
+                    if result:
+                        logger.info(f"💾 [API] Save result: True (attempt {attempt + 1})")
+                        break
+                else:
+                    logger.debug(f"💾 [API] Waiting for assistant message (attempt {attempt + 1}/{max_retries})")
+                    await asyncio.sleep(retry_delay)
+
+            if not result:
+                logger.warning(f"💾 [API] Failed to save follow-up questions after {max_retries} attempts")
 
         return {"questions": final_questions}
 
