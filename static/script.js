@@ -1192,6 +1192,20 @@ async function loadConversation(sessionId) {
                 if (msg.metadata?.context && Array.isArray(msg.metadata.context)) {
                     currentContextData.push(...msg.metadata.context);
                 }
+
+                // Display follow-up questions if saved in metadata
+                if (msg.metadata?.follow_up_questions && msg.metadata.follow_up_questions.length > 0) {
+                    const contentDiv = messageDiv.querySelector('.message-content');
+                    if (contentDiv) {
+                        followUpQuestions.display(contentDiv, msg.metadata.follow_up_questions, (selectedQuestion) => {
+                            // When user clicks a follow-up question, populate input and send
+                            userInput.value = selectedQuestion;
+                            autoResize();
+                            updateSendButton();
+                            sendMessage();
+                        });
+                    }
+                }
             }
         });
 
@@ -1805,7 +1819,7 @@ async function sendMessage(regenerate = false) {
 
                             // Generate and display follow-up questions
                             try {
-                                const followUpQs = await followUpQuestions.generate(question, fullText);
+                                const followUpQs = await followUpQuestions.generate(question, fullText, [], currentSessionId);
                                 if (followUpQs && followUpQs.length > 0) {
                                     followUpQuestions.display(contentDiv, followUpQs, (selectedQuestion) => {
                                         // When user clicks a follow-up question, populate input and send

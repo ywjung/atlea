@@ -924,7 +924,8 @@ async def startup_event():
             rag_system_fn=get_rag_system,
             auth_dependency=get_current_active_user,
             error_msg_fn=get_safe_error_message,
-            prompt_mode_fn=get_system_prompt_for_mode
+            prompt_mode_fn=get_system_prompt_for_mode,
+            get_llm_fn=get_llm
         )
         logger.info("✅ Query router dependencies injected (3 endpoints)")
 

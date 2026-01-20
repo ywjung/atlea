@@ -13,9 +13,10 @@ class FollowUpQuestions {
      * @param {string} userQuestion - The user's original question
      * @param {string} aiAnswer - The AI's answer
      * @param {Array} context - Optional conversation context
+     * @param {string} sessionId - Optional session ID for saving to history
      * @returns {Promise<Array<string>>} Array of follow-up questions
      */
-    async generate(userQuestion, aiAnswer, context = []) {
+    async generate(userQuestion, aiAnswer, context = [], sessionId = null) {
         try {
             // Check authentication (required for follow-up questions)
             const token = localStorage.getItem('access_token');
@@ -27,14 +28,21 @@ class FollowUpQuestions {
                 headers['Authorization'] = `Bearer ${token}`;
             }
 
+            const requestBody = {
+                question: userQuestion,
+                answer: aiAnswer,
+                context: context
+            };
+
+            // Add session_id if provided (for saving to conversation history)
+            if (sessionId) {
+                requestBody.session_id = sessionId;
+            }
+
             const response = await fetch('/api/follow-up-questions', {
                 method: 'POST',
                 headers: headers,
-                body: JSON.stringify({
-                    question: userQuestion,
-                    answer: aiAnswer,
-                    context: context
-                })
+                body: JSON.stringify(requestBody)
             });
 
             if (!response.ok) {

@@ -14,7 +14,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, validator
 from typing import Optional
 from ..auth.rate_limiter import create_rate_limit_dependency
-import logging
+from loguru import logger
 import json
 import asyncio
 import re
@@ -23,9 +23,6 @@ import time
 
 # Import auth dependency directly
 from ..auth.middleware import get_current_active_user as auth_get_current_active_user
-
-# Configure logger
-logger = logging.getLogger(__name__)
 
 # Create router
 router = APIRouter(tags=["Query"])
@@ -46,6 +43,7 @@ get_rag_system = None
 get_current_active_user = None
 get_safe_error_message = None
 get_system_prompt_for_mode = None
+get_llm_instance = None  # Function to get LLM (for lazy loading support)
 
 
 def inject_dependencies(
@@ -60,13 +58,14 @@ def inject_dependencies(
     rag_system_fn,
     auth_dependency,
     error_msg_fn,
-    prompt_mode_fn
+    prompt_mode_fn,
+    get_llm_fn=None
 ):
     """
     Inject dependencies from main application
 
     Args:
-        llm_instance: LLM model instance
+        llm_instance: LLM model instance (may be None if lazy loading)
         embedding_model_instance: Embedding model instance
         cache_mgr: CacheManager instance
         group_mgr: GroupManager instance
@@ -78,13 +77,15 @@ def inject_dependencies(
         auth_dependency: get_current_active_user dependency
         error_msg_fn: get_safe_error_message function
         prompt_mode_fn: get_system_prompt_for_mode function
+        get_llm_fn: Async function to get LLM instance (for lazy loading)
     """
     global llm, embedding_model, cache_manager, group_manager, conversation_manager
     global response_validator, confidence_scorer, get_hybrid_rag_orchestrator
     global get_rag_system, get_current_active_user, get_safe_error_message
-    global get_system_prompt_for_mode
+    global get_system_prompt_for_mode, get_llm_instance
 
     llm = llm_instance
+    get_llm_instance = get_llm_fn
     embedding_model = embedding_model_instance
     cache_manager = cache_mgr
     group_manager = group_mgr
@@ -558,7 +559,9 @@ async def query_stream(
             logger.info(f"🎯 Query result cache HIT (exact match): '{request.question[:50]}...'")
 
             # Generate follow-up questions for cached response (LLM 기반)
-            cached_follow_up = _generate_llm_follow_up_questions(request.question, query_result_cached["response"])
+            cached_follow_up = _generate_llm_follow_up_questions(
+                request.question, query_result_cached["response"], llm_instance=rag.llm
+            )
             if len(cached_follow_up) < 3:
                 cached_follow_up = _generate_context_aware_fallback(
                     request.question, cached_follow_up, query_result_cached["response"]
@@ -616,7 +619,9 @@ async def query_stream(
             logger.info(f"✅ Cache HIT (similarity: {cached_response['similarity']:.4f})")
 
             # Generate follow-up questions for cached response (LLM 기반)
-            semantic_follow_up = _generate_llm_follow_up_questions(request.question, cached_response["response"])
+            semantic_follow_up = _generate_llm_follow_up_questions(
+                request.question, cached_response["response"], llm_instance=rag.llm
+            )
             if len(semantic_follow_up) < 3:
                 semantic_follow_up = _generate_context_aware_fallback(
                     request.question, semantic_follow_up, cached_response["response"]
@@ -946,14 +951,8 @@ async def query_stream(
             )
             logger.info(f"📊 스트리밍 신뢰도 점수: {confidence_result['percentage']}% ({confidence_result['level']})")
 
-            # 🔄 후속 질문 생성 (LLM 기반, 질문+답변 종합 분석)
-            follow_up_questions = _generate_llm_follow_up_questions(request.question, complete_response)
-            if len(follow_up_questions) < 3:
-                # LLM 생성 실패 또는 부족 시 패턴 기반 fallback
-                follow_up_questions = _generate_context_aware_fallback(
-                    request.question, follow_up_questions, complete_response
-                )
-            logger.debug(f"Generated follow-up questions: {follow_up_questions}")
+            # 🔄 후속 질문은 별도 API (/api/follow-up-questions)에서 생성
+            # 스트리밍 응답 속도 향상을 위해 여기서는 생성하지 않음
 
             # Calculate statistics
             end_time = time.time()
@@ -1012,15 +1011,17 @@ async def query_stream(
                             "tokens_per_second": round(tokens_per_second, 2),
                             "total_tokens": token_count,
                             "time_to_first_token": round(time_to_first_token, 2)
-                        },
-                        "follow_up_questions": follow_up_questions  # 후속 질문 저장
+                        }
+                        # follow_up_questions는 별도 API에서 저장됨
                     }
+                    logger.info(f"💾 [CONV] Saving to history")
                     conversation_manager.add_message(
                         session_id=request.session_id,
                         role="assistant",
                         content=complete_response,
                         metadata=metadata
                     )
+                    logger.info(f"💾 [CONV] Saved to session {request.session_id}")
 
             # Add background tasks (non-blocking)
             background_tasks.add_task(save_to_caches)
@@ -1037,8 +1038,7 @@ async def query_stream(
             # Send confidence score
             yield f"data: {json.dumps({'type': 'confidence', 'data': confidence_result})}\n\n"
 
-            # Send follow-up questions
-            yield f"data: {json.dumps({'type': 'follow_up_questions', 'data': follow_up_questions})}\n\n"
+            # follow_up_questions는 별도 API (/api/follow-up-questions)에서 처리
 
             # Send completion message
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
@@ -1060,18 +1060,22 @@ async def query_stream(
         raise HTTPException(status_code=500, detail=safe_message)
 
 
-def _generate_llm_follow_up_questions(question: str, answer: str) -> list:
+def _generate_llm_follow_up_questions(question: str, answer: str, llm_instance=None) -> list:
     """
     Generate follow-up questions using LLM by analyzing both question and answer.
 
     Args:
         question: Original user question
         answer: Generated answer
+        llm_instance: Optional LLM instance to use (if not provided, uses global llm)
 
     Returns:
         List of 3 relevant follow-up questions, or empty list on failure
     """
-    if not llm:
+    # Use provided llm_instance or fall back to global llm
+    active_llm = llm_instance or llm
+
+    if not active_llm:
         logger.warning("🔄 LLM not available for follow-up question generation")
         return []
 
@@ -1101,9 +1105,9 @@ def _generate_llm_follow_up_questions(question: str, answer: str) -> list:
         # Check LLM type and use appropriate generation method
         from ..llm_ollama import OllamaLLM
 
-        if isinstance(llm, OllamaLLM):
+        if isinstance(active_llm, OllamaLLM):
             messages = [{"role": "user", "content": prompt}]
-            response = llm._generate_response(
+            response = active_llm._generate_response(
                 messages=messages,
                 max_tokens=250,
                 temperature=0.5  # Slightly higher for variety
@@ -1117,15 +1121,15 @@ def _generate_llm_follow_up_questions(question: str, answer: str) -> list:
                 {"role": "user", "content": prompt}
             ]
 
-            formatted_prompt = llm.tokenizer.apply_chat_template(
+            formatted_prompt = active_llm.tokenizer.apply_chat_template(
                 messages,
                 tokenize=False,
                 add_generation_prompt=True
             )
 
             response = mlx_generate(
-                llm.model,
-                llm.tokenizer,
+                active_llm.model,
+                active_llm.tokenizer,
                 prompt=formatted_prompt,
                 max_tokens=250,
                 verbose=False
@@ -1354,7 +1358,15 @@ async def generate_follow_up_questions(
     Generate smart follow-up questions (로그인 필요)
     """
     try:
-        if not llm:
+        # Debug: Log request info
+        logger.info(f"📝 [API] Follow-up request - session_id: {request.session_id}, question: {request.question[:50]}...")
+
+        # Get LLM instance (supports lazy loading)
+        active_llm = llm
+        if not active_llm and get_llm_instance:
+            active_llm = await get_llm_instance()
+
+        if not active_llm:
             raise HTTPException(status_code=503, detail="LLM not initialized")
 
         # Create simple completion prompt - pattern-based
@@ -1382,10 +1394,10 @@ async def generate_follow_up_questions(
         # Check LLM type and use appropriate generation method
         from ..llm_ollama import OllamaLLM
 
-        if isinstance(llm, OllamaLLM):
+        if isinstance(active_llm, OllamaLLM):
             # Use Ollama's _generate_response method with simple user message
             messages = [{"role": "user", "content": prompt}]
-            response = llm._generate_response(
+            response = active_llm._generate_response(
                 messages=messages,
                 max_tokens=200,
                 temperature=0.3  # Lower temperature for more focused output
@@ -1401,15 +1413,15 @@ async def generate_follow_up_questions(
             ]
 
             # Apply chat template for proper model instruction
-            formatted_prompt = llm.tokenizer.apply_chat_template(
+            formatted_prompt = active_llm.tokenizer.apply_chat_template(
                 messages,
                 tokenize=False,
                 add_generation_prompt=True
             )
 
             response = mlx_generate(
-                llm.model,
-                llm.tokenizer,
+                active_llm.model,
+                active_llm.tokenizer,
                 prompt=formatted_prompt,
                 max_tokens=200,
                 verbose=False
@@ -1464,11 +1476,12 @@ async def generate_follow_up_questions(
 
         # Save follow-up questions to conversation history
         if request.session_id and conversation_manager:
-            conversation_manager.update_last_message_metadata(
+            logger.info(f"💾 [API] Saving follow-up questions to session {request.session_id}: {final_questions}")
+            result = conversation_manager.update_last_message_metadata(
                 session_id=request.session_id,
                 metadata_update={"follow_up_questions": final_questions}
             )
-            logger.debug(f"Saved follow-up questions to session {request.session_id}")
+            logger.info(f"💾 [API] Save result: {result}")
 
         return {"questions": final_questions}
 
