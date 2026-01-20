@@ -31,7 +31,7 @@ server:
   base_url: false
   port: 8080
   bind_address: "0.0.0.0"
-  secret_key: "ultrasecretkey"
+  secret_key: "47d2ce3c064f6cccf72ba8cc44d102f213a8016e6642fffa5df21ed50c8a9a04"
   limiter: false
   image_proxy: true
   http_protocol_version: "1.0"
