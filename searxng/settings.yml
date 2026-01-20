@@ -84,12 +84,7 @@ engines:
     shortcut: wp
     disabled: false
 
-  # Tech documentation
-  - name: stackoverflow
-    engine: stackoverflow
-    shortcut: st
-    disabled: false
-
+  # Tech documentation (stackoverflow removed - not available in this SearXNG version)
   - name: github
     engine: github
     shortcut: gh
@@ -108,6 +103,10 @@ engines:
 
   - name: qwant
     engine: qwant
+    disabled: true
+
+  - name: startpage
+    engine: startpage
     disabled: true
 
 # Categories
