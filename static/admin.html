@@ -3931,7 +3931,7 @@
                         <div style="padding: 15px; background: #f8f9fa; border-radius: 8px; border-left: 4px solid #4caf50;">
                             <h4 style="margin: 0 0 10px 0; color: #4caf50;">5️⃣ Hybrid RAG 설정 (선택)</h4>
                             <p style="margin: 0; font-size: 14px; color: #666;">
-                                "시스템 설정" 탭에서 Hybrid RAG를 활성화하면 로컬 문서 + 웹 검색 + 공식 문서를 통합 검색할 수 있습니다. 최신 정보가 필요한 경우 유용합니다.
+                                "시스템 설정" 탭에서 Hybrid RAG를 활성화하면 로컬 문서 + 웹 검색 + 공식 문서를 통합 검색할 수 있습니다. 웹 검색은 Tavily(클라우드) 또는 SearXNG(자체 호스팅)를 선택할 수 있습니다.
                             </p>
                         </div>
                     </div>
@@ -4315,7 +4315,7 @@
                             <ul style="margin: 10px 0 0 20px; line-height: 1.8; color: #444;">
                                 <li>로컬 문서 + 웹 검색 결과 통합</li>
                                 <li>최신 뉴스, 트렌드, 실시간 정보 필요할 때</li>
-                                <li>Tavily 웹 검색 엔진 활용</li>
+                                <li>Tavily (클라우드) 또는 SearXNG (자체 호스팅) 선택 가능</li>
                             </ul>
                         </div>
                         <div style="margin-bottom: 0; padding: 15px; background: #f3e5f5; border-left: 4px solid #9c27b0; border-radius: 4px;">
@@ -4331,11 +4331,22 @@
                     <h4 style="color: #667eea; margin: 20px 0 15px 0;">🔧 검색 소스 설정</h4>
                     <ul style="line-height: 1.8; color: #444;">
                         <li><strong>로컬 문서:</strong> 항상 기본으로 검색됨 (비활성화 불가)</li>
-                        <li><strong>웹 검색 (Tavily):</strong>
+                        <li><strong>웹 검색 프로바이더:</strong>
                             <ul style="margin: 5px 0 0 20px;">
-                                <li>최신 뉴스, 기사, 블로그, 포럼 등 웹 전체 검색</li>
-                                <li>실시간 정보 필요시 활성화</li>
-                                <li>API 키 필요 (시스템 설정에서 입력)</li>
+                                <li><strong>Tavily (클라우드):</strong> 빠르고 안정적인 클라우드 기반 웹 검색
+                                    <ul style="margin: 3px 0 0 15px; font-size: 13px;">
+                                        <li>API 키 필요 (tavily.com에서 발급)</li>
+                                        <li>간편한 설정, 별도 인프라 불필요</li>
+                                    </ul>
+                                </li>
+                                <li><strong>SearXNG (자체 호스팅):</strong> 메타 검색 엔진 + Crawl4AI 연동
+                                    <ul style="margin: 3px 0 0 15px; font-size: 13px;">
+                                        <li>Google, Bing, DuckDuckGo, GitHub, StackOverflow 등 통합</li>
+                                        <li>Crawl4AI로 웹 페이지 전체 내용 추출 (27~125배 더 많은 콘텐츠)</li>
+                                        <li>외부 API 의존 없이 완전 자체 운영 가능</li>
+                                        <li>docker compose -f docker-compose.searxng.yml up -d 로 시작</li>
+                                    </ul>
+                                </li>
                             </ul>
                         </li>
                         <li><strong>공식 문서 (Context7):</strong>
@@ -4432,7 +4443,9 @@
                             • 민감한 내부 정보 질문 시 Local Only 모드 사용<br>
                             • 기술 문서는 로컬에 업로드 + Comprehensive 모드로 공식 문서와 비교<br>
                             • 웹/공식문서 API 키 미설정 시 자동으로 로컬 검색만 수행<br>
-                            • 외부 검색이 필요 없는 환경에서는 하이브리드 RAG를 비활성화하여 비용 절감
+                            • 외부 검색이 필요 없는 환경에서는 하이브리드 RAG를 비활성화하여 비용 절감<br>
+                            • SearXNG 사용 시 Crawl4AI로 웹 페이지 전체 내용 추출하여 더 정확한 답변 제공<br>
+                            • SearXNG는 외부 API 의존 없이 자체 운영 가능하여 비용 절감 및 데이터 프라이버시 보장
                         </p>
                     </div>
 
@@ -4524,24 +4537,47 @@
                         <li><strong>확인 방법:</strong> 검색 결과의 "참고 문서" 섹션에서 선택한 문서만 표시되는지 확인</li>
                     </ul>
 
-                    <h4 style="color: #dc3545; margin: 20px 0 15px 0;">❌ 하이브리드 검색이 작동하지 않음 (NEW)</h4>
+                    <h4 style="color: #dc3545; margin: 20px 0 15px 0;">❌ 하이브리드 검색이 작동하지 않음</h4>
                     <ul style="line-height: 1.8; color: #444;">
                         <li><strong>증상:</strong> Hybrid RAG를 활성화했는데 웹 검색이나 공식 문서 검색 결과가 나오지 않음</li>
                         <li><strong>원인:</strong>
                             <ul style="margin: 5px 0 0 20px;">
-                                <li>Tavily 또는 Context7 API 키 미설정</li>
+                                <li>Tavily API 키 미설정 (Tavily 사용 시)</li>
+                                <li>SearXNG 서비스 미실행 또는 URL 미설정 (SearXNG 사용 시)</li>
                                 <li>웹 검색/공식 문서 검색 개별 토글이 꺼져있음</li>
                                 <li>검색 모드가 "Local Only"로 설정됨</li>
                             </ul>
                         </li>
-                        <li><strong>해결:</strong>
+                        <li><strong>해결 (Tavily):</strong>
                             <ul style="margin: 5px 0 0 20px;">
-                                <li>"시스템 설정" 탭 → Hybrid RAG 설정 → API 키 입력</li>
-                                <li>웹 검색/공식 문서 검색 토글 활성화 확인</li>
-                                <li>검색 모드를 "Smart", "Web Enhanced", 또는 "Comprehensive"로 변경</li>
+                                <li>"시스템 설정" 탭 → Hybrid RAG 설정 → Tavily API 키 입력</li>
+                                <li>웹 검색 프로바이더를 "Tavily"로 선택</li>
+                            </ul>
+                        </li>
+                        <li><strong>해결 (SearXNG):</strong>
+                            <ul style="margin: 5px 0 0 20px;">
+                                <li>SearXNG 서비스 실행 확인: <code>docker ps | grep searxng</code></li>
+                                <li>SearXNG 헬스 체크: <code>curl http://localhost:8888/healthz</code></li>
+                                <li>"시스템 설정" → 웹 검색 프로바이더를 "SearXNG (자체 호스팅)"로 선택</li>
+                                <li>SearXNG URL 설정 (기본: http://localhost:8888)</li>
+                                <li>Crawl4AI 실행 확인: <code>curl http://localhost:11235/health</code></li>
                             </ul>
                         </li>
                         <li><strong>확인:</strong> 검색 결과에 "웹 검색 결과" 또는 "공식 문서" 섹션이 표시되는지 확인</li>
+                    </ul>
+
+                    <h4 style="color: #dc3545; margin: 20px 0 15px 0;">❌ SearXNG 검색 에러 (NEW)</h4>
+                    <ul style="line-height: 1.8; color: #444;">
+                        <li><strong>증상:</strong> SearXNG 사용 시 특정 엔진에서 JSON 파싱 에러 발생</li>
+                        <li><strong>원인:</strong> 일부 검색 엔진(예: Startpage)이 JSON 응답을 올바르게 반환하지 않음</li>
+                        <li><strong>해결:</strong>
+                            <ul style="margin: 5px 0 0 20px;">
+                                <li>SearXNG 로그 확인: <code>docker logs searxng --tail 50</code></li>
+                                <li>문제 엔진 비활성화: searxng/settings.yml에서 해당 엔진 disabled: true 설정</li>
+                                <li>SearXNG 재시작: <code>docker compose -f docker-compose.searxng.yml restart</code></li>
+                            </ul>
+                        </li>
+                        <li><strong>정상 작동 엔진:</strong> Google, Bing, DuckDuckGo, Brave, Wikipedia, GitHub, StackOverflow</li>
                     </ul>
 
                     <div style="margin-top: 20px; padding: 15px; background: #f8d7da; border-left: 4px solid #dc3545; border-radius: 4px;">
