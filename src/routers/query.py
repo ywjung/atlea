@@ -391,7 +391,8 @@ async def query(
                     source_name = f"{filename} (로컬 문서)"
                 elif source_type == "web":
                     title = metadata.get("title", metadata.get("url", "Web Source"))
-                    source_name = f"{title} (Tavily)"
+                    engine = metadata.get("engine", "웹 검색")
+                    source_name = f"{title} ({engine})"
                 elif source_type == "docs":
                     library = metadata.get("library", "Official Docs")
                     title = metadata.get("title", "Documentation")
@@ -786,7 +787,8 @@ async def query_stream(
                 elif source_type == "web":
                     # Web sources: use title or URL
                     title = metadata.get("title", metadata.get("url", "Web Source"))
-                    source_name = f"{title} (Tavily)"
+                    engine = metadata.get("engine", "웹 검색")
+                    source_name = f"{title} ({engine})"
                 elif source_type == "docs":
                     # Official docs: use library name and title
                     library = metadata.get("library", "Official Docs")
