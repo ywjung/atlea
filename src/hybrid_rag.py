@@ -296,8 +296,8 @@ class HybridRAGOrchestrator:
         else:
             search_tasks.append(asyncio.sleep(0, result=[]))
 
-        # 웹 검색
-        if 'web' in sources_to_use and self.tavily_client:
+        # 웹 검색 (Tavily 또는 SearXNG)
+        if 'web' in sources_to_use and (self.tavily_client or self.searxng_client):
             search_tasks.append(self._search_web(query, analysis))
         else:
             search_tasks.append(asyncio.sleep(0, result=[]))
