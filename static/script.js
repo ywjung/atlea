@@ -1576,6 +1576,27 @@ async function sendMessage(regenerate = false) {
         // Update last filter state
         lastFilterState = currentFilterState;
 
+        // Validate and sanitize query parameters before sending
+        const sanitizedParams = {
+            question: question,
+            top_k: Math.max(1, Math.min(20, parseInt(currentSettings.top_k) || 5)),
+            search_mode: ['smart', 'local-only', 'web-enhanced', 'comprehensive', 'tools-only'].includes(currentSettings.searchMode)
+                ? currentSettings.searchMode : 'smart',
+            temperature: Math.max(0, Math.min(2, parseFloat(currentSettings.temperature) || 0.7)),
+            max_tokens: Math.max(1, Math.min(8192, parseInt(currentSettings.max_tokens) || 2048)),
+            system_prompt: currentSettings.system_prompt || null,
+            cache_threshold: Math.max(0, Math.min(1, parseFloat(currentSettings.cache_threshold) || 0.95)),
+            cache_ttl: parseInt(currentSettings.cache_ttl) || 60,
+            document_ids: documentIds,
+            session_id: currentSessionId,
+            group_ids: groupIds,
+            // Filter history to only include role and content (required fields)
+            history: conversationHistory.slice(0, -1).map(h => ({
+                role: h.role,
+                content: h.content || ''
+            }))
+        };
+
         // Wrap fetch with ErrorHandler retry and timeout
         const response = await errorHandler.withTimeout(
             () => errorHandler.withRetry(
@@ -1591,29 +1612,24 @@ async function sendMessage(regenerate = false) {
                     const res = await fetch('/api/query/stream', {
                         method: 'POST',
                         headers: headers,
-                        body: JSON.stringify({
-                            question: question,
-                            top_k: currentSettings.top_k,
-                            search_mode: currentSettings.searchMode || 'smart',  // 검색 모드 설정
-                            temperature: currentSettings.temperature,
-                            max_tokens: currentSettings.max_tokens,
-                            system_prompt: currentSettings.system_prompt,
-                            cache_threshold: currentSettings.cache_threshold,
-                            cache_ttl: currentSettings.cache_ttl,
-                            document_ids: documentIds,  // Add selected document IDs
-                            session_id: currentSessionId,  // Add conversation session ID
-                            group_ids: groupIds,  // Add selected group IDs
-                            history: conversationHistory.slice(0, -1)  // Send history without current question
-                        }),
+                        body: JSON.stringify(sanitizedParams),
                         signal: currentAbortController.signal
                     });
 
                     if (!res.ok) {
-                        // Try to extract error message from response
-                        if (res.status === 400) {
+                        // Try to extract error message from response (400 Bad Request, 422 Validation Error)
+                        if (res.status === 400 || res.status === 422) {
                             try {
                                 const errorData = await res.json();
+                                // FastAPI validation errors have detail as array or string
                                 if (errorData.detail) {
+                                    if (Array.isArray(errorData.detail)) {
+                                        // Pydantic validation error format: [{loc: [...], msg: "...", type: "..."}]
+                                        const messages = errorData.detail.map(e =>
+                                            `${e.loc?.join('.') || 'field'}: ${e.msg}`
+                                        ).join(', ');
+                                        throw new Error(messages);
+                                    }
                                     throw new Error(errorData.detail);
                                 }
                             } catch (e) {
