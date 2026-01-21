@@ -5,9 +5,7 @@ Provides safe error message generation for user display
 while preventing information disclosure.
 """
 
-import logging
-
-logger = logging.getLogger(__name__)
+from loguru import logger
 
 
 def get_safe_error_message(error: Exception, context: str = "") -> str:

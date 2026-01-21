@@ -7,11 +7,9 @@ Questions are generated from document content using LLM.
 
 from fastapi import APIRouter, Depends
 import random
-import logging
+from loguru import logger
 
 from ..auth.middleware import get_current_active_user
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["Query"])
 

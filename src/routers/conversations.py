@@ -11,14 +11,24 @@ Handles conversation session management including:
 All endpoints require authentication.
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import Optional
-import logging
+from loguru import logger
+import html
 
 from ..auth.middleware import get_current_active_user
+from ..utils.error_handling import get_safe_error_message
 
-# Configure logger
-logger = logging.getLogger(__name__)
+
+def sanitize_title(title: Optional[str]) -> Optional[str]:
+    """Sanitize title to prevent XSS and enforce length limits"""
+    if title is None:
+        return None
+    # Strip whitespace and limit length
+    title = title.strip()[:200]
+    # Escape HTML to prevent XSS
+    title = html.escape(title)
+    return title if title else None
 
 # Create router with prefix and tags
 router = APIRouter(prefix="/api", tags=["Conversations"])
@@ -41,43 +51,6 @@ def inject_dependencies(conv_manager):
     conversation_manager = conv_manager
 
 
-# ============================================================================
-# Helper Functions
-# ============================================================================
-
-def get_safe_error_message(error: Exception, context: str = "") -> str:
-    """
-    Get sanitized error message for user display
-
-    Prevents information disclosure by mapping exception types to
-    generic user-friendly messages while logging the full error.
-
-    Args:
-        error: The exception that occurred
-        context: Context string for logging (e.g., "create conversation endpoint")
-
-    Returns:
-        Safe error message suitable for user display
-    """
-    error_type = type(error).__name__
-
-    # Log full error for debugging
-    logger.error(f"Error in {context}: {error_type}: {str(error)}")
-
-    # Map exception types to safe messages
-    error_messages = {
-        "FileNotFoundError": "요청한 리소스를 찾을 수 없습니다.",
-        "PermissionError": "접근 권한이 없습니다.",
-        "ValueError": "잘못된 입력값입니다.",
-        "ConnectionError": "서비스 연결에 실패했습니다.",
-        "TimeoutError": "요청 시간이 초과되었습니다.",
-    }
-
-    # Return mapped message or generic message
-    return error_messages.get(
-        error_type,
-        "처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
-    )
 
 
 # ============================================================================
@@ -86,7 +59,11 @@ def get_safe_error_message(error: Exception, context: str = "") -> str:
 
 @router.post("/conversations", tags=["Conversations"])
 async def create_conversation(
-    title: str = None,
+    title: Optional[str] = Query(
+        default=None,
+        max_length=200,
+        description="Optional conversation title (max 200 characters)"
+    ),
     current_user: dict = Depends(get_current_active_user)
 ):
     """
@@ -96,7 +73,7 @@ async def create_conversation(
     Each session maintains its own message history.
 
     Args:
-        title: Optional conversation title
+        title: Optional conversation title (max 200 characters, sanitized for XSS)
         current_user: Authenticated user (injected by dependency)
 
     Returns:
@@ -111,7 +88,9 @@ async def create_conversation(
         if not conversation_manager:
             raise HTTPException(status_code=500, detail="Conversation manager not initialized")
 
-        session_id = conversation_manager.create_session(title=title)
+        # Sanitize title to prevent XSS
+        safe_title = sanitize_title(title)
+        session_id = conversation_manager.create_session(title=safe_title)
         session = conversation_manager.get_session(session_id)
 
         logger.info(f"Created conversation {session_id} for user {current_user.get('user_id')}")
@@ -129,8 +108,8 @@ async def create_conversation(
 
 @router.get("/conversations", tags=["Conversations"])
 async def list_conversations(
-    limit: int = 50,
-    offset: int = 0,
+    limit: int = Query(default=50, ge=1, le=200, description="Maximum sessions to return (1-200)"),
+    offset: int = Query(default=0, ge=0, le=10000, description="Sessions to skip (0-10000)"),
     current_user: dict = Depends(get_current_active_user)
 ):
     """
@@ -140,8 +119,8 @@ async def list_conversations(
     Useful for displaying conversation history in UI.
 
     Args:
-        limit: Maximum number of sessions to return (default: 50)
-        offset: Number of sessions to skip for pagination (default: 0)
+        limit: Maximum number of sessions to return (1-200, default: 50)
+        offset: Number of sessions to skip for pagination (0-10000, default: 0)
         current_user: Authenticated user (injected by dependency)
 
     Returns:
@@ -367,8 +346,8 @@ async def toggle_bookmark(
 
 @router.get("/conversations/bookmarked/list", tags=["Conversations"])
 async def get_bookmarked_conversations(
-    limit: int = 50,
-    offset: int = 0,
+    limit: int = Query(default=50, ge=1, le=200, description="Maximum conversations to return (1-200)"),
+    offset: int = Query(default=0, ge=0, le=10000, description="Conversations to skip (0-10000)"),
     current_user: dict = Depends(get_current_active_user)
 ):
     """
@@ -378,8 +357,8 @@ async def get_bookmarked_conversations(
     Useful for "Favorites" or "Starred" conversations view.
 
     Args:
-        limit: Maximum number of conversations to return (default: 50)
-        offset: Number of conversations to skip for pagination (default: 0)
+        limit: Maximum number of conversations to return (1-200, default: 50)
+        offset: Number of conversations to skip for pagination (0-10000, default: 0)
         current_user: Authenticated user (injected by dependency)
 
     Returns:

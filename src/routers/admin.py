@@ -3,10 +3,14 @@ Admin API Router
 관리자 전용 API 엔드포인트
 """
 import os
-from fastapi import APIRouter, Depends, HTTPException, Request
+import re
+from fastapi import APIRouter, Depends, HTTPException, Request, Path, Query
 from pydantic import BaseModel, EmailStr, Field
 from typing import Optional
 from loguru import logger
+
+# UUID validation pattern
+UUID_PATTERN = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', re.IGNORECASE)
 
 from ..auth.middleware import require_admin
 from .auth import invalidate_dashboard_cache
@@ -20,6 +24,28 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 # ============================================================================
 # Helper Functions
 # ============================================================================
+
+def validate_uuid(value: str, field_name: str = "ID") -> str:
+    """
+    Validate UUID format to prevent injection attacks
+
+    Args:
+        value: The string to validate as UUID
+        field_name: Name of the field for error messages
+
+    Returns:
+        The validated UUID string
+
+    Raises:
+        HTTPException: 400 if the value is not a valid UUID
+    """
+    if not UUID_PATTERN.match(value):
+        raise HTTPException(
+            status_code=400,
+            detail=f"잘못된 {field_name} 형식입니다"
+        )
+    return value
+
 
 def get_safe_error_message(error: Exception, context: str = "") -> str:
     """
@@ -422,8 +448,8 @@ async def update_captcha_config(
 @router.get("/security-logs")
 async def get_security_logs(
     request: Request,
-    page: int = 1,
-    page_size: int = 100,
+    page: int = Query(default=1, ge=1, le=10000, description="페이지 번호 (1-10000)"),
+    page_size: int = Query(default=100, ge=1, le=500, description="페이지당 로그 수 (1-500)"),
     level: Optional[str] = None,
     event_type: Optional[str] = None,
     start_time: Optional[str] = None,
@@ -435,8 +461,8 @@ async def get_security_logs(
 
     Args:
         request: FastAPI Request
-        page: 페이지 번호
-        page_size: 페이지당 로그 수
+        page: 페이지 번호 (1-10000)
+        page_size: 페이지당 로그 수 (1-500)
         level: 로그 레벨 필터
         event_type: 이벤트 타입 필터
         start_time: 시작 시간 (ISO 8601 형식)
@@ -559,20 +585,23 @@ async def update_totp_config(
 
 @router.get("/users/{user_id}/totp", response_model=UserTotpResponse)
 async def get_user_totp_qr(
-    user_id: str,
-    request: Request,
+    user_id: str = Path(..., description="사용자 UUID"),
+    request: Request = None,
     user=Depends(require_admin)
 ):
     """
     사용자별 2FA QR 코드 조회/생성 (관리자 전용)
 
     Args:
-        user_id: 사용자 ID
+        user_id: 사용자 ID (UUID 형식)
 
     Returns:
         사용자 정보 및 QR 코드 (totp_secret이 없으면 생성)
     """
     try:
+        # Validate user_id format to prevent injection
+        validate_uuid(user_id, "사용자 ID")
+
         from ..auth.totp import TOTPService
 
         # Redis 가져오기
@@ -624,8 +653,8 @@ async def get_user_totp_qr(
 
 @router.post("/users/{user_id}/totp/reset", response_model=UserTotpResponse)
 async def reset_user_totp(
-    user_id: str,
-    request: Request,
+    user_id: str = Path(..., description="사용자 UUID"),
+    request: Request = None,
     user=Depends(require_admin),
     _rate_limit=Depends(create_rate_limit_dependency(5, 60, "admin_totp_reset"))
 ):
@@ -633,12 +662,15 @@ async def reset_user_totp(
     사용자 2FA Secret 재생성 (관리자 전용)
 
     Args:
-        user_id: 사용자 ID
+        user_id: 사용자 ID (UUID 형식)
 
     Returns:
         새로운 QR 코드
     """
     try:
+        # Validate user_id format to prevent injection
+        validate_uuid(user_id, "사용자 ID")
+
         from ..auth.totp import TOTPService
 
         # Redis 가져오기
@@ -1453,20 +1485,23 @@ async def revoke_session(
 
 @router.delete("/sessions/user/{user_id}", response_model=RevokeSessionResponse)
 async def revoke_user_sessions(
-    user_id: str,
-    request: Request,
+    user_id: str = Path(..., description="사용자 UUID"),
+    request: Request = None,
     user=Depends(require_admin),
     _rate_limit=Depends(create_rate_limit_dependency(10, 60, "admin_user_session_revoke"))
 ):
     """특정 사용자의 모든 세션 무효화 (관리자 전용)
 
     Args:
-        user_id: 사용자 ID
+        user_id: 사용자 ID (UUID 형식)
 
     Returns:
         무효화 결과
     """
     try:
+        # Validate user_id format to prevent injection
+        validate_uuid(user_id, "사용자 ID")
+
         redis = request.app.state.cache_manager.redis
 
         # 자기 자신의 세션을 무효화하려는 경우 경고
@@ -2068,20 +2103,17 @@ async def update_context7_api_key(
             import httpx
 
             # Context7 REST API v2 클라이언트 생성 (hybrid_rag._init_context7()와 동일)
-            test_client = httpx.AsyncClient(
+            # Using async with to ensure proper resource cleanup
+            async with httpx.AsyncClient(
                 headers={
                     'Authorization': f'Bearer {api_key}',
                     'Content-Type': 'application/json'
                 },
                 timeout=15.0
-            )
-
-            # 간단한 테스트: /health 또는 기본 엔드포인트 호출
-            # Context7은 MCP 서버를 통해 동작하므로, 클라이언트 생성만으로 검증
-            logger.info("✅ Context7 client created successfully")
-
-            # 클라이언트 정리
-            await test_client.aclose()
+            ) as test_client:
+                # 간단한 테스트: /health 또는 기본 엔드포인트 호출
+                # Context7은 MCP 서버를 통해 동작하므로, 클라이언트 생성만으로 검증
+                logger.info("✅ Context7 client created successfully")
 
             logger.success("✅ Context7 API key is valid")
 

@@ -14,12 +14,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ValidationError
 from typing import Optional, List
 import json
-import logging
+from loguru import logger
 
 from ..auth.middleware import get_current_active_user
-
-# Configure logger
-logger = logging.getLogger(__name__)
+from ..utils.error_handling import get_safe_error_message
 
 # Create router with prefix and tags
 router = APIRouter(prefix="/api", tags=["Settings"])
@@ -61,45 +59,6 @@ class HybridRAGStatusResponse(BaseModel):
     enabled: bool
     web_search_enabled: bool = False
     doc_search_enabled: bool = False
-
-
-# ============================================================================
-# Helper Functions
-# ============================================================================
-
-def get_safe_error_message(error: Exception, context: str = "") -> str:
-    """
-    Get sanitized error message for user display
-
-    Prevents information disclosure by mapping exception types to
-    generic user-friendly messages while logging the full error.
-
-    Args:
-        error: The exception that occurred
-        context: Context string for logging (e.g., "settings endpoint")
-
-    Returns:
-        Safe error message suitable for user display
-    """
-    error_type = type(error).__name__
-
-    # Log full error for debugging
-    logger.error(f"Error in {context}: {error_type}: {str(error)}")
-
-    # Map exception types to safe messages
-    error_messages = {
-        "FileNotFoundError": "요청한 리소스를 찾을 수 없습니다.",
-        "PermissionError": "접근 권한이 없습니다.",
-        "ValueError": "잘못된 입력값입니다.",
-        "ConnectionError": "서비스 연결에 실패했습니다.",
-        "TimeoutError": "요청 시간이 초과되었습니다.",
-    }
-
-    # Return mapped message or generic message
-    return error_messages.get(
-        error_type,
-        "처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
-    )
 
 
 # ============================================================================

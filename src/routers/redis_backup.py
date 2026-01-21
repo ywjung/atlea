@@ -19,9 +19,9 @@ import asyncio
 import subprocess
 import shutil
 import json
-import logging
+from loguru import logger
 
-logger = logging.getLogger(__name__)
+from ..utils.error_handling import get_safe_error_message
 
 router = APIRouter(prefix="/api/redis/backup", tags=["Admin", "Redis Backup"])
 
@@ -33,28 +33,6 @@ def inject_dependencies(cache_mgr):
     """Inject dependencies into the router"""
     global cache_manager
     cache_manager = cache_mgr
-
-
-def get_safe_error_message(error: Exception, context: str = "") -> str:
-    """
-    Get sanitized error message for user display
-    """
-    error_type = type(error).__name__
-    logger.error(f"Error in {context}: {error_type}: {str(error)}")
-
-    error_messages = {
-        "ValueError": "잘못된 입력값입니다.",
-        "FileNotFoundError": "파일을 찾을 수 없습니다.",
-        "PermissionError": "파일 접근 권한이 없습니다.",
-        "ConnectionError": "Redis 연결에 실패했습니다.",
-        "TimeoutError": "작업 시간이 초과되었습니다.",
-        "subprocess.CalledProcessError": "명령 실행에 실패했습니다.",
-    }
-
-    return error_messages.get(
-        error_type,
-        "백업 작업 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
-    )
 
 
 # ==================== Pydantic Models ====================
