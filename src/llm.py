@@ -932,6 +932,9 @@ class Reranker:
 # Ollama Integration
 # ============================================
 
+# Keep reference to original local LLM class for runtime switching
+LocalLLM = LLM
+
 USE_OLLAMA = os.getenv("USE_OLLAMA", "false").lower() == "true"
 
 if USE_OLLAMA:

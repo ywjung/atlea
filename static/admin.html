@@ -8176,6 +8176,9 @@
                     restartNotice.style.display = 'none';
                 }
 
+                // 설정 UI 새로고침
+                await loadModelSettings();
+
             } catch (error) {
                 logger.error('Error saving model config:', error);
                 Auth.showError('모델 설정 저장에 실패했습니다: ' + error.message);

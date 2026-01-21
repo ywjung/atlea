@@ -831,12 +831,14 @@ async def startup_event():
             if llm_model:
                 try:
                     if use_ollama:
-                        # Ollama: 환경변수에서 읽음
-                        llm = LLM(model_dir=MODEL_DIR)
+                        # Ollama: OllamaLLM 클래스 직접 임포트하여 사용
+                        from .llm_ollama import OllamaLLM
+                        llm = OllamaLLM(model_name=llm_model, model_dir=MODEL_DIR)
                     else:
-                        # Local: 직접 모델명 전달
+                        # Local: llm.py의 원본 LocalLLM 클래스 사용 (Ollama 대체 전의 클래스)
+                        from .llm import LocalLLM
                         LLM_MODEL = llm_model
-                        llm = LLM(model_name=LLM_MODEL, model_dir=MODEL_DIR)
+                        llm = LocalLLM(model_name=LLM_MODEL, model_dir=MODEL_DIR)
 
                     # RAG 시스템 재초기화
                     rag_system = RAGSystem(
@@ -845,7 +847,7 @@ async def startup_event():
                         top_k=5
                     )
                     llm_changed = True
-                    logger.success(f"✅ LLM model changed to: {llm_model}")
+                    logger.success(f"✅ LLM model changed to: {llm_model} (backend: {backend})")
                 except Exception as e:
                     logger.error(f"Failed to reload LLM: {e}")
 
@@ -853,9 +855,9 @@ async def startup_event():
             if embedding_model_name:
                 try:
                     if use_ollama:
-                        # Ollama: 환경변수에서 읽음
+                        # Ollama: 모델명 직접 전달
                         from embeddings_ollama import OllamaEmbedding
-                        embedding_model = OllamaEmbedding(model_dir=MODEL_DIR)
+                        embedding_model = OllamaEmbedding(model_name=embedding_model_name, model_dir=MODEL_DIR)
                     else:
                         # Local: 직접 모델명 전달
                         EMBEDDING_MODEL = embedding_model_name
