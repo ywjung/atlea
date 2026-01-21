@@ -23,6 +23,7 @@ from ..auth.webhook_service import WebhookService
 from ..auth.middleware import get_current_active_user, require_admin
 from ..auth.rate_limiter import create_rate_limit_dependency, RateLimitConfig
 from ..redis_helpers import decode_bytes, decode_redis_hash
+from ..utils.error_handling import get_safe_error_message
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 
@@ -70,27 +71,6 @@ async def invalidate_dashboard_cache(redis):
     except Exception as e:
         from loguru import logger
         logger.error(f"Failed to invalidate dashboard cache: {e}")
-
-
-def get_safe_error_message(error: Exception, context: str = "") -> str:
-    """
-    Get sanitized error message for user display
-    """
-    error_type = type(error).__name__
-    logger.error(f"Error in {context}: {error_type}: {str(error)}")
-
-    error_messages = {
-        "ValueError": "잘못된 입력값입니다.",
-        "KeyError": "요청한 리소스를 찾을 수 없습니다.",
-        "ConnectionError": "서비스 연결에 실패했습니다.",
-        "TimeoutError": "요청 시간이 초과되었습니다.",
-        "PermissionError": "접근 권한이 없습니다.",
-    }
-
-    return error_messages.get(
-        error_type,
-        "처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
-    )
 
 
 async def send_password_reset_email(email_service, to_email: str, reset_token: str) -> bool:
@@ -166,8 +146,9 @@ class RefreshTokenRequest(BaseModel):
 
 # ============= CSRF Protection =============
 
+from ..config.settings import CSRF_COOKIE_MAX_AGE
+
 CSRF_COOKIE_NAME = "csrf_token"
-CSRF_COOKIE_MAX_AGE = 3600  # 1 hour
 
 
 @router.get("/csrf-token")

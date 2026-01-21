@@ -17,6 +17,8 @@ from .auth import invalidate_dashboard_cache
 from ..cache_manager import CacheManager
 from ..redis_helpers import decode_bytes, decode_redis_hash
 from ..auth.rate_limiter import create_rate_limit_dependency
+from ..utils.error_handling import get_safe_error_message
+from ..config.settings import CACHE_TTL_MEDIUM
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -45,42 +47,6 @@ def validate_uuid(value: str, field_name: str = "ID") -> str:
             detail=f"잘못된 {field_name} 형식입니다"
         )
     return value
-
-
-def get_safe_error_message(error: Exception, context: str = "") -> str:
-    """
-    Get sanitized error message for user display
-
-    Prevents information disclosure by mapping exception types to
-    generic user-friendly messages while logging the full error.
-
-    Args:
-        error: The exception that occurred
-        context: Context string for logging (e.g., "rate limit endpoint")
-
-    Returns:
-        Safe error message suitable for user display
-    """
-    error_type = type(error).__name__
-
-    # Log full error for debugging
-    logger.error(f"Error in {context}: {error_type}: {str(error)}")
-
-    # Map exception types to safe messages
-    error_messages = {
-        "ValueError": "잘못된 입력값입니다.",
-        "KeyError": "요청한 리소스를 찾을 수 없습니다.",
-        "ConnectionError": "서비스 연결에 실패했습니다.",
-        "TimeoutError": "요청 시간이 초과되었습니다.",
-        "PermissionError": "접근 권한이 없습니다.",
-        "FileNotFoundError": "파일을 찾을 수 없습니다.",
-    }
-
-    # Return mapped message or generic message
-    return error_messages.get(
-        error_type,
-        "처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
-    )
 
 
 # ============================================================================
@@ -807,7 +773,7 @@ async def update_brute_force_config(
                 detail="브루트 포스 보호 설정 업데이트에 실패했습니다"
             )
 
-        logger.info(f"브루트 포스 보호 설정 업데이트: {config.model_dump()} by {user['username']}")
+        logger.info(f"브루트 포스 보호 설정 업데이트: {config.model_dump()} by {user.get('username', 'unknown')}")
 
         return BruteForceConfigResponse(
             max_attempts=config.max_attempts,
@@ -928,7 +894,7 @@ async def reset_user_password(
             redis.delete(f"user:sessions:{user_id_str}")
 
         logger.info(
-            f"관리자 {user['email']}가 사용자 {reset_request.email}의 비밀번호를 재설정했습니다 "
+            f"관리자 {user.get('email', 'unknown')}가 사용자 {reset_request.email}의 비밀번호를 재설정했습니다 "
             f"(자동생성: {auto_generated}, 무효화된 세션: {invalidated_sessions}개)"
         )
 
@@ -1023,7 +989,7 @@ async def update_password_reset_method(
             )
 
         logger.info(
-            f"관리자 {user['email']}가 비밀번호 재설정 방식을 "
+            f"관리자 {user.get('email', 'unknown')}가 비밀번호 재설정 방식을 "
             f"{config_update.method}(으)로 변경했습니다"
         )
 
@@ -1150,7 +1116,7 @@ async def save_smtp_settings_endpoint(
                 detail="SMTP 설정 저장에 실패했습니다"
             )
 
-        logger.info(f"관리자 {user['email']}가 SMTP 설정을 업데이트했습니다")
+        logger.info(f"관리자 {user.get('email', 'unknown')}가 SMTP 설정을 업데이트했습니다")
 
         return {
             "success": True,
@@ -1321,8 +1287,8 @@ async def list_all_sessions(
             sessions.append(SessionInfo(
                 session_id=session_dict.get("session_id", ""),
                 user_id=user_id or "",
-                user_email=user_info['email'] or "",
-                username=user_info['username'] or "",
+                user_email=user_info.get('email', '') or "",
+                username=user_info.get('username', '') or "",
                 created_at=session_dict.get("created_at", ""),
                 expires_at=expires_at_str,
                 ip_address=session_dict.get("ip_address", ""),
@@ -1388,7 +1354,7 @@ async def revoke_all_sessions(
         await invalidate_dashboard_cache(redis)
 
         logger.warning(
-            f"🚨 관리자 {user['email']}가 모든 세션을 무효화했습니다 "
+            f"🚨 관리자 {user.get('email', 'unknown')}가 모든 세션을 무효화했습니다 "
             f"(무효화된 세션: {revoked_count}개)"
         )
 
@@ -1464,7 +1430,7 @@ async def revoke_session(
         await invalidate_dashboard_cache(redis)
 
         logger.info(
-            f"관리자 {user['email']}가 세션을 무효화했습니다 "
+            f"관리자 {user.get('email', 'unknown')}가 세션을 무효화했습니다 "
             f"(session_id: {session_id[:8]}..., target_user: {target_email})"
         )
 
@@ -1542,7 +1508,7 @@ async def revoke_user_sessions(
         await invalidate_dashboard_cache(redis)
 
         logger.info(
-            f"관리자 {user['email']}가 사용자 {target_email}의 모든 세션을 무효화했습니다 "
+            f"관리자 {user.get('email', 'unknown')}가 사용자 {target_email}의 모든 세션을 무효화했습니다 "
             f"(무효화된 세션: {revoked_count}개)"
         )
 
@@ -2363,7 +2329,7 @@ async def get_redis_stats(
         redis_client = cache_manager.redis
 
         cache_key = "cache:stats:redis"
-        cache_ttl = 300  # 5분
+        cache_ttl = CACHE_TTL_MEDIUM
 
         # 캐시 확인
         cached_stats = redis_client.get(cache_key)
@@ -2416,7 +2382,7 @@ async def get_document_stats(
         redis_client = cache_manager.redis
 
         cache_key = "cache:stats:documents"
-        cache_ttl = 300  # 5분
+        cache_ttl = CACHE_TTL_MEDIUM
 
         # 캐시 확인
         cached_stats = redis_client.get(cache_key)

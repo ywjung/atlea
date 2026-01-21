@@ -339,7 +339,7 @@ async def update_admin_settings(request: Request):
         # 로깅
         token = extract_token_from_request(request)
         user_data = verify_token(token)
-        logger.info(f"System settings updated by user {user_data['user_id']}: {updated_settings.model_dump()}")
+        logger.info(f"System settings updated by user {user_data.get('user_id', 'unknown')}: {updated_settings.model_dump()}")
 
         return {
             "settings": updated_settings.model_dump(),

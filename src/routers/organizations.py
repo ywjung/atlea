@@ -13,34 +13,10 @@ from ..auth.middleware import (
     require_org_admin_or_system_admin
 )
 from ..organization_manager import OrganizationManager
+from ..utils.error_handling import get_safe_error_message
 from loguru import logger
 
 router = APIRouter(prefix="/api/organizations", tags=["organizations"])
-
-
-# ============================================================================
-# Helper Functions
-# ============================================================================
-
-def get_safe_error_message(error: Exception, context: str = "") -> str:
-    """
-    Get sanitized error message for user display
-    """
-    error_type = type(error).__name__
-    logger.error(f"Error in {context}: {error_type}: {str(error)}")
-
-    error_messages = {
-        "ValueError": "잘못된 입력값입니다.",
-        "KeyError": "요청한 리소스를 찾을 수 없습니다.",
-        "ConnectionError": "서비스 연결에 실패했습니다.",
-        "TimeoutError": "요청 시간이 초과되었습니다.",
-        "PermissionError": "접근 권한이 없습니다.",
-    }
-
-    return error_messages.get(
-        error_type,
-        "처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
-    )
 
 
 # ============================================================================

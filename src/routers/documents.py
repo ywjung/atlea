@@ -33,6 +33,7 @@ from ..document_tracker import DocumentTracker
 from ..embeddings import EmbeddingModel
 from .admin import invalidate_stats_cache
 from ..utils.pagination import calculate_total_pages
+from ..utils.error_handling import get_safe_error_message
 
 # Create router
 router = APIRouter(prefix="/api", tags=["Documents"])
@@ -147,33 +148,6 @@ def validate_filename(filename: str) -> str:
         )
 
     return safe_name
-
-
-def get_safe_error_message(error: Exception, context: str = "") -> str:
-    """
-    Get sanitized error message for user display (prevents information disclosure)
-
-    Args:
-        error: The exception that occurred
-        context: Context description for logging
-
-    Returns:
-        Generic, safe error message for user display
-    """
-    error_type = type(error).__name__
-
-    # Log full error details server-side
-    logger.error(f"Error in {context}: {error_type}: {str(error)}")
-
-    # Map exception types to generic user-friendly messages
-    error_messages = {
-        "FileNotFoundError": "요청한 파일을 찾을 수 없습니다.",
-        "PermissionError": "파일에 대한 접근 권한이 없습니다.",
-        "ValueError": "잘못된 입력값입니다.",
-    }
-
-    # Return generic message
-    return error_messages.get(error_type, "처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.")
 
 
 def invalidate_status_cache():

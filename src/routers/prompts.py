@@ -101,7 +101,7 @@ async def save_system_prompt(request: Request):
         # 로깅
         token = extract_token_from_request(request)
         user_data = verify_token(token)
-        logger.info(f"System prompt updated by user {user_data['user_id']} (length: {len(system_prompt)})")
+        logger.info(f"System prompt updated by user {user_data.get('user_id', 'unknown')} (length: {len(system_prompt)})")
 
         return {
             "message": "시스템 프롬프트가 저장되었습니다",
@@ -275,7 +275,7 @@ async def update_prompts(data: PromptsUpdateRequest, request: Request):
         # 로깅
         token = extract_token_from_request(request)
         user_data = verify_token(token)
-        logger.info(f"Prompts updated by user {user_data['user_id']}: {', '.join(updated)}")
+        logger.info(f"Prompts updated by user {user_data.get('user_id', 'unknown')}: {', '.join(updated)}")
 
         return {
             'success': True,
