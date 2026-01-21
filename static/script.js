@@ -1591,7 +1591,8 @@ async function sendMessage(regenerate = false) {
             session_id: currentSessionId,
             group_ids: groupIds,
             // Filter history to only include role and content (required fields)
-            history: conversationHistory.slice(0, -1).map(h => ({
+            // Limit to last 50 messages (backend validation limit)
+            history: conversationHistory.slice(0, -1).slice(-50).map(h => ({
                 role: h.role,
                 content: h.content || ''
             }))
