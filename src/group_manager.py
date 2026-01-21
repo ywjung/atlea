@@ -626,18 +626,27 @@ class GroupManager:
             # Fallback to all docs if no active index
             index_pattern = "doc:*"
 
-        # Update all chunks of this document
-        for key in self.client.scan_iter(match=index_pattern, count=100):
+        # Step 1: Collect all candidate keys (with higher count for efficiency)
+        candidate_keys = []
+        for key in self.client.scan_iter(match=index_pattern, count=5000):
             key_str = key.decode('utf-8')
             # Skip special keys (doc:group:, doc:hash:, doc:counts:, doc:version:, doc:files)
             parts = key_str.split(':')
             if len(parts) >= 2 and parts[1] in ['group', 'hash', 'counts', 'version', 'files']:
                 continue
+            candidate_keys.append(key)
 
-            # Check if this chunk belongs to the file
-            chunk_filename = self.client.hget(key, 'filename')
-            if chunk_filename and chunk_filename.decode('utf-8') == filename:
-                pipe.hset(key, 'group_id', group_id)
+        # Step 2: Batch fetch all filenames using pipeline (N+1 방지)
+        if candidate_keys:
+            filename_pipe = self.client.pipeline()
+            for key in candidate_keys:
+                filename_pipe.hget(key, 'filename')
+            filenames_result = filename_pipe.execute()
+
+            # Step 3: Filter and queue updates for matching files
+            for key, chunk_filename in zip(candidate_keys, filenames_result):
+                if chunk_filename and chunk_filename.decode('utf-8') == filename:
+                    pipe.hset(key, 'group_id', group_id)
 
         # Update group sets
         if old_group_id and old_group_id != group_id:
@@ -714,22 +723,31 @@ class GroupManager:
             # Fallback to all docs if no active index
             index_pattern = "doc:*"
 
-        # Single scan through all documents - update all matching files
-        for key in self.client.scan_iter(match=index_pattern, count=1000):
+        # Step 1: Collect all candidate keys (with higher count for efficiency)
+        candidate_keys = []
+        for key in self.client.scan_iter(match=index_pattern, count=5000):
             key_str = key.decode('utf-8')
 
             # Skip special keys (doc:group:, doc:hash:, doc:counts:, doc:version:, doc:files)
             parts = key_str.split(':')
             if len(parts) >= 2 and parts[1] in ['group', 'hash', 'counts', 'version', 'files']:
                 continue
+            candidate_keys.append(key)
 
-            # Check if this chunk belongs to one of the target files
-            chunk_filename = self.client.hget(key, 'filename')
-            if chunk_filename:
-                filename = chunk_filename.decode('utf-8')
-                if filename in filenames_to_assign:
-                    # Update group_id for this chunk
-                    pipe.hset(key, 'group_id', group_id)
+        # Step 2: Batch fetch all filenames using pipeline (N+1 방지)
+        if candidate_keys:
+            filename_pipe = self.client.pipeline()
+            for key in candidate_keys:
+                filename_pipe.hget(key, 'filename')
+            filenames_result = filename_pipe.execute()
+
+            # Step 3: Filter and queue updates for matching files
+            for key, chunk_filename in zip(candidate_keys, filenames_result):
+                if chunk_filename:
+                    fname = chunk_filename.decode('utf-8')
+                    if fname in filenames_to_assign:
+                        # Update group_id for this chunk
+                        pipe.hset(key, 'group_id', group_id)
 
         # Update group sets and counts
         for filename, old_group_id in files_to_assign.items():
@@ -879,7 +897,7 @@ class GroupManager:
             group_ids_bytes = self.client.smembers(f'org:groups:{org_id}')
             group_id_list = [gid.decode('utf-8') for gid in group_ids_bytes]
         else:
-            for key in self.client.scan_iter(match="group:*", count=100):
+            for key in self.client.scan_iter(match="group:*", count=5000):
                 key_str = key.decode('utf-8')
                 if (key_str.startswith('group:children:') or
                     key_str.startswith('group:docs:') or

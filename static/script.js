@@ -193,7 +193,7 @@ function renderMermaid(element) {
                     container.innerHTML = result.svg;
                 }).catch(err => {
                     logger.error('Mermaid rendering error:', err);
-                    container.innerHTML = `<div class="render-error">❌ Diagram rendering error: ${err.message}</div>`;
+                    container.innerHTML = `<div class="render-error">❌ Diagram rendering error: ${escapeHtml(err.message)}</div>`;
                 });
             });
         } catch (e) {
@@ -230,7 +230,7 @@ function renderMusic(element) {
                     });
                 } catch (err) {
                     logger.error('ABC rendering error:', err);
-                    container.innerHTML = `<div class="render-error">❌ Music notation error: ${err.message}</div>`;
+                    container.innerHTML = `<div class="render-error">❌ Music notation error: ${escapeHtml(err.message)}</div>`;
                 }
             });
         } catch (e) {
@@ -3770,7 +3770,7 @@ function addErrorMessageWithRetry(errorText, question, errorDetail = null) {
         if (errorDetail.solution) {
             const solutionDiv = document.createElement('div');
             solutionDiv.className = 'error-solution';
-            solutionDiv.innerHTML = `<strong>💡 해결 방법:</strong> ${errorDetail.solution}`;
+            solutionDiv.innerHTML = `<strong>💡 해결 방법:</strong> ${escapeHtml(errorDetail.solution)}`;
             errorDiv.appendChild(solutionDiv);
         }
     }
@@ -6062,7 +6062,7 @@ async function loadFilterDocuments() {
         } else if (error.message.includes('인증')) {
             documentList.innerHTML = '<div class="loading-documents" style="color: #666;">🔒 로그인 후 이용 가능합니다.</div>';
         } else {
-            documentList.innerHTML = '<div class="loading-documents" style="color: #ef4444;">❌ 문서 목록을 불러오는데 실패했습니다.<br><small>' + error.message + '</small></div>';
+            documentList.innerHTML = '<div class="loading-documents" style="color: #ef4444;">❌ 문서 목록을 불러오는데 실패했습니다.<br><small>' + escapeHtml(error.message) + '</small></div>';
         }
     }
 }
@@ -7546,7 +7546,7 @@ async function loadSecurityLogs() {
 
     } catch (error) {
         logger.error('Failed to load security logs:', error);
-        logsTableBody.innerHTML = '<tr><td colspan="6" class="loading">로그 로딩 실패: ' + error.message + '</td></tr>';
+        logsTableBody.innerHTML = '<tr><td colspan="6" class="loading">로그 로딩 실패: ' + escapeHtml(error.message) + '</td></tr>';
     }
 }
 

@@ -5480,6 +5480,14 @@
     <script src="/static/group-manager.js"></script>
     <script src="/static/admin-organizations.js"></script>
     <script>
+        // HTML escape helper to prevent XSS
+        function escapeHtml(text) {
+            if (typeof text !== 'string') return String(text);
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
         // Debug mode control
         const DEBUG_MODE = false; // Set to true to enable debug logging
 
@@ -8509,7 +8517,7 @@
 
             } catch (error) {
                 logger.error('❌ Error loading documents:', error);
-                docsList.innerHTML = '<div style="text-align: center; padding: 40px; color: #dc3545;">문서 목록 로드 실패: ' + error.message + '</div>';
+                docsList.innerHTML = '<div style="text-align: center; padding: 40px; color: #dc3545;">문서 목록 로드 실패: ' + escapeHtml(error.message) + '</div>';
             }
         }
 
@@ -8844,11 +8852,11 @@
 
                     // Check if file is duplicate
                     if (result.is_duplicate) {
-                        uploadStatus.innerHTML = `<div style="color: #ff9800; background: #fff3e0; padding: 12px; border-radius: 6px; border-left: 4px solid #ff9800;">⚠️ <strong>${file.name}</strong>: ${result.message || '이미 업로드된 파일과 동일합니다.'}</div>`;
+                        uploadStatus.innerHTML = `<div style="color: #ff9800; background: #fff3e0; padding: 12px; border-radius: 6px; border-left: 4px solid #ff9800;">⚠️ <strong>${escapeHtml(file.name)}</strong>: ${escapeHtml(result.message || '이미 업로드된 파일과 동일합니다.')}</div>`;
                         setTimeout(() => uploadStatus.innerHTML = '', 5000);
                     } else {
                         // Show success message with filename
-                        uploadStatus.innerHTML = `<div style="color: #28a745;">✅ <strong>${file.name}</strong> 업로드 완료!</div>`;
+                        uploadStatus.innerHTML = `<div style="color: #28a745;">✅ <strong>${escapeHtml(file.name)}</strong> 업로드 완료!</div>`;
                         setTimeout(() => uploadStatus.innerHTML = '', 3000);
                     }
 
@@ -8858,7 +8866,7 @@
                 } catch (error) {
                     logger.error('Error uploading file:', error);
                     // Show error message with filename
-                    uploadStatus.innerHTML = `<div style="color: #dc3545;">❌ <strong>${file.name}</strong>: ${error.message}</div>`;
+                    uploadStatus.innerHTML = `<div style="color: #dc3545;">❌ <strong>${escapeHtml(file.name)}</strong>: ${escapeHtml(error.message)}</div>`;
                 }
             }
         })();
@@ -8894,7 +8902,7 @@
 
             } catch (error) {
                 logger.error('Error loading groups:', error);
-                groupTree.innerHTML = '<div style="text-align: center; padding: 40px; color: #dc3545;">그룹 로드 실패: ' + error.message + '</div>';
+                groupTree.innerHTML = '<div style="text-align: center; padding: 40px; color: #dc3545;">그룹 로드 실패: ' + escapeHtml(error.message) + '</div>';
             }
         }
 
@@ -9022,7 +9030,7 @@
 
             } catch (error) {
                 logger.error('Error loading group documents:', error);
-                docsList.innerHTML = '<div style="text-align: center; color: #dc3545;">문서 로드 실패: ' + error.message + '</div>';
+                docsList.innerHTML = '<div style="text-align: center; color: #dc3545;">문서 로드 실패: ' + escapeHtml(error.message) + '</div>';
             }
         }
 
@@ -9338,7 +9346,7 @@
 
             } catch (error) {
                 logger.error('Error loading available documents:', error);
-                docsList.innerHTML = '<div style="text-align: center; color: #dc3545;">문서 로드 실패: ' + error.message + '</div>';
+                docsList.innerHTML = '<div style="text-align: center; color: #dc3545;">문서 로드 실패: ' + escapeHtml(error.message) + '</div>';
             }
         }
 
@@ -9749,7 +9757,7 @@
 
             } catch (error) {
                 logger.error('Error loading chunks:', error);
-                listEl.innerHTML = '<div style="text-align: center; padding: 40px; color: #dc3545;">청크를 불러오는데 실패했습니다: ' + error.message + '</div>';
+                listEl.innerHTML = '<div style="text-align: center; padding: 40px; color: #dc3545;">청크를 불러오는데 실패했습니다: ' + escapeHtml(error.message) + '</div>';
                 countEl.textContent = '';
             }
         }
@@ -9826,7 +9834,7 @@
 
             } catch (error) {
                 logger.error('Error loading versions:', error);
-                listEl.innerHTML = '<div style="text-align: center; padding: 40px; color: #dc3545;">버전 목록을 불러오는데 실패했습니다: ' + error.message + '</div>';
+                listEl.innerHTML = '<div style="text-align: center; padding: 40px; color: #dc3545;">버전 목록을 불러오는데 실패했습니다: ' + escapeHtml(error.message) + '</div>';
                 countEl.textContent = '';
             }
         }
@@ -9944,7 +9952,7 @@
 
             } catch (error) {
                 logger.error('Error comparing versions:', error);
-                contentEl.innerHTML = '<div style="text-align: center; padding: 40px; color: #dc3545;">비교 실패: ' + error.message + '</div>';
+                contentEl.innerHTML = '<div style="text-align: center; padding: 40px; color: #dc3545;">비교 실패: ' + escapeHtml(error.message) + '</div>';
             }
         }
 

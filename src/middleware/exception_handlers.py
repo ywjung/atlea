@@ -32,15 +32,16 @@ def register_exception_handlers(app: FastAPI):
         if exc.status_code >= 500:
             logger.error(f"HTTP {exc.status_code}: {exc.detail} - {request.url}")
 
-        # Don't expose sensitive information in production
-        detail = exc.detail
+        # Don't expose sensitive information in production for 500+ errors
         if config.ENV == "production" and exc.status_code >= 500:
             detail = "Internal server error"
+        else:
+            detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
 
         return JSONResponse(
             status_code=exc.status_code,
             content={
-                "error": exc.detail if isinstance(exc.detail, str) else str(exc.detail),
+                "error": detail,
                 "status_code": exc.status_code
             }
         )
@@ -84,21 +85,24 @@ def register_exception_handlers(app: FastAPI):
         # Combine all error messages
         combined_message = '\n'.join(error_messages) if error_messages else "입력값이 올바르지 않습니다"
 
-        # Prepare serializable errors for debug mode
+        # Prepare serializable errors for debug mode ONLY in non-production
         serializable_errors = None
-        if config.DEBUG:
+        if config.DEBUG and config.ENV != "production":
             serializable_errors = []
             for error in errors:
                 serializable_error = {
                     'type': error.get('type'),
                     'loc': error.get('loc'),
                     'msg': error.get('msg'),
-                    'input': error.get('input')
+                    # Don't expose input in errors - could contain sensitive data
                 }
-                # Convert ctx to serializable format
+                # Convert ctx to serializable format (exclude sensitive data)
                 if error.get('ctx'):
                     serializable_error['ctx'] = {}
                     for key, value in error['ctx'].items():
+                        # Skip potentially sensitive context keys
+                        if key in ('password', 'token', 'secret', 'api_key'):
+                            continue
                         # Convert non-serializable objects to strings
                         if isinstance(value, Exception):
                             serializable_error['ctx'][key] = str(value)

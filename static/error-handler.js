@@ -3,6 +3,14 @@
  * Handles network errors, timeouts, and retry logic with user-friendly messages
  */
 
+// HTML escape helper to prevent XSS
+function escapeHtmlForError(text) {
+    if (typeof text !== 'string') return String(text);
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
 class ErrorHandler {
     constructor() {
         this.maxRetries = 3;
@@ -164,7 +172,7 @@ class ErrorHandler {
                 <div class="error-icon">⚠️</div>
                 <div class="error-content">
                     <div class="error-title">오류 발생</div>
-                    <div class="error-text">${errorInfo.message}</div>
+                    <div class="error-text">${escapeHtmlForError(errorInfo.message)}</div>
                 </div>
                 ${showRetryButton ? `
                     <div class="error-actions">
