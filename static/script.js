@@ -33,7 +33,7 @@ function isAsciiArt(code, language) {
 function normalizeLanguageClass(block) {
     const classList = Array.from(block.classList);
 
-    // Map of incorrect -> correct language codes
+    // Map of incorrect/unsupported -> correct language codes
     const languageMap = {
         'language-jav': 'language-java',
         'language-ja': 'language-java',
@@ -43,14 +43,44 @@ function normalizeLanguageClass(block) {
         'language-yml': 'language-yaml',
         'language-sh': 'language-bash',
         'language-props': 'language-properties',
-        'language-prop': 'language-properties'
+        'language-prop': 'language-properties',
+        // Unsupported languages -> fallback to similar or plaintext
+        'language-gradle': 'language-groovy',
+        'language-kt': 'language-kotlin',
+        'language-dockerfile': 'language-docker',
+        'language-env': 'language-properties',
+        'language-dotenv': 'language-properties',
+        'language-conf': 'language-ini',
+        'language-config': 'language-ini',
+        'language-txt': 'language-plaintext',
+        'language-text': 'language-plaintext',
+        'language-log': 'language-plaintext'
     };
+
+    // List of languages supported by highlight.js (common subset)
+    const supportedLanguages = new Set([
+        'javascript', 'typescript', 'python', 'java', 'kotlin', 'groovy',
+        'c', 'cpp', 'csharp', 'go', 'rust', 'ruby', 'php', 'swift',
+        'html', 'xml', 'css', 'scss', 'less', 'json', 'yaml', 'markdown',
+        'sql', 'bash', 'shell', 'powershell', 'docker', 'nginx',
+        'ini', 'properties', 'plaintext', 'diff', 'makefile'
+    ]);
 
     // Replace incorrect language classes
     classList.forEach(className => {
         if (languageMap[className]) {
             block.classList.remove(className);
             block.classList.add(languageMap[className]);
+        } else if (className.startsWith('language-')) {
+            // Check if language is supported, if not fallback to plaintext
+            const lang = className.replace('language-', '');
+            if (!supportedLanguages.has(lang) && typeof hljs !== 'undefined') {
+                // Check if hljs has this language
+                if (!hljs.getLanguage(lang)) {
+                    block.classList.remove(className);
+                    block.classList.add('language-plaintext');
+                }
+            }
         }
     });
 }
@@ -1707,6 +1737,20 @@ async function sendMessage(regenerate = false) {
                                 cached: data.data.cached,
                                 searchSummary: searchSummary
                             });
+
+                            // RAG 품질 개선 디버그 로그
+                            if (data.data.rewritten_query) {
+                                devLog('✏️ [QUERY REWRITE] 쿼리 확장됨:', {
+                                    original: question,
+                                    rewritten: data.data.rewritten_query
+                                });
+                            }
+                            if (data.data.query_rewrite_enabled || data.data.reranking_enabled) {
+                                devLog('🚀 [RAG QUALITY] 품질 개선 설정:', {
+                                    queryRewriteEnabled: data.data.query_rewrite_enabled,
+                                    rerankingEnabled: data.data.reranking_enabled
+                                });
+                            }
 
                             // 🆕 실제 사용된 소스 기반 메시지 업데이트
                             if (searchSummary && searchSummary.sources_used) {

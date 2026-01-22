@@ -879,7 +879,11 @@ async def query_stream(
                 for doc in result["context"]
             ],
             "cached": False,
-            "search_summary": result.get("search_summary")  # 하이브리드 검색 정보
+            "search_summary": result.get("search_summary"),  # 하이브리드 검색 정보
+            # RAG 품질 개선 디버그 정보
+            "rewritten_query": result.get("rewritten_query"),
+            "query_rewrite_enabled": result.get("query_rewrite_enabled", False),
+            "reranking_enabled": result.get("reranking_enabled", False)
         }
 
         # Collect response for caching and conversation history

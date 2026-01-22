@@ -71,10 +71,19 @@ class JinaReranker:
 
             # 모델 및 토크나이저 로드
             self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-            self.model = AutoModelForSequenceClassification.from_pretrained(
-                self.model_name,
-                trust_remote_code=True
-            )
+
+            # MPS에서는 BFloat16이 지원되지 않으므로 Float32 사용
+            if self.device == "mps":
+                self.model = AutoModelForSequenceClassification.from_pretrained(
+                    self.model_name,
+                    trust_remote_code=True,
+                    torch_dtype=torch.float32
+                )
+            else:
+                self.model = AutoModelForSequenceClassification.from_pretrained(
+                    self.model_name,
+                    trust_remote_code=True
+                )
             self.model.to(self.device)
             self.model.eval()
 

@@ -562,7 +562,10 @@ class HybridRAGOrchestrator:
         return {
             'answer': answer,
             'sources': merged_results,
-            'search_summary': search_summary
+            'search_summary': search_summary,
+            'rewritten_query': search_query if search_query != query else None,
+            'query_rewrite_enabled': self.query_rewrite_enabled,
+            'reranking_enabled': self.reranking_enabled
         }
 
     def _select_sources(self, analysis: Dict, mode: str) -> List[str]:
