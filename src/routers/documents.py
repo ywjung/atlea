@@ -1139,27 +1139,6 @@ async def upload_document(
         # Use authenticated user
         username = current_user.get("username", "system")
 
-        # Remove old manual token extraction
-        if False:
-            try:
-                from .auth.utils import verify_token
-                auth_header = request.headers.get("Authorization")
-                if auth_header and auth_header.startswith("Bearer "):
-                    token = auth_header.split(" ")[1]
-                    user_data = verify_token(token)
-                    if user_data:
-                        # Token contains: user_id (always), username (optional)
-                        username = user_data.get("username")
-                        user_id = user_data.get("user_id")
-                        current_user = username or user_id or "system"
-                        logger.info(f"Upload user identified: {current_user}")
-                    else:
-                        logger.warning("Token verification returned None")
-                else:
-                    logger.warning("No valid Authorization header found")
-            except Exception as e:
-                logger.warning(f"Could not extract user from token: {e}")
-                # Continue with system user
         # Security: Validate and sanitize filename
         safe_filename = validate_filename(file.filename)
 

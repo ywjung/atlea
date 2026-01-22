@@ -189,11 +189,27 @@ class ConversationManager:
             offset + limit - 1
         )
 
-        sessions = []
+        if not session_ids:
+            return []
+
+        # Batch fetch all sessions using Pipeline (eliminates N+1 query)
+        pipe = self.client.pipeline()
+        decoded_ids = []
         for session_id in session_ids:
-            session_id = session_id.decode('utf-8')
-            session = self.get_session(session_id)
-            if session:
+            sid = session_id.decode('utf-8') if isinstance(session_id, bytes) else session_id
+            decoded_ids.append(sid)
+            pipe.hgetall(f'conversation:{sid}')
+
+        results = pipe.execute()
+
+        sessions = []
+        for session_id, session_data in zip(decoded_ids, results):
+            if session_data:
+                session = {
+                    k.decode('utf-8'): v.decode('utf-8')
+                    for k, v in session_data.items()
+                }
+                session['id'] = session_id
                 sessions.append(session)
 
         return sessions

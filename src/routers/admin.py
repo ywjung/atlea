@@ -1900,13 +1900,12 @@ async def delete_tavily_api_key(
 async def reveal_tavily_api_key(
     request: Request,
     user: dict = Depends(require_admin),
-    full: bool = False,
     _rate_limit=Depends(create_rate_limit_dependency(5, 60, "admin_api_key_reveal"))
 ):
     """Tavily API 키 조회 (관리자 전용)
-    
-    Args:
-        full: True면 전체 키 반환 (보안 주의), False면 마스킹된 키 반환
+
+    보안상 항상 마스킹된 키만 반환합니다.
+    전체 키가 필요한 경우 Redis 또는 환경변수에서 직접 확인하세요.
     """
     try:
         cache_manager = request.app.state.cache_manager
@@ -1916,44 +1915,22 @@ async def reveal_tavily_api_key(
 
         if stored_key:
             full_key = stored_key.decode()
-            if full:
-                logger.warning(
-                    f"🔐 Tavily API 키 전체 조회 (관리자: {user.get('username')})"
-                )
-                return {
-                    "success": True,
-                    "api_key": full_key,
-                    "masked": False,
-                    "source": "redis"
-                }
-            else:
-                return {
-                    "success": True,
-                    "api_key": mask_api_key(full_key),
-                    "masked": True,
-                    "source": "redis"
-                }
+            return {
+                "success": True,
+                "api_key": mask_api_key(full_key),
+                "masked": True,
+                "source": "redis"
+            }
         else:
             # 환경 변수 확인
             env_key = os.getenv('TAVILY_API_KEY')
             if env_key:
-                if full:
-                    logger.warning(
-                        f"🔐 Tavily API 키 전체 조회 - 환경변수 (관리자: {user.get('username')})"
-                    )
-                    return {
-                        "success": True,
-                        "api_key": env_key,
-                        "masked": False,
-                        "source": "environment"
-                    }
-                else:
-                    return {
-                        "success": True,
-                        "api_key": mask_api_key(env_key),
-                        "masked": True,
-                        "source": "environment"
-                    }
+                return {
+                    "success": True,
+                    "api_key": mask_api_key(env_key),
+                    "masked": True,
+                    "source": "environment"
+                }
 
             raise HTTPException(
                 status_code=404,
@@ -2160,13 +2137,12 @@ async def delete_context7_api_key(
 async def reveal_context7_api_key(
     request: Request,
     user: dict = Depends(require_admin),
-    full: bool = False,
     _rate_limit=Depends(create_rate_limit_dependency(5, 60, "admin_api_key_reveal"))
 ):
     """Context7 API 키 조회 (관리자 전용)
-    
-    Args:
-        full: True면 전체 키 반환 (보안 주의), False면 마스킹된 키 반환
+
+    보안상 항상 마스킹된 키만 반환합니다.
+    전체 키가 필요한 경우 Redis 또는 환경변수에서 직접 확인하세요.
     """
     try:
         cache_manager = request.app.state.cache_manager
@@ -2176,44 +2152,22 @@ async def reveal_context7_api_key(
 
         if stored_key:
             full_key = stored_key.decode()
-            if full:
-                logger.warning(
-                    f"🔐 Context7 API 키 전체 조회 (관리자: {user.get('username')})"
-                )
-                return {
-                    "success": True,
-                    "api_key": full_key,
-                    "masked": False,
-                    "source": "redis"
-                }
-            else:
-                return {
-                    "success": True,
-                    "api_key": mask_api_key(full_key),
-                    "masked": True,
-                    "source": "redis"
-                }
+            return {
+                "success": True,
+                "api_key": mask_api_key(full_key),
+                "masked": True,
+                "source": "redis"
+            }
         else:
             # 환경 변수 확인
             env_key = os.getenv('CONTEXT7_API_KEY')
             if env_key:
-                if full:
-                    logger.warning(
-                        f"🔐 Context7 API 키 전체 조회 - 환경변수 (관리자: {user.get('username')})"
-                    )
-                    return {
-                        "success": True,
-                        "api_key": env_key,
-                        "masked": False,
-                        "source": "environment"
-                    }
-                else:
-                    return {
-                        "success": True,
-                        "api_key": mask_api_key(env_key),
-                        "masked": True,
-                        "source": "environment"
-                    }
+                return {
+                    "success": True,
+                    "api_key": mask_api_key(env_key),
+                    "masked": True,
+                    "source": "environment"
+                }
 
             raise HTTPException(
                 status_code=404,
