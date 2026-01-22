@@ -1,26 +1,33 @@
 """
 Document Processor - Extract and chunk documents
 Supports: PDF, HWP, HWPX, DOC, DOCX, XLS, XLSX, PPT, PPTX, TXT
+
+📝 Changelog:
+- 2026-01-22: 표 데이터 처리 기능 추가
+  - 마크다운/HTML 테이블 감지
+  - 행 단위 청킹으로 표 검색 품질 향상
 """
 
 import os
 import struct
 import zlib
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 from loguru import logger
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 import olefile
 
 from .document_service import DocumentService
 from .hwp_processor import HWPProcessor
+from .table_processor import TableProcessor
 
 
 class DocumentProcessor:
     """Process documents and create chunks - supports multiple formats via Java Document Service"""
 
     def __init__(self, chunk_size: int = 512, chunk_overlap: int = 50,
-                 document_service_url: str = None):
+                 document_service_url: str = None,
+                 enable_table_processing: bool = True):
         """
         Initialize document processor
 
@@ -28,15 +35,29 @@ class DocumentProcessor:
             chunk_size: Size of text chunks
             chunk_overlap: Overlap between chunks
             document_service_url: URL of Java document service (default: http://localhost:8081)
+            enable_table_processing: Enable table detection and row-level chunking
         """
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
+        self.enable_table_processing = enable_table_processing
         self.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
             length_function=len,
             separators=["\n\n", "\n", ". ", " ", ""]
         )
+
+        # Initialize table processor
+        if enable_table_processing:
+            self.table_processor = TableProcessor(
+                min_columns=2,
+                min_rows=1,
+                include_header_in_chunk=True,
+                chunk_mode="row"  # 행 단위 청킹
+            )
+            logger.info("📊 Table processing enabled")
+        else:
+            self.table_processor = None
 
         # Initialize unified document service
         self.document_service = DocumentService(document_service_url)
@@ -52,7 +73,7 @@ class DocumentProcessor:
         # Keep HWP fallback processor for legacy support
         self.hwp_processor = HWPProcessor(document_service_url)
 
-        logger.info(f"Document Processor initialized (chunk_size={chunk_size}, overlap={chunk_overlap})")
+        logger.info(f"Document Processor initialized (chunk_size={chunk_size}, overlap={chunk_overlap}, table_processing={enable_table_processing})")
 
     def extract_text_from_document(self, doc_path: str) -> str:
         """
@@ -274,7 +295,63 @@ class DocumentProcessor:
 
     def create_chunks(self, text: str, metadata: Dict = None) -> List[Dict]:
         """
-        Split text into chunks
+        Split text into chunks with optional table processing
+
+        Args:
+            text: Text to split
+            metadata: Additional metadata to include
+
+        Returns:
+            List of chunk dictionaries
+        """
+        try:
+            metadata = metadata or {}
+            result = []
+            table_chunks = []
+            remaining_text = text
+
+            # 표 처리 (활성화된 경우)
+            if self.enable_table_processing and self.table_processor:
+                remaining_text, table_chunks = self.table_processor.extract_and_chunk(
+                    text,
+                    base_metadata=metadata
+                )
+
+                if table_chunks:
+                    logger.info(f"📊 Extracted {len(table_chunks)} table chunks")
+
+            # 일반 텍스트 청킹
+            if remaining_text.strip():
+                text_chunks = self.text_splitter.split_text(remaining_text)
+
+                for idx, chunk in enumerate(text_chunks):
+                    chunk_data = {
+                        "text": chunk,
+                        "chunk_index": idx,
+                        "chunk_type": "text",
+                        "is_table": False
+                    }
+                    chunk_data.update(metadata)
+                    result.append(chunk_data)
+
+            # 표 청크 추가
+            for idx, table_chunk in enumerate(table_chunks):
+                table_chunk["chunk_index"] = len(result) + idx
+                result.append(table_chunk)
+
+            # 전체 청크 수 업데이트
+            for chunk in result:
+                chunk["total_chunks"] = len(result)
+
+            logger.debug(f"Created {len(result)} chunks (text: {len(result) - len(table_chunks)}, table: {len(table_chunks)})")
+            return result
+        except Exception as e:
+            logger.error(f"Failed to create chunks: {e}")
+            raise
+
+    def create_chunks_simple(self, text: str, metadata: Dict = None) -> List[Dict]:
+        """
+        Split text into chunks (simple version without table processing)
 
         Args:
             text: Text to split
@@ -297,7 +374,7 @@ class DocumentProcessor:
                     chunk_data.update(metadata)
                 result.append(chunk_data)
 
-            logger.debug(f"Created {len(result)} chunks")
+            logger.debug(f"Created {len(result)} chunks (simple)")
             return result
         except Exception as e:
             logger.error(f"Failed to create chunks: {e}")

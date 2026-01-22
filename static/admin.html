@@ -3119,6 +3119,41 @@
                                     <span class="toggle-slider"></span>
                                 </label>
                             </div>
+
+                            <!-- RAG Quality Enhancement Section -->
+                            <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #e5e7eb;">
+                                <div style="font-weight: 600; margin-bottom: 12px; color: #374151;">🚀 RAG 품질 개선</div>
+
+                                <!-- Reranking Toggle -->
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                                    <div>
+                                        <div style="font-weight: 600; margin-bottom: 3px;">🎯 재랭킹 (Cross-encoder)</div>
+                                        <div style="font-size: 12px; color: #666;">검색 결과를 의미 기반으로 재정렬</div>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="rerankingToggle" onchange="toggleReranking()">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+
+                                <!-- Query Rewrite Toggle -->
+                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                    <div>
+                                        <div style="font-weight: 600; margin-bottom: 3px;">✏️ 쿼리 재작성</div>
+                                        <div style="font-size: 12px; color: #666;">질문을 검색 친화적 키워드로 확장</div>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="queryRewriteToggle" onchange="toggleQueryRewrite()">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+
+                                <!-- RAG Quality Status -->
+                                <div id="ragQualityStatus" style="margin-top: 12px; padding: 8px 12px; background: #f9fafb; border-radius: 6px; font-size: 12px; color: #666;">
+                                    <span id="rerankingStatus">재랭킹: 비활성</span> |
+                                    <span id="queryRewriteStatus">쿼리 재작성: 비활성</span>
+                                </div>
+                            </div>
                         </div>
 
                         <!-- Tavily API Key Configuration -->
@@ -8471,6 +8506,7 @@
                 loadTotpConfig();
                 loadBruteForceConfig();
                 loadHybridRagConfig();
+                loadRagQualityConfig();
             }
             if (tabName === 'documents') {
                 adminLoadDocuments();
@@ -12082,6 +12118,104 @@
                 logger.error('Error toggling doc search:', error);
                 toggle.checked = !enabled;
                 showHybridRagError('문서 검색 설정 변경 실패: ' + error.message);
+            }
+        }
+
+        // ====================================================================
+        // RAG 품질 개선 설정 관련 함수
+        // ====================================================================
+
+        /**
+         * RAG 품질 설정 로드
+         */
+        async function loadRagQualityConfig() {
+            try {
+                const data = await Auth.apiCall('/api/admin/rag-quality');
+
+                // 토글 상태 업데이트
+                document.getElementById('rerankingToggle').checked = data.reranking_enabled;
+                document.getElementById('queryRewriteToggle').checked = data.query_rewrite_enabled;
+
+                // 상태 표시 업데이트
+                updateRagQualityStatus(data.reranking_enabled, data.query_rewrite_enabled);
+
+                logger.info('RAG quality config loaded:', data);
+            } catch (error) {
+                logger.error('Error loading RAG quality config:', error);
+                // 실패해도 UI는 기본값으로 표시
+                document.getElementById('rerankingToggle').checked = false;
+                document.getElementById('queryRewriteToggle').checked = false;
+                updateRagQualityStatus(false, false);
+            }
+        }
+
+        /**
+         * 재랭킹 토글
+         */
+        async function toggleReranking() {
+            const toggle = document.getElementById('rerankingToggle');
+            const enabled = toggle.checked;
+
+            try {
+                const data = await Auth.apiCall('/api/admin/rag-quality', {
+                    method: 'PUT',
+                    body: JSON.stringify({
+                        reranking_enabled: enabled
+                    })
+                });
+
+                updateRagQualityStatus(data.reranking_enabled, data.query_rewrite_enabled);
+                showHybridRagSuccess(data.message);
+                setTimeout(() => hideHybridRagMessages(), 3000);
+
+            } catch (error) {
+                logger.error('Error toggling reranking:', error);
+                toggle.checked = !enabled;
+                showHybridRagError('재랭킹 설정 변경 실패: ' + error.message);
+            }
+        }
+
+        /**
+         * 쿼리 재작성 토글
+         */
+        async function toggleQueryRewrite() {
+            const toggle = document.getElementById('queryRewriteToggle');
+            const enabled = toggle.checked;
+
+            try {
+                const data = await Auth.apiCall('/api/admin/rag-quality', {
+                    method: 'PUT',
+                    body: JSON.stringify({
+                        query_rewrite_enabled: enabled
+                    })
+                });
+
+                updateRagQualityStatus(data.reranking_enabled, data.query_rewrite_enabled);
+                showHybridRagSuccess(data.message);
+                setTimeout(() => hideHybridRagMessages(), 3000);
+
+            } catch (error) {
+                logger.error('Error toggling query rewrite:', error);
+                toggle.checked = !enabled;
+                showHybridRagError('쿼리 재작성 설정 변경 실패: ' + error.message);
+            }
+        }
+
+        /**
+         * RAG 품질 상태 표시 업데이트
+         */
+        function updateRagQualityStatus(rerankingEnabled, queryRewriteEnabled) {
+            const rerankingStatus = document.getElementById('rerankingStatus');
+            const queryRewriteStatus = document.getElementById('queryRewriteStatus');
+
+            if (rerankingStatus) {
+                rerankingStatus.textContent = rerankingEnabled ? '재랭킹: ✅ 활성' : '재랭킹: 비활성';
+                rerankingStatus.style.color = rerankingEnabled ? '#166534' : '#666';
+            }
+
+            if (queryRewriteStatus) {
+                queryRewriteStatus.textContent = queryRewriteEnabled ? '쿼리 재작성: ✅ 활성' : '쿼리 재작성: 비활성';
+                queryRewriteStatus.style.color = queryRewriteEnabled ? '#166534' : '#666';
             }
         }
 

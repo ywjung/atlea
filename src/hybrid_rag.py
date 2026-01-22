@@ -4,6 +4,10 @@ Hybrid RAG Orchestrator - 다중 소스 RAG 시스템
 로컬 문서 + 웹 검색 + 공식 문서를 결합하여 더 완벽한 답변 제공
 
 📝 Changelog:
+- 2026-01-22: RAG 품질 개선 기능 추가
+  - Cross-encoder 기반 재랭킹 (Jina Reranker)
+  - LLM 기반 쿼리 재작성 (검색 친화적 쿼리 변환)
+  - Redis 설정 기반 기능 활성화/비활성화
 - 2026-01-20: Crawl4AI 통합으로 SearXNG 콘텐츠 품질 개선
   - SearXNG 검색 결과 URL에서 Crawl4AI로 전체 콘텐츠 추출
   - 짧은 스니펫 대신 풍부한 페이지 콘텐츠 제공
@@ -34,6 +38,8 @@ from loguru import logger
 from .query_analyzer import QueryAnalyzer
 from .metrics_collector import MetricsCollector
 from .performance_utils import log_slow_query
+from .reranker import get_reranker
+from .query_rewriter import HybridQueryRewriter
 
 
 class HybridRAGOrchestrator:
@@ -102,9 +108,14 @@ class HybridRAGOrchestrator:
         if enable_doc_search:
             self.context7_client = self._init_context7()
 
+        # RAG 품질 개선 기능 초기화
+        self._init_rag_quality_features()
+
         logger.info("🔗 HybridRAGOrchestrator initialized")
         logger.info(f"  - Web Search: {self.web_search_enabled} (provider: {self.web_search_provider})")
         logger.info(f"  - Doc Search: {self.doc_search_enabled}")
+        logger.info(f"  - Reranking: {self.reranking_enabled}")
+        logger.info(f"  - Query Rewrite: {self.query_rewrite_enabled}")
 
     def _init_tavily(self):
         """Tavily 웹 검색 클라이언트 초기화 (Redis 우선, 환경 변수 대체)"""
@@ -297,6 +308,127 @@ class HybridRAGOrchestrator:
             self.doc_search_enabled = False
             return None
 
+    def _init_rag_quality_features(self):
+        """RAG 품질 개선 기능 초기화 (재랭킹, 쿼리 재작성)"""
+        # Redis에서 설정 로드
+        self.reranking_enabled = False
+        self.query_rewrite_enabled = False
+        self.reranker = None
+        self.query_rewriter = None
+
+        try:
+            # Redis에서 설정 확인
+            reranking_setting = self.cache.redis.get("config:reranking_enabled")
+            query_rewrite_setting = self.cache.redis.get("config:query_rewrite_enabled")
+
+            self.reranking_enabled = (
+                reranking_setting.decode() == "true" if reranking_setting else False
+            )
+            self.query_rewrite_enabled = (
+                query_rewrite_setting.decode() == "true" if query_rewrite_setting else False
+            )
+
+            # 재랭킹 활성화 시 Reranker 초기화 (지연 로딩)
+            if self.reranking_enabled:
+                try:
+                    self.reranker = get_reranker(model_type="jina")
+                    logger.info("🎯 Reranker initialized (lazy loading)")
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to initialize reranker: {e}")
+                    self.reranking_enabled = False
+
+            # 쿼리 재작성 활성화 시 QueryRewriter 초기화
+            if self.query_rewrite_enabled:
+                self.query_rewriter = HybridQueryRewriter(
+                    use_llm=True,
+                    fallback_to_rules=True
+                )
+                logger.info("✏️ QueryRewriter initialized")
+
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to load RAG quality settings: {e}")
+
+    def refresh_rag_quality_settings(self):
+        """RAG 품질 설정 새로고침 (설정 변경 시 호출)"""
+        self._init_rag_quality_features()
+        logger.info("🔄 RAG quality settings refreshed")
+
+    async def _rerank_results(
+        self,
+        query: str,
+        results: List[Dict],
+        top_k: int = 10
+    ) -> List[Dict]:
+        """
+        검색 결과 재랭킹
+
+        Args:
+            query: 사용자 쿼리
+            results: 검색 결과 리스트
+            top_k: 반환할 최대 문서 수
+
+        Returns:
+            재랭킹된 결과 리스트
+        """
+        if not self.reranking_enabled or not self.reranker:
+            return results
+
+        if not results:
+            return results
+
+        try:
+            logger.info(f"🎯 Reranking {len(results)} results...")
+            start_time = time.time()
+
+            reranked = await self.reranker.rerank_async(
+                query=query,
+                documents=results,
+                top_k=top_k
+            )
+
+            rerank_time = time.time() - start_time
+            logger.info(f"✅ Reranking completed in {rerank_time:.3f}s")
+
+            return reranked
+
+        except Exception as e:
+            logger.error(f"❌ Reranking failed: {e}")
+            return results
+
+    async def _rewrite_query(self, query: str) -> str:
+        """
+        쿼리 재작성
+
+        Args:
+            query: 원본 사용자 쿼리
+
+        Returns:
+            확장된 검색 쿼리
+        """
+        if not self.query_rewrite_enabled or not self.query_rewriter:
+            return query
+
+        try:
+            logger.info(f"✏️ Rewriting query: '{query}'")
+            start_time = time.time()
+
+            # LLM 클라이언트 전달
+            llm_client = getattr(self.local_rag, 'llm', None)
+            rewritten = await self.query_rewriter.rewrite(
+                query=query,
+                llm_client=llm_client,
+                include_original=True
+            )
+
+            rewrite_time = time.time() - start_time
+            logger.info(f"✅ Query rewritten in {rewrite_time:.3f}s: '{rewritten}'")
+
+            return rewritten
+
+        except Exception as e:
+            logger.error(f"❌ Query rewrite failed: {e}")
+            return query
+
     async def answer(
         self,
         query: str,
@@ -341,6 +473,11 @@ class HybridRAGOrchestrator:
                    f"fresh={analysis['needs_fresh_info']}, "
                    f"web_beneficial={analysis.get('benefits_from_web', False)}")
 
+        # 1.5. 쿼리 재작성 (검색 최적화)
+        search_query = query
+        if self.query_rewrite_enabled:
+            search_query = await self._rewrite_query(query)
+
         # 2. 검색 소스 결정
         sources_to_use = self._select_sources(analysis, search_mode)
         logger.info(f"🎯 Selected sources: {sources_to_use}")
@@ -348,21 +485,21 @@ class HybridRAGOrchestrator:
         # 3. 병렬 검색 실행
         search_tasks = []
 
-        # 로컬 문서 검색
+        # 로컬 문서 검색 (재작성된 쿼리 사용)
         if 'local' in sources_to_use:
-            search_tasks.append(self._search_local(query, group_ids, top_k, document_ids))
+            search_tasks.append(self._search_local(search_query, group_ids, top_k, document_ids))
         else:
             search_tasks.append(asyncio.sleep(0, result=[]))
 
-        # 웹 검색 (Tavily 또는 SearXNG)
+        # 웹 검색 (Tavily 또는 SearXNG) - 재작성된 쿼리 사용
         if 'web' in sources_to_use and (self.tavily_client or self.searxng_client):
-            search_tasks.append(self._search_web(query, analysis))
+            search_tasks.append(self._search_web(search_query, analysis))
         else:
             search_tasks.append(asyncio.sleep(0, result=[]))
 
-        # 공식 문서 검색
+        # 공식 문서 검색 - 재작성된 쿼리 사용
         if 'docs' in sources_to_use and self.context7_client:
-            search_tasks.append(self._search_docs(query, analysis))
+            search_tasks.append(self._search_docs(search_query, analysis))
         else:
             search_tasks.append(asyncio.sleep(0, result=[]))
 
@@ -380,6 +517,10 @@ class HybridRAGOrchestrator:
             analysis
         )
 
+        # 4.5. 재랭킹 (Cross-encoder 기반)
+        if self.reranking_enabled and merged_results:
+            merged_results = await self._rerank_results(query, merged_results, top_k=10)
+
         # 5. LLM 답변 생성
         answer = await self._generate_answer(query, merged_results, analysis, system_prompt)
 
@@ -395,6 +536,11 @@ class HybridRAGOrchestrator:
                 'needs_fresh_info': analysis['needs_fresh_info'],
                 'is_internal': analysis['is_internal'],
                 'benefits_from_web': analysis.get('benefits_from_web', False)
+            },
+            'quality_features': {
+                'reranking_enabled': self.reranking_enabled,
+                'query_rewrite_enabled': self.query_rewrite_enabled,
+                'rewritten_query': search_query if self.query_rewrite_enabled and search_query != query else None
             }
         }
 

@@ -151,6 +151,19 @@ class HybridRAGConfigResponse(ConfigResponseBase):
     searxng_configured: bool = False
 
 
+class RAGQualityConfig(BaseModel):
+    """RAG 품질 설정 모델"""
+    reranking_enabled: Optional[bool] = None
+    query_rewrite_enabled: Optional[bool] = None
+
+
+class RAGQualityConfigResponse(ConfigResponseBase):
+    """RAG 품질 설정 응답 모델"""
+    reranking_enabled: bool
+    query_rewrite_enabled: bool
+    reranker_model: str = "jinaai/jina-reranker-v2-base-multilingual"
+
+
 class PasswordResetRequest(BaseModel):
     """비밀번호 재설정 요청 모델"""
     email: EmailStr
@@ -1704,6 +1717,132 @@ async def update_hybrid_rag_config(
         raise HTTPException(
             status_code=500,
             detail=get_safe_error_message(e, "hybrid rag update")
+        )
+
+
+# ============================================================================
+# RAG Quality Configuration Endpoints
+# ============================================================================
+
+@router.get("/rag-quality", response_model=RAGQualityConfigResponse)
+async def get_rag_quality_config(
+    request: Request,
+    user=Depends(require_admin)
+):
+    """
+    RAG 품질 설정 조회 (관리자 전용)
+
+    Returns:
+        현재 RAG 품질 설정 (재랭킹, 쿼리 재작성)
+    """
+    try:
+        cache_manager = request.app.state.cache_manager
+
+        # Redis에서 설정 가져오기 (Pipeline으로 배치 조회)
+        pipe = cache_manager.redis.pipeline()
+        pipe.get("config:reranking_enabled")
+        pipe.get("config:query_rewrite_enabled")
+        results = pipe.execute()
+
+        reranking_raw, query_rewrite_raw = results
+
+        # 기본값 설정
+        reranking_enabled = reranking_raw.decode() == "true" if reranking_raw else False
+        query_rewrite_enabled = query_rewrite_raw.decode() == "true" if query_rewrite_raw else False
+
+        return RAGQualityConfigResponse(
+            reranking_enabled=reranking_enabled,
+            query_rewrite_enabled=query_rewrite_enabled,
+            reranker_model="jinaai/jina-reranker-v2-base-multilingual",
+            message="RAG 품질 설정을 조회했습니다"
+        )
+
+    except Exception as e:
+        logger.error(f"RAG 품질 설정 조회 실패: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=get_safe_error_message(e, "rag quality get")
+        )
+
+
+@router.put("/rag-quality", response_model=RAGQualityConfigResponse)
+async def update_rag_quality_config(
+    config_update: RAGQualityConfig,
+    request: Request,
+    user=Depends(require_admin)
+):
+    """
+    RAG 품질 설정 업데이트 (관리자 전용)
+
+    Args:
+        config_update: 업데이트할 설정
+
+    Returns:
+        업데이트된 RAG 품질 설정
+    """
+    try:
+        cache_manager = request.app.state.cache_manager
+
+        # 재랭킹 설정
+        if config_update.reranking_enabled is not None:
+            cache_manager.redis.set(
+                "config:reranking_enabled",
+                "true" if config_update.reranking_enabled else "false"
+            )
+            reranking_enabled = config_update.reranking_enabled
+        else:
+            # 기존 값 유지
+            reranking_setting = cache_manager.redis.get("config:reranking_enabled")
+            reranking_enabled = reranking_setting.decode() == "true" if reranking_setting else False
+
+        # 쿼리 재작성 설정
+        if config_update.query_rewrite_enabled is not None:
+            cache_manager.redis.set(
+                "config:query_rewrite_enabled",
+                "true" if config_update.query_rewrite_enabled else "false"
+            )
+            query_rewrite_enabled = config_update.query_rewrite_enabled
+        else:
+            # 기존 값 유지
+            query_rewrite_setting = cache_manager.redis.get("config:query_rewrite_enabled")
+            query_rewrite_enabled = query_rewrite_setting.decode() == "true" if query_rewrite_setting else False
+
+        # HybridRAGOrchestrator 설정 새로고침 트리거
+        try:
+            import sys
+            if 'src.web_server' in sys.modules:
+                web_server = sys.modules['src.web_server']
+                if hasattr(web_server, 'hybrid_rag_orchestrator') and web_server.hybrid_rag_orchestrator:
+                    web_server.hybrid_rag_orchestrator.refresh_rag_quality_settings()
+                    logger.info("🔄 HybridRAGOrchestrator settings refreshed")
+        except Exception as e:
+            logger.warning(f"Failed to refresh HybridRAGOrchestrator: {e}")
+
+        logger.info(
+            f"RAG 품질 설정 업데이트: reranking={reranking_enabled}, "
+            f"query_rewrite={query_rewrite_enabled} by user={user.get('email', 'unknown')}"
+        )
+
+        status_parts = []
+        if config_update.reranking_enabled is not None:
+            status_parts.append(f"재랭킹 {'활성화' if reranking_enabled else '비활성화'}")
+        if config_update.query_rewrite_enabled is not None:
+            status_parts.append(f"쿼리 재작성 {'활성화' if query_rewrite_enabled else '비활성화'}")
+
+        status_msg = ", ".join(status_parts) if status_parts else "설정이 유지되었습니다"
+
+        return RAGQualityConfigResponse(
+            reranking_enabled=reranking_enabled,
+            query_rewrite_enabled=query_rewrite_enabled,
+            reranker_model="jinaai/jina-reranker-v2-base-multilingual",
+            message=status_msg
+        )
+
+    except Exception as e:
+        logger.error(f"RAG 품질 설정 업데이트 실패: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=get_safe_error_message(e, "rag quality update")
         )
 
 
