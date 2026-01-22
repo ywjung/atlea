@@ -93,26 +93,16 @@ async def get_audit_logs(
             except ValueError:
                 raise HTTPException(status_code=400, detail=f"Invalid action: {action}")
 
-        # 로그 조회 (더 많이 가져와서 필터링 후 페이지네이션 적용)
-        fetch_limit = limit * 10 if username else limit
+        # 로그 조회 (username 인덱스 사용으로 효율적 필터링)
         logs = audit_logger.get_logs(
             user_id=user_id,
+            username=username,  # username 인덱스 사용
             action=action_enum,
             start_date=start_date,
             end_date=end_date,
-            limit=fetch_limit,
-            offset=0 if username else offset
+            limit=limit,
+            offset=offset
         )
-
-        # username 필터링 (부분 매칭)
-        if username:
-            username_lower = username.lower()
-            logs = [
-                log for log in logs
-                if log.get("username") and username_lower in log["username"].lower()
-            ]
-            # 필터링 후 페이지네이션 적용
-            logs = logs[offset:offset + limit]
 
         return {
             "logs": logs,

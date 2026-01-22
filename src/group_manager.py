@@ -57,6 +57,7 @@ class GroupManager:
 
         self.client.hset(f'group:{group_id}', mapping=group_data)
         self.client.set(default_key, group_id)
+        self.client.sadd('groups:all', group_id)  # Add to global groups index
 
         logger.info(f"Created default group: {group_id}")
         return group_id
@@ -137,6 +138,9 @@ class GroupManager:
         # Store group and update indices
         pipe = self.client.pipeline()
         pipe.hset(f'group:{group_id}', mapping=group_data)
+
+        # Add to global groups index (for efficient lookup without org_id)
+        pipe.sadd('groups:all', group_id)
 
         # Add to organization's groups index only if org_id is provided
         if org_id:
@@ -469,6 +473,9 @@ class GroupManager:
             pipe.srem(f'group:children:{parent_id}', group_id)
         else:
             pipe.srem('group:children:root', group_id)
+
+        # Remove from global groups index
+        pipe.srem('groups:all', group_id)
 
         # Delete group data
         pipe.delete(group_key)
@@ -897,15 +904,9 @@ class GroupManager:
             group_ids_bytes = self.client.smembers(f'org:groups:{org_id}')
             group_id_list = [gid.decode('utf-8') for gid in group_ids_bytes]
         else:
-            for key in self.client.scan_iter(match="group:*", count=5000):
-                key_str = key.decode('utf-8')
-                if (key_str.startswith('group:children:') or
-                    key_str.startswith('group:docs:') or
-                    key_str.startswith('group:orgs:') or
-                    key_str == 'group:default'):
-                    continue
-                group_id = key_str.split(':', 1)[1]
-                group_id_list.append(group_id)
+            # Use global groups index (O(1) instead of scan_iter O(n))
+            group_ids_bytes = self.client.smembers('groups:all')
+            group_id_list = [gid.decode('utf-8') for gid in group_ids_bytes]
 
         if not group_id_list:
             return []

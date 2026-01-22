@@ -26,6 +26,7 @@ class ProductionConfig:
         "http://localhost:3000,http://localhost:8000"
     ).split(",")
     CORS_ALLOW_CREDENTIALS: bool = os.getenv("CORS_ALLOW_CREDENTIALS", "true").lower() == "true"
+    CORS_STRICT: bool = os.getenv("CORS_STRICT", "true").lower() == "true"  # Enforce strict CORS in production
 
     # Rate Limiting
     RATE_LIMIT_ENABLED: bool = os.getenv("RATE_LIMIT_ENABLED", "true").lower() == "true"
@@ -89,9 +90,17 @@ class ProductionConfig:
             if not cls.REQUIRE_HTTPS:
                 logger.warning("⚠️  HTTPS is not required (recommended for production)")
 
-            # CORS origins 확인
-            if "*" in cls.CORS_ORIGINS or "http://localhost" in str(cls.CORS_ORIGINS):
-                logger.warning("⚠️  CORS origins include localhost or wildcard (not recommended for production)")
+            # CORS origins 확인 - wildcard is always blocked in production
+            if "*" in cls.CORS_ORIGINS:
+                errors.append("CORS wildcard (*) is not allowed in production - set specific origins")
+
+            # localhost origins check - blocked in strict mode, warning otherwise
+            has_localhost = any("localhost" in origin or "127.0.0.1" in origin for origin in cls.CORS_ORIGINS)
+            if has_localhost:
+                if cls.CORS_STRICT:
+                    errors.append("CORS localhost origins not allowed in strict mode - set CORS_STRICT=false to allow or use production origins")
+                else:
+                    logger.warning("⚠️  CORS origins include localhost (not recommended for production)")
 
         # Redis 연결 정보 확인
         if not cls.REDIS_HOST:
@@ -176,7 +185,7 @@ class ProductionConfig:
         logger.info(f"Host: {cls.HOST}")
         logger.info(f"Port: {cls.PORT}")
         logger.info(f"Workers: {cls.WORKERS}")
-        logger.info(f"CORS Origins: {cls.CORS_ORIGINS}")
+        logger.info(f"CORS Origins: {cls.CORS_ORIGINS} (strict: {cls.CORS_STRICT})")
         logger.info(f"Rate Limit: {cls.RATE_LIMIT_PER_MINUTE}/min (enabled: {cls.RATE_LIMIT_ENABLED})")
         logger.info(f"Request Timeout: {cls.REQUEST_TIMEOUT}s")
         logger.info(f"Max File Size: {cls.MAX_FILE_SIZE_MB}MB")

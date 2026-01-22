@@ -71,6 +71,7 @@ class AuditLogger:
         # Redis keys
         self.audit_prefix = "audit:log"
         self.user_activity_prefix = "audit:user"
+        self.username_index_prefix = "audit:username"  # username 인덱스 추가
         self.action_index_prefix = "audit:action"
         self.daily_index_prefix = "audit:daily"
 
@@ -144,18 +145,24 @@ class AuditLogger:
             # 인덱싱 (빠른 조회용)
             today = kst_time.strftime("%Y-%m-%d")
 
-            # 1. 사용자별 인덱스
+            # 1. 사용자별 인덱스 (user_id)
             if user_id:
                 user_key = f"{self.user_activity_prefix}:{user_id}"
                 self.redis.zadd(user_key, {log_id: timestamp})
                 self.redis.expire(user_key, ttl)
 
-            # 2. 작업별 인덱스
+            # 2. 사용자명별 인덱스 (username) - 효율적인 username 필터링용
+            if username:
+                username_key = f"{self.username_index_prefix}:{username.lower()}"
+                self.redis.zadd(username_key, {log_id: timestamp})
+                self.redis.expire(username_key, ttl)
+
+            # 3. 작업별 인덱스
             action_key = f"{self.action_index_prefix}:{action.value}"
             self.redis.zadd(action_key, {log_id: timestamp})
             self.redis.expire(action_key, ttl)
 
-            # 3. 일별 인덱스
+            # 4. 일별 인덱스
             daily_key = f"{self.daily_index_prefix}:{today}"
             self.redis.zadd(daily_key, {log_id: timestamp})
             self.redis.expire(daily_key, ttl)
@@ -198,6 +205,7 @@ class AuditLogger:
     def get_logs(
         self,
         user_id: Optional[str] = None,
+        username: Optional[str] = None,
         action: Optional[AuditAction] = None,
         start_date: Optional[str] = None,  # YYYY-MM-DD
         end_date: Optional[str] = None,    # YYYY-MM-DD
@@ -209,6 +217,7 @@ class AuditLogger:
 
         Args:
             user_id: 사용자 ID 필터
+            username: 사용자명 필터 (정확히 일치)
             action: 작업 유형 필터
             start_date: 시작 날짜
             end_date: 종료 날짜
@@ -219,9 +228,11 @@ class AuditLogger:
             로그 목록
         """
         try:
-            # 인덱스 키 결정
+            # 인덱스 키 결정 (우선순위: user_id > username > action > daily)
             if user_id:
                 index_key = f"{self.user_activity_prefix}:{user_id}"
+            elif username:
+                index_key = f"{self.username_index_prefix}:{username.lower()}"
             elif action:
                 index_key = f"{self.action_index_prefix}:{action.value}"
             else:
@@ -250,13 +261,20 @@ class AuditLogger:
                 num=limit
             )
 
-            # 로그 데이터 조회
-            logs = []
+            if not log_ids:
+                return []
+
+            # 로그 데이터 배치 조회 (Pipeline 사용)
+            pipe = self.redis.pipeline()
             for log_id in log_ids:
                 log_id_str = log_id.decode() if isinstance(log_id, bytes) else log_id
                 log_key = f"{self.audit_prefix}:{log_id_str}"
-                log_data = self.redis.get(log_key)
+                pipe.get(log_key)
 
+            results = pipe.execute()
+
+            logs = []
+            for log_data in results:
                 if log_data:
                     logs.append(json.loads(log_data))
 
