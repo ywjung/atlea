@@ -4476,10 +4476,11 @@ function applySettings() {
     }
 }
 
-// Display current LLM and Embedding models
+// Display current LLM, Embedding, and Reranker models
 async function loadAvailableModels() {
     const llmModelDisplay = document.getElementById('llmModelDisplay');
     const embeddingModelDisplay = document.getElementById('embeddingModelDisplay');
+    const rerankerModelDisplay = document.getElementById('rerankerModelDisplay');
 
     if (!llmModelDisplay || !embeddingModelDisplay) {
         logger.error('Model display elements not found');
@@ -4489,6 +4490,26 @@ async function loadAvailableModels() {
     // Simply display the current models from settings
     llmModelDisplay.textContent = currentSettings.llm_model || '설정되지 않음';
     embeddingModelDisplay.textContent = currentSettings.embedding_model || '설정되지 않음';
+
+    // Load reranker model from RAG quality settings
+    if (rerankerModelDisplay) {
+        try {
+            const response = await fetch('/api/hybrid-rag/status');
+            const data = await response.json();
+
+            if (data.quality_features && data.quality_features.reranking_enabled) {
+                rerankerModelDisplay.textContent = currentSettings.reranker_model || 'dengcao/Qwen3-Reranker-8B:Q4_K_M';
+                rerankerModelDisplay.style.color = '#166534';
+            } else {
+                rerankerModelDisplay.textContent = '비활성화됨';
+                rerankerModelDisplay.style.color = '#9ca3af';
+            }
+        } catch (error) {
+            logger.error('Failed to load reranker model:', error);
+            rerankerModelDisplay.textContent = '로드 실패';
+            rerankerModelDisplay.style.color = '#dc2626';
+        }
+    }
 }
 
 // Open settings panel (called from dropdown menu)
@@ -4505,6 +4526,17 @@ async function openSettingsPanel() {
         if (data.embedding_model) currentSettings.embedding_model = data.embedding_model;
     } catch (error) {
         logger.error('Failed to fetch latest model info:', error);
+    }
+
+    // Fetch reranker model from RAG quality settings
+    try {
+        const ragResponse = await fetch('/api/hybrid-rag/status');
+        const ragData = await ragResponse.json();
+        if (ragData.quality_features && ragData.quality_features.reranker_model) {
+            currentSettings.reranker_model = ragData.quality_features.reranker_model;
+        }
+    } catch (error) {
+        logger.error('Failed to fetch reranker model info:', error);
     }
 
     // Load latest system prompt from server (admin-configured)

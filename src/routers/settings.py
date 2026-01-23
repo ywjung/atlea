@@ -53,12 +53,20 @@ class UserPreferences(BaseModel):
     group_filter_mode: Optional[str] = "all"  # "all" or "selected"
 
 
+class RAGQualityFeatures(BaseModel):
+    """RAG 품질 기능 상태"""
+    reranking_enabled: bool = False
+    query_rewrite_enabled: bool = False
+    reranker_model: str = "dengcao/Qwen3-Reranker-8B:Q4_K_M"
+
+
 class HybridRAGStatusResponse(BaseModel):
     """하이브리드 RAG 상태 응답"""
     success: bool = True
     enabled: bool
     web_search_enabled: bool = False
     doc_search_enabled: bool = False
+    quality_features: Optional[RAGQualityFeatures] = None
 
 
 # ============================================================================
@@ -376,16 +384,31 @@ async def get_hybrid_rag_status(
         web_search_enabled = cache_manager.redis.get("config:hybrid_rag_web_search")
         doc_search_enabled = cache_manager.redis.get("config:hybrid_rag_doc_search")
 
+        # RAG 품질 기능 설정 가져오기
+        reranking_enabled = cache_manager.redis.get("config:reranking_enabled")
+        query_rewrite_enabled = cache_manager.redis.get("config:query_rewrite_enabled")
+        reranker_model = cache_manager.redis.get("config:reranker_model")
+
         # 기본값 설정
         enabled = enabled.decode() == "true" if enabled else False
         web_search_enabled = web_search_enabled.decode() == "true" if web_search_enabled else False
         doc_search_enabled = doc_search_enabled.decode() == "true" if doc_search_enabled else False
 
+        # RAG 품질 기능 기본값
+        reranking_enabled = reranking_enabled.decode() == "true" if reranking_enabled else False
+        query_rewrite_enabled = query_rewrite_enabled.decode() == "true" if query_rewrite_enabled else False
+        reranker_model = reranker_model.decode() if reranker_model else "dengcao/Qwen3-Reranker-8B:Q4_K_M"
+
         return HybridRAGStatusResponse(
             success=True,
             enabled=enabled,
             web_search_enabled=web_search_enabled,
-            doc_search_enabled=doc_search_enabled
+            doc_search_enabled=doc_search_enabled,
+            quality_features=RAGQualityFeatures(
+                reranking_enabled=reranking_enabled,
+                query_rewrite_enabled=query_rewrite_enabled,
+                reranker_model=reranker_model
+            )
         )
 
     except Exception as e:
