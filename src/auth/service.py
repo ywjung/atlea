@@ -23,6 +23,7 @@ from .security_logger import SecurityLogger
 from .password_reset import PasswordResetService
 from src.redis_helpers import decode_bytes, decode_redis_hash
 from src.utils.pagination import calculate_total_pages
+from src.constants import Limits, RedisKeys
 
 
 class AuthService:
@@ -421,7 +422,7 @@ class AuthService:
             session_id=session_id,
             user_id=user_id,
             created_at=datetime.now(timezone.utc),
-            expires_at=datetime.now(timezone.utc) + timedelta(days=30),
+            expires_at=datetime.now(timezone.utc) + timedelta(days=Limits.SESSION_EXPIRY_DAYS),
             ip_address=ip_address,
             user_agent=user_agent
         )
@@ -756,12 +757,18 @@ class AuthService:
             세션 목록
         """
         session_ids = self.redis.smembers(f"user:sessions:{user_id}")
+        if not session_ids:
+            return []
+
+        # Pipeline을 사용하여 모든 세션 데이터를 일괄 조회 (N+1 → 1 쿼리)
+        session_id_strs = [decode_bytes(sid) for sid in session_ids]
+        pipe = self.redis.pipeline()
+        for session_id_str in session_id_strs:
+            pipe.hgetall(f"session:{session_id_str}")
+        session_data_list = pipe.execute()
+
         sessions = []
-
-        for session_id in session_ids:
-            session_id_str = decode_bytes(session_id)
-            session_data = self.redis.hgetall(f"session:{session_id_str}")
-
+        for session_data in session_data_list:
             if session_data:
                 decoded_session = decode_redis_hash(session_data)
                 session_dict = {}
@@ -1193,17 +1200,19 @@ class AuthService:
         email = user_data.get(b'email' if isinstance(list(user_data.keys())[0], bytes) else 'email')
         email = decode_bytes(email)
 
-        # 사용자 데이터 삭제
-        self.redis.delete(f"user:{user_id}")
-        self.redis.delete(f"user:email:{email}")
-        self.redis.srem("users:all", user_id)
-
-        # 모든 세션 삭제
+        # 모든 세션 ID 조회
         session_ids = self.redis.smembers(f"user:sessions:{user_id}")
+
+        # Pipeline으로 모든 삭제 작업을 일괄 처리 (N+1 → 1 쿼리)
+        pipe = self.redis.pipeline()
+        pipe.delete(f"user:{user_id}")
+        pipe.delete(f"user:email:{email}")
+        pipe.srem("users:all", user_id)
         for session_id in session_ids:
             session_id_str = decode_bytes(session_id)
-            self.redis.delete(f"session:{session_id_str}")
-        self.redis.delete(f"user:sessions:{user_id}")
+            pipe.delete(f"session:{session_id_str}")
+        pipe.delete(f"user:sessions:{user_id}")
+        pipe.execute()
 
         logger.info(f"🗑️  User deleted: {user_id}")
 

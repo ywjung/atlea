@@ -141,13 +141,51 @@ class WebhookService:
             웹훅 목록
         """
         webhook_ids = self.redis.smembers(f"user:{user_id}:webhooks")
-        webhooks = []
+        if not webhook_ids:
+            return []
 
-        for webhook_id in webhook_ids:
-            webhook_id = webhook_id.decode() if isinstance(webhook_id, bytes) else webhook_id
-            webhook = await self.get_webhook(webhook_id)
-            if webhook:
+        # Pipeline을 사용하여 모든 웹훅 데이터를 일괄 조회 (N+1 → 1 쿼리)
+        webhook_id_strs = [wid.decode() if isinstance(wid, bytes) else wid for wid in webhook_ids]
+        pipe = self.redis.pipeline()
+        for webhook_id in webhook_id_strs:
+            pipe.hgetall(f"webhook:{webhook_id}")
+        webhook_data_list = pipe.execute()
+
+        webhooks = []
+        for data in webhook_data_list:
+            if not data:
+                continue
+
+            def get_field(field_name: str, default=None):
+                """Helper to get field from data"""
+                raw = data.get(field_name.encode()) or data.get(field_name)
+                if raw is None:
+                    return default
+                return raw.decode() if isinstance(raw, bytes) else raw
+
+            try:
+                webhook = Webhook(
+                    webhook_id=get_field("webhook_id"),
+                    name=get_field("name"),
+                    url=get_field("url"),
+                    events=json.loads(get_field("events", "[]")),
+                    secret=get_field("secret") or None,
+                    is_active=get_field("is_active") == "True",
+                    created_at=datetime.fromisoformat(get_field("created_at")),
+                    updated_at=datetime.fromisoformat(get_field("updated_at")),
+                    created_by=get_field("created_by"),
+                    total_deliveries=int(get_field("total_deliveries", 0)),
+                    successful_deliveries=int(get_field("successful_deliveries", 0)),
+                    failed_deliveries=int(get_field("failed_deliveries", 0)),
+                    last_delivery_at=datetime.fromisoformat(get_field("last_delivery_at")) if get_field("last_delivery_at") else None,
+                    last_success_at=datetime.fromisoformat(get_field("last_success_at")) if get_field("last_success_at") else None,
+                    last_failure_at=datetime.fromisoformat(get_field("last_failure_at")) if get_field("last_failure_at") else None,
+                    retry_count=int(get_field("retry_count", 3)),
+                    timeout_seconds=int(get_field("timeout_seconds", 30))
+                )
                 webhooks.append(webhook)
+            except Exception:
+                continue
 
         return sorted(webhooks, key=lambda w: w.created_at, reverse=True)
 
@@ -215,10 +253,14 @@ class WebhookService:
         # 사용자 인덱스에서 제거
         self.redis.srem(f"user:{user_id}:webhooks", webhook_id)
 
-        # 전송 기록 삭제 (옵션)
-        delivery_keys = self.redis.keys(f"webhook:{webhook_id}:delivery:*")
-        if delivery_keys:
-            self.redis.delete(*delivery_keys)
+        # 전송 기록 삭제 (SCAN 사용으로 블로킹 방지)
+        cursor = 0
+        while True:
+            cursor, delivery_keys = self.redis.scan(cursor, match=f"webhook:{webhook_id}:delivery:*", count=100)
+            if delivery_keys:
+                self.redis.delete(*delivery_keys)
+            if cursor == 0:
+                break
 
         logger.info(f"Webhook deleted: {webhook_id} by user {user_id}")
         return True
@@ -512,14 +554,29 @@ class WebhookService:
         if not webhook or webhook.created_by != user_id:
             return []
 
-        # 전송 기록 키 조회
-        delivery_keys = self.redis.keys(f"webhook:{webhook_id}:delivery:*")
+        # 전송 기록 키 조회 (SCAN 사용으로 블로킹 방지)
+        delivery_keys = []
+        cursor = 0
+        while True:
+            cursor, keys = self.redis.scan(cursor, match=f"webhook:{webhook_id}:delivery:*", count=100)
+            delivery_keys.extend(keys)
+            if cursor == 0:
+                break
+            if len(delivery_keys) >= limit:
+                break
+
+        if not delivery_keys:
+            return []
+
+        # Pipeline을 사용하여 모든 전송 기록을 일괄 조회 (N+1 → 1 쿼리)
+        key_strs = [k.decode() if isinstance(k, bytes) else k for k in delivery_keys[:limit]]
+        pipe = self.redis.pipeline()
+        for key_str in key_strs:
+            pipe.hgetall(key_str)
+        data_list = pipe.execute()
+
         deliveries = []
-
-        for key in delivery_keys[:limit]:
-            key_str = key.decode() if isinstance(key, bytes) else key
-            data = self.redis.hgetall(key_str)
-
+        for data in data_list:
             if not data:
                 continue
 
@@ -529,20 +586,23 @@ class WebhookService:
                     return default
                 return raw.decode() if isinstance(raw, bytes) else raw
 
-            delivery = WebhookDelivery(
-                delivery_id=get_field("delivery_id"),
-                webhook_id=get_field("webhook_id"),
-                event_type=WebhookEvent(get_field("event_type")),
-                payload=json.loads(get_field("payload", "{}")),
-                status=get_field("status"),
-                response_status=int(get_field("response_status")) if get_field("response_status") else None,
-                response_body=get_field("response_body"),
-                error_message=get_field("error_message"),
-                created_at=datetime.fromisoformat(get_field("created_at")),
-                delivered_at=datetime.fromisoformat(get_field("delivered_at")) if get_field("delivered_at") else None,
-                retry_count=int(get_field("retry_count", 0))
-            )
-            deliveries.append(delivery)
+            try:
+                delivery = WebhookDelivery(
+                    delivery_id=get_field("delivery_id"),
+                    webhook_id=get_field("webhook_id"),
+                    event_type=WebhookEvent(get_field("event_type")),
+                    payload=json.loads(get_field("payload", "{}")),
+                    status=get_field("status"),
+                    response_status=int(get_field("response_status")) if get_field("response_status") else None,
+                    response_body=get_field("response_body"),
+                    error_message=get_field("error_message"),
+                    created_at=datetime.fromisoformat(get_field("created_at")),
+                    delivered_at=datetime.fromisoformat(get_field("delivered_at")) if get_field("delivered_at") else None,
+                    retry_count=int(get_field("retry_count", 0))
+                )
+                deliveries.append(delivery)
+            except Exception:
+                continue
 
         # 최신순 정렬
         deliveries.sort(key=lambda d: d.created_at, reverse=True)

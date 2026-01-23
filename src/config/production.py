@@ -55,6 +55,14 @@ class ProductionConfig:
     REQUIRE_HTTPS: bool = os.getenv("REQUIRE_HTTPS", "false").lower() == "true"
     BASE_URL: str = os.getenv("BASE_URL", "http://localhost:8000")
 
+    # Default Admin Credentials (환경변수로 설정 권장)
+    # 프로덕션 환경에서는 반드시 강력한 비밀번호로 변경해야 합니다
+    ADMIN_DEFAULT_EMAIL: str = os.getenv("ADMIN_DEFAULT_EMAIL", "admin@admin.com")
+    ADMIN_DEFAULT_USERNAME: str = os.getenv("ADMIN_DEFAULT_USERNAME", "관리자")
+    ADMIN_DEFAULT_PASSWORD: Optional[str] = os.getenv("ADMIN_DEFAULT_PASSWORD")
+    # 비밀번호가 환경변수로 설정되지 않으면 랜덤 생성
+    ADMIN_PASSWORD_AUTO_GENERATED: bool = False
+
     # Logging
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO" if ENV == "production" else "DEBUG")
     LOG_FORMAT: str = os.getenv(
@@ -75,6 +83,12 @@ class ProductionConfig:
             # SECRET_KEY 필수
             if not cls.SECRET_KEY:
                 errors.append("SECRET_KEY must be set in production")
+
+            # 관리자 기본 비밀번호 경고
+            if not cls.ADMIN_DEFAULT_PASSWORD:
+                logger.warning("⚠️  ADMIN_DEFAULT_PASSWORD not set - will generate random password on first startup")
+            elif cls.ADMIN_DEFAULT_PASSWORD in ["Admin123!@#", "admin", "password", "123456"]:
+                errors.append("ADMIN_DEFAULT_PASSWORD is too weak for production - set a strong password")
 
             # BASE_URL 검증 (production에서는 localhost가 아니어야 함)
             if not cls.BASE_URL or cls.BASE_URL == "http://localhost:8000":

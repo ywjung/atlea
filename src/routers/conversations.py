@@ -11,13 +11,17 @@ Handles conversation session management including:
 All endpoints require authentication.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from typing import Optional
 from loguru import logger
 import html
 
 from ..auth.middleware import get_current_active_user
-from ..utils.error_handling import get_safe_error_message
+from ..utils.error_handling import (
+    raise_server_error,
+    raise_not_found,
+    raise_service_unavailable,
+)
 
 
 def sanitize_title(title: Optional[str]) -> Optional[str]:
@@ -86,7 +90,7 @@ async def create_conversation(
     """
     try:
         if not conversation_manager:
-            raise HTTPException(status_code=500, detail="Conversation manager not initialized")
+            raise_service_unavailable("대화 관리자", "create conversation")
 
         # Sanitize title to prevent XSS
         safe_title = sanitize_title(title)
@@ -99,11 +103,8 @@ async def create_conversation(
             "session_id": session_id,
             "session": session
         }
-    except HTTPException:
-        raise
     except Exception as e:
-        safe_message = get_safe_error_message(e, "create conversation endpoint")
-        raise HTTPException(status_code=500, detail=safe_message)
+        raise_server_error(e, "create conversation")
 
 
 @router.get("/conversations", tags=["Conversations"])
@@ -135,7 +136,7 @@ async def list_conversations(
     """
     try:
         if not conversation_manager:
-            raise HTTPException(status_code=500, detail="Conversation manager not initialized")
+            raise_service_unavailable("대화 관리자", "list conversations")
 
         sessions = conversation_manager.list_sessions(limit=limit, offset=offset)
         total_count = conversation_manager.get_session_count()
@@ -146,11 +147,8 @@ async def list_conversations(
             "limit": limit,
             "offset": offset
         }
-    except HTTPException:
-        raise
     except Exception as e:
-        safe_message = get_safe_error_message(e, "list conversations endpoint")
-        raise HTTPException(status_code=500, detail=safe_message)
+        raise_server_error(e, "list conversations")
 
 
 @router.get("/conversations/{session_id}", tags=["Conversations"])
@@ -184,11 +182,11 @@ async def get_conversation(
     """
     try:
         if not conversation_manager:
-            raise HTTPException(status_code=500, detail="Conversation manager not initialized")
+            raise_service_unavailable("대화 관리자", "get conversation")
 
         session = conversation_manager.get_session(session_id)
         if not session:
-            raise HTTPException(status_code=404, detail=f"Conversation {session_id} not found")
+            raise_not_found("대화", "get conversation")
 
         messages = conversation_manager.get_messages(session_id, limit=limit, offset=offset)
 
@@ -197,11 +195,8 @@ async def get_conversation(
             "messages": messages,
             "message_count": len(messages)
         }
-    except HTTPException:
-        raise
     except Exception as e:
-        safe_message = get_safe_error_message(e, "get conversation endpoint")
-        raise HTTPException(status_code=500, detail=safe_message)
+        raise_server_error(e, "get conversation")
 
 
 @router.delete("/conversations/{session_id}", tags=["Conversations"])
@@ -230,12 +225,12 @@ async def delete_conversation(
     """
     try:
         if not conversation_manager:
-            raise HTTPException(status_code=500, detail="Conversation manager not initialized")
+            raise_service_unavailable("대화 관리자", "delete conversation")
 
         success = conversation_manager.delete_session(session_id)
 
         if not success:
-            raise HTTPException(status_code=404, detail=f"Conversation {session_id} not found")
+            raise_not_found("대화", "delete conversation")
 
         logger.info(f"Deleted conversation {session_id} by user {current_user.get('user_id')}")
 
@@ -243,11 +238,8 @@ async def delete_conversation(
             "status": "success",
             "message": f"Conversation {session_id} deleted successfully"
         }
-    except HTTPException:
-        raise
     except Exception as e:
-        safe_message = get_safe_error_message(e, "delete conversation endpoint")
-        raise HTTPException(status_code=500, detail=safe_message)
+        raise_server_error(e, "delete conversation")
 
 
 @router.delete("/conversations", tags=["Conversations"])
@@ -279,7 +271,7 @@ async def delete_all_conversations(
     """
     try:
         if not conversation_manager:
-            raise HTTPException(status_code=500, detail="Conversation manager not initialized")
+            raise_service_unavailable("대화 관리자", "delete all conversations")
 
         deleted_count = conversation_manager.clear_all_sessions()
 
@@ -290,11 +282,8 @@ async def delete_all_conversations(
             "message": f"Successfully deleted {deleted_count} conversations",
             "deleted_count": deleted_count
         }
-    except HTTPException:
-        raise
     except Exception as e:
-        safe_message = get_safe_error_message(e, "delete all conversations endpoint")
-        raise HTTPException(status_code=500, detail=safe_message)
+        raise_server_error(e, "delete all conversations")
 
 
 @router.post("/conversations/{session_id}/bookmark", tags=["Conversations"])
@@ -325,7 +314,7 @@ async def toggle_bookmark(
     """
     try:
         if not conversation_manager:
-            raise HTTPException(status_code=500, detail="Conversation manager not initialized")
+            raise_service_unavailable("대화 관리자", "toggle bookmark")
 
         is_bookmarked = conversation_manager.toggle_bookmark(session_id)
 
@@ -337,11 +326,8 @@ async def toggle_bookmark(
             "session_id": session_id,
             "is_bookmarked": is_bookmarked
         }
-    except HTTPException:
-        raise
     except Exception as e:
-        safe_message = get_safe_error_message(e, "toggle bookmark endpoint")
-        raise HTTPException(status_code=500, detail=safe_message)
+        raise_server_error(e, "toggle bookmark")
 
 
 @router.get("/conversations/bookmarked/list", tags=["Conversations"])
@@ -374,7 +360,7 @@ async def get_bookmarked_conversations(
     """
     try:
         if not conversation_manager:
-            raise HTTPException(status_code=500, detail="Conversation manager not initialized")
+            raise_service_unavailable("대화 관리자", "get bookmarked conversations")
 
         sessions = conversation_manager.list_bookmarked_sessions(limit, offset)
         total = conversation_manager.get_bookmarked_count()
@@ -386,8 +372,5 @@ async def get_bookmarked_conversations(
             "limit": limit,
             "offset": offset
         }
-    except HTTPException:
-        raise
     except Exception as e:
-        safe_message = get_safe_error_message(e, "get bookmarked conversations endpoint")
-        raise HTTPException(status_code=500, detail=safe_message)
+        raise_server_error(e, "get bookmarked conversations")

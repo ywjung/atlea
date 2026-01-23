@@ -815,12 +815,21 @@ async def query_stream(
                     unique_source_names.append(name)
 
             # Create result dict matching basic RAG format
+            # 원본 result에서 RAG 품질 정보 추출 (덮어쓰기 전에)
+            rewritten_query = result.get("rewritten_query")
+            query_rewrite_enabled = result.get("query_rewrite_enabled", False)
+            reranking_enabled = result.get("reranking_enabled", False)
+
             result = {
                 "answer": answer_text,
                 "context": context_docs,
                 "sources": unique_source_names,  # String array for frontend
                 "search_summary": result.get("search_summary", {}),
-                "generator": None  # No streaming generator for Hybrid RAG
+                "generator": None,  # No streaming generator for Hybrid RAG
+                # RAG 품질 개선 정보 보존
+                "rewritten_query": rewritten_query,
+                "query_rewrite_enabled": query_rewrite_enabled,
+                "reranking_enabled": reranking_enabled
             }
         else:
             # Use basic RAG (local documents only) with streaming

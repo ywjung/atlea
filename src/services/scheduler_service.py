@@ -15,6 +15,8 @@ from datetime import datetime, timedelta
 from typing import Optional
 import logging
 
+from ..security_validators import SubprocessValidator
+
 logger = logging.getLogger(__name__)
 
 # Global dependencies (injected from web_server.py)
@@ -158,8 +160,15 @@ async def backup_scheduler():
                                 timeout=5
                             )
                             if result.returncode == 0 and result.stdout.strip():
-                                docker_container = result.stdout.strip()
-                                logger.debug(f"📦 Detected Redis in Docker: {docker_container}")
+                                # 컨테이너 이름 검증 및 정제
+                                container_name = result.stdout.strip()
+                                sanitized_name = SubprocessValidator.sanitize_for_shell(container_name)
+                                is_valid, error = SubprocessValidator.validate_docker_container_name(sanitized_name)
+                                if is_valid:
+                                    docker_container = sanitized_name
+                                    logger.debug(f"📦 Detected Redis in Docker: {docker_container}")
+                                else:
+                                    logger.error(f"❌ Invalid Docker container name: {error}")
                         except Exception as e:
                             logger.debug(f"Docker check skipped: {e}")
 
@@ -167,25 +176,31 @@ async def backup_scheduler():
                         backup_success = False
                         if docker_container:
                             # Copy from Docker container
-                            source_path = f"{redis_dir}/{redis_dbfilename}"
-                            docker_source = f"{docker_container}:{source_path}"
+                            # 경로 검증
+                            is_dir_valid, dir_error = SubprocessValidator.validate_path_for_subprocess(redis_dir)
+                            is_file_valid, file_error = SubprocessValidator.validate_path_for_subprocess(redis_dbfilename)
+                            if not is_dir_valid or not is_file_valid:
+                                logger.error(f"❌ Invalid Redis path: {dir_error or file_error}")
+                            else:
+                                source_path = f"{redis_dir}/{redis_dbfilename}"
+                                docker_source = f"{docker_container}:{source_path}"
 
-                            try:
-                                result = subprocess.run(
-                                    ["docker", "cp", docker_source, str(backup_path)],
-                                    capture_output=True,
-                                    text=True,
-                                    timeout=30
-                                )
+                                try:
+                                    result = subprocess.run(
+                                        ["docker", "cp", docker_source, str(backup_path)],
+                                        capture_output=True,
+                                        text=True,
+                                        timeout=30
+                                    )
 
-                                if result.returncode == 0:
-                                    logger.success(f"✅ Scheduled backup completed: {filename} (from Docker: {docker_source})")
-                                    backup_success = True
-                                else:
-                                    logger.error(f"❌ Docker copy failed: {result.stderr}")
+                                    if result.returncode == 0:
+                                        logger.success(f"✅ Scheduled backup completed: {filename} (from Docker: {docker_source})")
+                                        backup_success = True
+                                    else:
+                                        logger.error(f"❌ Docker copy failed: {result.stderr}")
 
-                            except Exception as e:
-                                logger.error(f"❌ Docker copy error: {e}")
+                                except Exception as e:
+                                    logger.error(f"❌ Docker copy error: {e}")
                         else:
                             # Copy from local filesystem
                             source_dump = Path(redis_dir) / redis_dbfilename

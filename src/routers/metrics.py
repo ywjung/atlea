@@ -10,11 +10,13 @@ Handles performance metrics and monitoring including:
 Admin privileges required for all endpoints.
 """
 
-from fastapi import APIRouter, HTTPException, Request
-from typing import Optional
+from fastapi import APIRouter, Request
 from loguru import logger
 
-from ..utils.error_handling import get_safe_error_message
+from ..utils.error_handling import (
+    raise_server_error,
+    raise_service_unavailable,
+)
 
 # Create router with prefix and tags
 router = APIRouter(prefix="/api/admin", tags=["Admin", "Metrics"])
@@ -54,7 +56,7 @@ async def get_metrics_summary(request: Request):
         from ..auth.utils import require_admin
 
         if not cache_manager:
-            raise HTTPException(status_code=500, detail="Cache manager not initialized")
+            raise_service_unavailable("캐시 관리자", "get metrics summary")
 
         redis_client = cache_manager.redis
         require_admin(request, redis_client)
@@ -77,11 +79,8 @@ async def get_metrics_summary(request: Request):
             "hourly": hourly_stats
         }
 
-    except HTTPException:
-        raise
     except Exception as e:
-        logger.error(f"Failed to get metrics summary: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve metrics summary")
+        raise_server_error(e, "get metrics summary", "메트릭 요약 조회에 실패했습니다")
 
 
 @router.get("/metrics/recent", tags=["Metrics"])
@@ -100,7 +99,7 @@ async def get_recent_searches(request: Request, limit: int = 100):
         from ..auth.utils import require_admin
 
         if not cache_manager:
-            raise HTTPException(status_code=500, detail="Cache manager not initialized")
+            raise_service_unavailable("캐시 관리자", "get recent searches")
 
         redis_client = cache_manager.redis
         require_admin(request, redis_client)
@@ -121,11 +120,8 @@ async def get_recent_searches(request: Request, limit: int = 100):
             "limit": limit
         }
 
-    except HTTPException:
-        raise
     except Exception as e:
-        logger.error(f"Failed to get recent searches: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve recent searches")
+        raise_server_error(e, "get recent searches", "최근 검색 기록 조회에 실패했습니다")
 
 
 @router.get("/metrics/source-performance", tags=["Metrics"])
@@ -141,7 +137,7 @@ async def get_source_performance(request: Request):
         from ..auth.utils import require_admin
 
         if not cache_manager:
-            raise HTTPException(status_code=500, detail="Cache manager not initialized")
+            raise_service_unavailable("캐시 관리자", "get source performance")
 
         redis_client = cache_manager.redis
         require_admin(request, redis_client)
@@ -159,11 +155,8 @@ async def get_source_performance(request: Request):
             "docs": source_performance.get("docs", {})
         }
 
-    except HTTPException:
-        raise
     except Exception as e:
-        logger.error(f"Failed to get source performance: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve source performance")
+        raise_server_error(e, "get source performance", "소스별 성능 조회에 실패했습니다")
 
 
 @router.delete("/metrics/cleanup", tags=["Metrics"])
@@ -182,7 +175,7 @@ async def cleanup_old_metrics(request: Request, days: int = 30):
         from ..auth.utils import require_admin
 
         if not cache_manager:
-            raise HTTPException(status_code=500, detail="Cache manager not initialized")
+            raise_service_unavailable("캐시 관리자", "cleanup old metrics")
 
         redis_client = cache_manager.redis
         require_admin(request, redis_client)
@@ -202,8 +195,5 @@ async def cleanup_old_metrics(request: Request, days: int = 30):
             "message": f"{deleted_count}개의 오래된 메트릭이 삭제되었습니다"
         }
 
-    except HTTPException:
-        raise
     except Exception as e:
-        logger.error(f"Failed to cleanup old metrics: {e}")
-        raise HTTPException(status_code=500, detail="Failed to cleanup old metrics")
+        raise_server_error(e, "cleanup old metrics", "오래된 메트릭 삭제에 실패했습니다")

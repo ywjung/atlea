@@ -22,6 +22,8 @@ import json
 from loguru import logger
 
 from ..utils.error_handling import get_safe_error_message
+from ..security_validators import SubprocessValidator, InputValidator
+from ..constants import Timeouts
 
 router = APIRouter(prefix="/api/redis/backup", tags=["Admin", "Redis Backup"])
 
@@ -64,10 +66,44 @@ BACKUP_DIR.mkdir(exist_ok=True)
 
 
 def get_backup_filepath(filename: str) -> Path:
-    """Get safe backup file path"""
+    """Get safe backup file path with security validation"""
     # Prevent directory traversal
     safe_filename = Path(filename).name
+
+    # 추가 보안 검증
+    is_valid, error = InputValidator.validate_filename(safe_filename)
+    if not is_valid:
+        raise ValueError(f"Invalid filename: {error}")
+
     return BACKUP_DIR / safe_filename
+
+
+def validate_docker_container(container_name: str) -> str:
+    """Docker 컨테이너 이름 검증 및 정제"""
+    if not container_name:
+        raise ValueError("Container name is empty")
+
+    # 정제
+    sanitized = SubprocessValidator.sanitize_for_shell(container_name.strip())
+
+    # 검증
+    is_valid, error = SubprocessValidator.validate_docker_container_name(sanitized)
+    if not is_valid:
+        raise ValueError(f"Invalid container name: {error}")
+
+    return sanitized
+
+
+def validate_path_for_docker(path: str) -> str:
+    """Docker 명령어에서 사용할 경로 검증"""
+    if not path:
+        raise ValueError("Path is empty")
+
+    is_valid, error = SubprocessValidator.validate_path_for_subprocess(path)
+    if not is_valid:
+        raise ValueError(f"Invalid path: {error}")
+
+    return path
 
 
 def get_redis_backup_info():
@@ -154,18 +190,38 @@ async def create_redis_backup(
                 ["docker", "ps", "--filter", "name=chatbot_redis", "--format", "{{.Names}}"],
                 capture_output=True,
                 text=True,
-                timeout=5
+                timeout=Timeouts.DOCKER_CHECK
             )
             if result.returncode == 0 and result.stdout.strip():
-                docker_container = result.stdout.strip()
-                logger.info(f"📦 Detected Redis running in Docker container: {docker_container}")
+                # 컨테이너 이름 검증 및 정제
+                try:
+                    docker_container = validate_docker_container(result.stdout.strip())
+                    logger.info(f"📦 Detected Redis running in Docker container: {docker_container}")
+                except ValueError as ve:
+                    logger.error(f"❌ Invalid Docker container name: {ve}")
+                    raise HTTPException(
+                        status_code=500,
+                        detail="Docker 컨테이너 이름이 유효하지 않습니다"
+                    )
+        except HTTPException:
+            raise
         except Exception as e:
             logger.warning(f"Could not check for Docker container: {e}")
 
         # Copy dump file from Docker or local filesystem
         if docker_container:
             # Copy from Docker container
-            source_path = f"{redis_dir}/{redis_dbfilename}"
+            # 경로 검증
+            try:
+                validated_redis_dir = validate_path_for_docker(redis_dir)
+                validated_dbfilename = validate_path_for_docker(redis_dbfilename)
+            except ValueError as ve:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Redis 경로가 유효하지 않습니다: {ve}"
+                )
+
+            source_path = f"{validated_redis_dir}/{validated_dbfilename}"
             docker_source = f"{docker_container}:{source_path}"
 
             try:
@@ -174,7 +230,7 @@ async def create_redis_backup(
                     ["docker", "cp", docker_source, str(backup_path)],
                     capture_output=True,
                     text=True,
-                    timeout=30
+                    timeout=Timeouts.DOCKER_COPY
                 )
 
                 if result.returncode != 0:
@@ -315,13 +371,23 @@ async def restore_redis_backup(
                 ["docker", "ps", "--filter", "name=chatbot_redis", "--format", "{{.Names}}"],
                 capture_output=True,
                 text=True,
-                timeout=5
+                timeout=Timeouts.DOCKER_CHECK
             )
             if result.returncode == 0 and result.stdout.strip():
-                docker_container = result.stdout.strip()
-                logger.info(f"🔍 Step 2/7: Docker container detected: {docker_container}")
+                # 컨테이너 이름 검증 및 정제
+                try:
+                    docker_container = validate_docker_container(result.stdout.strip())
+                    logger.info(f"🔍 Step 2/7: Docker container detected: {docker_container}")
+                except ValueError as ve:
+                    logger.error(f"❌ Invalid Docker container name: {ve}")
+                    raise HTTPException(
+                        status_code=500,
+                        detail="Docker 컨테이너 이름이 유효하지 않습니다"
+                    )
             else:
                 logger.info(f"🔍 Step 2/7: Local Redis installation detected")
+        except HTTPException:
+            raise
         except Exception as e:
             raise HTTPException(
                 status_code=500,
@@ -344,6 +410,17 @@ async def restore_redis_backup(
 
         if docker_container:
             # Docker environment - MUST successfully backup current state
+
+            # 경로 검증
+            try:
+                validated_redis_dir = validate_path_for_docker(redis_dir)
+                validated_dbfilename = validate_path_for_docker(redis_dbfilename)
+            except ValueError as ve:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Redis 경로가 유효하지 않습니다: {ve}"
+                )
+
             try:
                 # Force Redis to save current state
                 redis_client.save()
@@ -355,13 +432,13 @@ async def restore_redis_backup(
                 )
 
             # Copy current dump from container - MUST succeed
-            docker_source = f"{docker_container}:{redis_dir}/{redis_dbfilename}"
+            docker_source = f"{docker_container}:{validated_redis_dir}/{validated_dbfilename}"
             try:
                 result = subprocess.run(
                     ["docker", "cp", docker_source, str(current_backup)],
                     capture_output=True,
                     text=True,
-                    timeout=30
+                    timeout=Timeouts.DOCKER_COPY
                 )
 
                 if result.returncode != 0:
@@ -394,13 +471,13 @@ async def restore_redis_backup(
                 )
 
             # STEP 5: Copy backup file into Docker container
-            docker_target = f"{docker_container}:{redis_dir}/{redis_dbfilename}"
+            docker_target = f"{docker_container}:{validated_redis_dir}/{validated_dbfilename}"
             try:
                 result = subprocess.run(
                     ["docker", "cp", str(backup_path), docker_target],
                     capture_output=True,
                     text=True,
-                    timeout=30
+                    timeout=Timeouts.DOCKER_COPY
                 )
 
                 if result.returncode != 0:
@@ -428,7 +505,7 @@ async def restore_redis_backup(
                     ["docker", "restart", docker_container],
                     capture_output=True,
                     text=True,
-                    timeout=30
+                    timeout=Timeouts.DOCKER_COPY
                 )
 
                 if result.returncode != 0:
@@ -543,12 +620,13 @@ async def restore_redis_backup(
             logger.error("🚨 Restore failed - attempting automatic rollback...")
             try:
                 # Rollback: restore from pre-restore backup
-                docker_target = f"{docker_container}:{redis_dir}/{redis_dbfilename}"
+                # 경로는 이미 위에서 검증됨 (validated_redis_dir, validated_dbfilename)
+                docker_target = f"{docker_container}:{validated_redis_dir}/{validated_dbfilename}"
                 result = subprocess.run(
                     ["docker", "cp", str(current_backup), docker_target],
                     capture_output=True,
                     text=True,
-                    timeout=30
+                    timeout=Timeouts.DOCKER_COPY
                 )
 
                 if result.returncode == 0:
@@ -557,7 +635,7 @@ async def restore_redis_backup(
                         ["docker", "restart", docker_container],
                         capture_output=True,
                         text=True,
-                        timeout=30
+                        timeout=Timeouts.DOCKER_COPY
                     )
                     await asyncio.sleep(3)
 

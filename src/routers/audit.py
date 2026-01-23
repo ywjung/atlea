@@ -10,12 +10,16 @@ Handles audit logging and compliance including:
 Admin privileges required for all endpoints.
 """
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Request
 from typing import Optional
 from loguru import logger
 
 from ..audit import AuditAction
-from ..utils.error_handling import get_safe_error_message
+from ..utils.error_handling import (
+    raise_server_error,
+    raise_bad_request,
+    raise_service_unavailable,
+)
 
 # Create router with prefix and tags
 router = APIRouter(prefix="/api/admin", tags=["Admin", "Audit"])
@@ -76,14 +80,14 @@ async def get_audit_logs(
         from ..auth.utils import require_admin
 
         if not cache_manager:
-            raise HTTPException(status_code=500, detail="Cache manager not initialized")
+            raise_service_unavailable("캐시 관리자", "get audit logs")
 
         redis_client = cache_manager.redis
         require_admin(request, redis_client)
 
         # Audit logger 가져오기
         if not audit_logger:
-            raise HTTPException(status_code=503, detail="Audit logger not initialized")
+            raise_service_unavailable("감사 로거", "get audit logs")
 
         # 작업 유형 검증
         action_enum = None
@@ -91,7 +95,7 @@ async def get_audit_logs(
             try:
                 action_enum = AuditAction(action)
             except ValueError:
-                raise HTTPException(status_code=400, detail=f"Invalid action: {action}")
+                raise_bad_request(f"유효하지 않은 작업 유형: {action}", "get audit logs")
 
         # 로그 조회 (username 인덱스 사용으로 효율적 필터링)
         logs = audit_logger.get_logs(
@@ -118,11 +122,8 @@ async def get_audit_logs(
             }
         }
 
-    except HTTPException:
-        raise
     except Exception as e:
-        logger.error(f"Failed to get audit logs: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve audit logs")
+        raise_server_error(e, "get audit logs", "감사 로그 조회에 실패했습니다")
 
 
 @router.get("/audit/stats", tags=["Audit"])
@@ -146,14 +147,14 @@ async def get_audit_stats(
         from ..auth.utils import require_admin
 
         if not cache_manager:
-            raise HTTPException(status_code=500, detail="Cache manager not initialized")
+            raise_service_unavailable("캐시 관리자", "get audit stats")
 
         redis_client = cache_manager.redis
         require_admin(request, redis_client)
 
         # Audit logger 가져오기
         if not audit_logger:
-            raise HTTPException(status_code=503, detail="Audit logger not initialized")
+            raise_service_unavailable("감사 로거", "get audit stats")
 
         # 통계 조회
         stats = audit_logger.get_stats(
@@ -163,11 +164,8 @@ async def get_audit_stats(
 
         return stats
 
-    except HTTPException:
-        raise
     except Exception as e:
-        logger.error(f"Failed to get audit stats: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve audit statistics")
+        raise_server_error(e, "get audit stats", "감사 로그 통계 조회에 실패했습니다")
 
 
 @router.get("/audit/user/{user_id}", tags=["Audit"])
@@ -193,14 +191,14 @@ async def get_user_audit_logs(
         from ..auth.utils import require_admin
 
         if not cache_manager:
-            raise HTTPException(status_code=500, detail="Cache manager not initialized")
+            raise_service_unavailable("캐시 관리자", "get user audit logs")
 
         redis_client = cache_manager.redis
         require_admin(request, redis_client)
 
         # Audit logger 가져오기
         if not audit_logger:
-            raise HTTPException(status_code=503, detail="Audit logger not initialized")
+            raise_service_unavailable("감사 로거", "get user audit logs")
 
         # 사용자 활동 조회
         logs = audit_logger.get_user_activity(
@@ -214,11 +212,8 @@ async def get_user_audit_logs(
             "count": len(logs)
         }
 
-    except HTTPException:
-        raise
     except Exception as e:
-        logger.error(f"Failed to get user audit logs: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve user audit logs")
+        raise_server_error(e, "get user audit logs", "사용자 감사 로그 조회에 실패했습니다")
 
 
 @router.get("/audit/actions", tags=["Audit"])
@@ -234,7 +229,7 @@ async def get_audit_actions(request: Request):
         from ..auth.utils import require_admin
 
         if not cache_manager:
-            raise HTTPException(status_code=500, detail="Cache manager not initialized")
+            raise_service_unavailable("캐시 관리자", "get audit actions")
 
         redis_client = cache_manager.redis
         require_admin(request, redis_client)
@@ -247,8 +242,5 @@ async def get_audit_actions(request: Request):
 
         return {"actions": actions}
 
-    except HTTPException:
-        raise
     except Exception as e:
-        logger.error(f"Failed to get audit actions: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve audit actions")
+        raise_server_error(e, "get audit actions", "작업 유형 조회에 실패했습니다")

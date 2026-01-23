@@ -559,9 +559,16 @@ async def get_hybrid_rag_orchestrator():
 
 
 async def create_default_admin(redis_client):
-    """Create default admin user if no admin exists"""
+    """Create default admin user if no admin exists
+
+    비밀번호 설정 우선순위:
+    1. ADMIN_DEFAULT_PASSWORD 환경변수
+    2. 자동 생성된 랜덤 비밀번호 (보안상 권장)
+    """
     from .auth.service import AuthService
     from .auth.models import UserCreate
+    import secrets
+    import string
 
     try:
         auth_service = AuthService(redis_client)
@@ -571,10 +578,18 @@ async def create_default_admin(redis_client):
         admin_exists = any(u.get('role') == 'admin' for u in users_result['users'])
 
         if not admin_exists:
-            # Default admin credentials
-            default_email = "admin@admin.com"
-            default_password = "Admin123!@#"  # Strong default password
-            default_username = "관리자"
+            # 환경변수에서 자격 증명 로드
+            default_email = config.ADMIN_DEFAULT_EMAIL
+            default_username = config.ADMIN_DEFAULT_USERNAME
+            default_password = config.ADMIN_DEFAULT_PASSWORD
+
+            # 비밀번호가 설정되지 않았으면 랜덤 생성
+            password_auto_generated = False
+            if not default_password:
+                # 강력한 랜덤 비밀번호 생성 (16자: 대소문자, 숫자, 특수문자)
+                alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
+                default_password = ''.join(secrets.choice(alphabet) for _ in range(16))
+                password_auto_generated = True
 
             # Check if user already exists
             existing_user_id = redis_client.get(f"user:email:{default_email}")
@@ -597,9 +612,29 @@ async def create_default_admin(redis_client):
                 redis_client.hset(f"user:{user.user_id}", "role", "admin")
 
                 logger.success(f"✅ Created default admin user: {default_email}")
-                logger.info(f"   Username: {default_username}")
-                logger.info(f"   Password: {default_password}")
-                logger.warning("⚠️  Please change the default admin password after first login!")
+
+                # 보안: 비밀번호는 로그에 출력하지 않음
+                if password_auto_generated:
+                    # 자동 생성된 비밀번호만 파일에 안전하게 저장
+                    try:
+                        password_file = ".admin_initial_password"
+                        with open(password_file, "w") as f:
+                            f.write(f"Initial Admin Password (DELETE THIS FILE AFTER READING)\n")
+                            f.write(f"Email: {default_email}\n")
+                            f.write(f"Password: {default_password}\n")
+                            f.write(f"\n⚠️  Change this password immediately after first login!\n")
+                        # 파일 권한 설정 (소유자만 읽기 가능)
+                        import os
+                        os.chmod(password_file, 0o600)
+                        logger.warning(f"🔐 Auto-generated admin password saved to: {password_file}")
+                        logger.warning("⚠️  Please read the file, login, change password, then DELETE the file!")
+                    except Exception as file_error:
+                        logger.error(f"❌ Could not save password file: {file_error}")
+                        # 파일 저장 실패 시에만 로그에 출력 (마지막 수단)
+                        logger.warning(f"🔐 Auto-generated password (SAVE THIS): {default_password}")
+                else:
+                    logger.info("ℹ️  Admin password set from ADMIN_DEFAULT_PASSWORD environment variable")
+                    logger.warning("⚠️  Please change the default admin password after first login!")
         else:
             logger.info("ℹ️  Admin user already exists, skipping default admin creation")
 
@@ -1005,11 +1040,15 @@ async def startup_event():
                         except Exception:
                             pass
 
-                        # Get chunk count from Redis if available
+                        # Get chunk count from Redis if available (SCAN 사용으로 블로킹 방지)
                         chunk_count = 0
                         try:
-                            chunk_keys = vector_db.client.keys(f"chunk:{filename}:*")
-                            chunk_count = len(chunk_keys) if chunk_keys else 0
+                            cursor = 0
+                            while True:
+                                cursor, keys = vector_db.client.scan(cursor, match=f"chunk:{filename}:*", count=100)
+                                chunk_count += len(keys)
+                                if cursor == 0:
+                                    break
                         except Exception:
                             pass
 
@@ -1369,7 +1408,7 @@ async def get_system_metrics(
 
     except Exception as e:
         logger.error(f"❌ Failed to get system metrics: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=get_safe_error_message(e, "system metrics"))
 
 
 @app.get("/api/models", tags=["Settings"])
@@ -1438,7 +1477,7 @@ async def list_available_models(
 
     except Exception as e:
         logger.error(f"Failed to list models: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to list models: {str(e)}")
+        raise HTTPException(status_code=500, detail=get_safe_error_message(e, "list models"))
 
 
 @app.post("/api/change-llm", tags=["Settings"])

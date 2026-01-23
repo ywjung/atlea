@@ -15,6 +15,7 @@ from src.redis_helpers import (
     decode_bytes as _decode_bytes,
     decode_redis_hash as _decode_redis_hash,
 )
+from src.constants import CacheTTL
 
 # Module load timestamp for debugging
 logger.warning(f"🔄 cache_manager.py loaded at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - Version: FIXED_OLLAMA_ENCODE")
@@ -32,15 +33,15 @@ class CacheManager:
         redis_client,
         embedding_model,
         similarity_threshold: float = 0.90,  # Lowered from 0.95 to 0.90 for better hit rate
-        cache_ttl: int = 3600,  # 1 hour in seconds (default for dynamic data)
+        cache_ttl: int = CacheTTL.LONG,  # 1 hour in seconds (default for dynamic data)
         memory_cache_size: int = 50  # Number of entries to keep in memory
     ):
         # TTL configuration by content type (in seconds)
         self.ttl_config = {
-            'static_docs': 24 * 3600,  # 24 hours for regulations, policies
-            'dynamic_data': 3600,       # 1 hour for frequently changing content
-            'realtime': 300,            # 5 minutes for time-sensitive data
-            'default': 3600             # Default: 1 hour
+            'static_docs': CacheTTL.VERY_LONG,  # 24 hours for regulations, policies
+            'dynamic_data': CacheTTL.LONG,       # 1 hour for frequently changing content
+            'realtime': CacheTTL.STANDARD,       # 5 minutes for time-sensitive data
+            'default': CacheTTL.LONG             # Default: 1 hour
         }
         """
         Initialize cache manager.

@@ -4,7 +4,7 @@ Security validation utilities for preventing SSRF, XSS, and other attacks
 import re
 import ipaddress
 from urllib.parse import urlparse
-from typing import Optional
+from typing import Optional, Tuple, List, Pattern, Set, Final
 
 
 class SSRFValidator:
@@ -14,7 +14,7 @@ class SSRFValidator:
     """
 
     # Private IP ranges (RFC 1918)
-    PRIVATE_IP_RANGES = [
+    PRIVATE_IP_RANGES: Final[List[ipaddress.IPv4Network | ipaddress.IPv6Network]] = [
         ipaddress.ip_network('10.0.0.0/8'),
         ipaddress.ip_network('172.16.0.0/12'),
         ipaddress.ip_network('192.168.0.0/16'),
@@ -26,13 +26,13 @@ class SSRFValidator:
     ]
 
     # Dangerous schemes
-    BLOCKED_SCHEMES = [
+    BLOCKED_SCHEMES: Final[List[str]] = [
         'file', 'gopher', 'dict', 'ftp', 'jar',
         'data', 'tftp', 'ldap', 'telnet'
     ]
 
     # Blocked hostnames
-    BLOCKED_HOSTS = [
+    BLOCKED_HOSTS: Final[List[str]] = [
         'localhost',
         'metadata.google.internal',  # GCP metadata
         'metadata',
@@ -48,7 +48,7 @@ class SSRFValidator:
             return False
 
     @classmethod
-    def validate_url(cls, url: str, allow_private: bool = False) -> tuple[bool, Optional[str]]:
+    def validate_url(cls, url: str, allow_private: bool = False) -> Tuple[bool, Optional[str]]:
         """
         Validate URL for SSRF protection
 
@@ -119,7 +119,7 @@ class InputValidator:
     """
 
     @staticmethod
-    def validate_filename(filename: str) -> tuple[bool, Optional[str]]:
+    def validate_filename(filename: str) -> Tuple[bool, Optional[str]]:
         """
         Validate filename to prevent path traversal
 
@@ -164,3 +164,115 @@ class InputValidator:
         pattern = pattern.replace('%', '\\%')
         pattern = pattern.replace('_', '\\_')
         return pattern
+
+
+class SubprocessValidator:
+    """
+    Subprocess command validation utilities
+    Prevents command injection and validates inputs for subprocess calls
+    """
+
+    # Docker 컨테이너 이름 패턴 (알파벳, 숫자, 밑줄, 하이픈, 점만 허용)
+    DOCKER_CONTAINER_NAME_PATTERN: Final[Pattern[str]] = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_.-]*$')
+
+    # 허용된 Docker 명령어 (화이트리스트)
+    ALLOWED_DOCKER_COMMANDS: Final[Set[str]] = {
+        'ps', 'cp', 'exec', 'inspect'
+    }
+
+    # 위험한 쉘 문자
+    DANGEROUS_SHELL_CHARS: Final[List[str]] = ['|', '&', ';', '$', '`', '(', ')', '{', '}', '<', '>', '\n', '\r', '\x00']
+
+    @classmethod
+    def validate_docker_container_name(cls, name: str) -> Tuple[bool, Optional[str]]:
+        """
+        Docker 컨테이너 이름 검증
+
+        Args:
+            name: 컨테이너 이름
+
+        Returns:
+            (is_valid, error_message) tuple
+        """
+        if not name:
+            return False, "컨테이너 이름이 비어있습니다"
+
+        if len(name) > 128:
+            return False, "컨테이너 이름이 너무 깁니다 (최대 128자)"
+
+        if not cls.DOCKER_CONTAINER_NAME_PATTERN.match(name):
+            return False, "컨테이너 이름에 허용되지 않는 문자가 포함되어 있습니다"
+
+        # 위험한 쉘 문자 검사
+        for char in cls.DANGEROUS_SHELL_CHARS:
+            if char in name:
+                return False, f"컨테이너 이름에 위험한 문자가 포함되어 있습니다: {repr(char)}"
+
+        return True, None
+
+    @classmethod
+    def validate_path_for_subprocess(cls, path: str) -> Tuple[bool, Optional[str]]:
+        """
+        subprocess에서 사용할 경로 검증
+
+        Args:
+            path: 파일/디렉토리 경로
+
+        Returns:
+            (is_valid, error_message) tuple
+        """
+        if not path:
+            return False, "경로가 비어있습니다"
+
+        if len(path) > 4096:
+            return False, "경로가 너무 깁니다"
+
+        # 위험한 쉘 문자 검사
+        for char in cls.DANGEROUS_SHELL_CHARS:
+            if char in path:
+                return False, f"경로에 위험한 문자가 포함되어 있습니다: {repr(char)}"
+
+        # 경로 탐색 패턴 검사 (상대 경로로 상위 디렉토리 접근 시도)
+        if '..' in path.split('/'):
+            return False, "상위 디렉토리 접근은 허용되지 않습니다"
+
+        return True, None
+
+    @classmethod
+    def validate_docker_command(cls, command: str) -> Tuple[bool, Optional[str]]:
+        """
+        Docker 명령어 검증 (화이트리스트 기반)
+
+        Args:
+            command: Docker 하위 명령어 (ps, cp, exec 등)
+
+        Returns:
+            (is_valid, error_message) tuple
+        """
+        if not command:
+            return False, "명령어가 비어있습니다"
+
+        if command not in cls.ALLOWED_DOCKER_COMMANDS:
+            return False, f"허용되지 않는 Docker 명령어입니다: {command}"
+
+        return True, None
+
+    @classmethod
+    def sanitize_for_shell(cls, value: str) -> str:
+        """
+        쉘 명령어에서 사용할 값 정제 (위험한 문자 제거)
+
+        Args:
+            value: 정제할 값
+
+        Returns:
+            정제된 값
+        """
+        if not value:
+            return ""
+
+        # 위험한 문자 제거
+        for char in cls.DANGEROUS_SHELL_CHARS:
+            value = value.replace(char, '')
+
+        return value.strip()
