@@ -4523,6 +4523,9 @@ async function openSettingsPanel() {
         const data = await response.json();
         if (data.llm_model) currentSettings.llm_model = data.llm_model;
         if (data.embedding_model) currentSettings.embedding_model = data.embedding_model;
+
+        // Update max tokens slider based on model
+        updateMaxTokensSlider(data.llm_model);
     } catch (error) {
         logger.error('Failed to fetch latest model info:', error);
     }
@@ -4628,6 +4631,77 @@ if (temperatureSlider && temperatureValue) {
         localStorage.setItem('chatSettings', JSON.stringify(currentSettings));
         logger.info('✅ Temperature 저장됨:', e.target.value);
     });
+}
+
+// Model-specific max token limits
+const MODEL_MAX_TOKENS = {
+    // Qwen models
+    'qwen': 32768,
+    'qwen2': 32768,
+    'qwen2.5': 32768,
+    'qwen3': 32768,
+    // Llama models
+    'llama': 8192,
+    'llama2': 4096,
+    'llama3': 8192,
+    'llama3.1': 131072,
+    'llama3.2': 131072,
+    // Gemma models
+    'gemma': 8192,
+    'gemma2': 8192,
+    // Mistral models
+    'mistral': 32768,
+    'mixtral': 32768,
+    // Claude models
+    'claude': 8192,
+    // GPT models
+    'gpt-4': 8192,
+    'gpt-3.5': 4096,
+    // Gemini models
+    'gemini': 8192,
+    // Default
+    'default': 8192
+};
+
+/**
+ * Update max tokens slider based on current LLM model
+ * @param {string} modelName - Current LLM model name
+ */
+function updateMaxTokensSlider(modelName) {
+    if (!maxTokensSlider || !maxTokensValue) return;
+
+    const modelLower = (modelName || '').toLowerCase();
+    let maxTokens = MODEL_MAX_TOKENS['default'];
+
+    // Find matching model max tokens
+    for (const [key, value] of Object.entries(MODEL_MAX_TOKENS)) {
+        if (modelLower.includes(key)) {
+            maxTokens = value;
+            break;
+        }
+    }
+
+    // Cap at reasonable UI limit (32768 for usability)
+    const uiMaxTokens = Math.min(maxTokens, 32768);
+
+    // Update slider attributes
+    maxTokensSlider.max = uiMaxTokens;
+
+    // Adjust current value if exceeds new max
+    if (parseInt(maxTokensSlider.value) > uiMaxTokens) {
+        maxTokensSlider.value = uiMaxTokens;
+        maxTokensValue.textContent = uiMaxTokens;
+        currentSettings.max_tokens = uiMaxTokens;
+    }
+
+    // Update slider step for larger ranges
+    if (uiMaxTokens > 8192) {
+        maxTokensSlider.step = 512;
+    } else {
+        maxTokensSlider.step = 256;
+    }
+
+    logger.info(`✅ Max tokens slider updated for ${modelName}: max=${uiMaxTokens}`);
 }
 
 if (maxTokensSlider && maxTokensValue) {
