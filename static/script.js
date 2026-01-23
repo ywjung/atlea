@@ -4494,11 +4494,10 @@ async function loadAvailableModels() {
     // Load reranker model from RAG quality settings
     if (rerankerModelDisplay) {
         try {
-            const response = await fetch('/api/hybrid-rag/status');
-            const data = await response.json();
+            const data = await Auth.apiCall('/api/hybrid-rag/status');
 
             if (data.quality_features && data.quality_features.reranking_enabled) {
-                rerankerModelDisplay.textContent = currentSettings.reranker_model || 'dengcao/Qwen3-Reranker-8B:Q4_K_M';
+                rerankerModelDisplay.textContent = data.quality_features.reranker_model || 'dengcao/Qwen3-Reranker-8B:Q4_K_M';
                 rerankerModelDisplay.style.color = '#166534';
             } else {
                 rerankerModelDisplay.textContent = '비활성화됨';
@@ -4530,8 +4529,7 @@ async function openSettingsPanel() {
 
     // Fetch reranker model from RAG quality settings
     try {
-        const ragResponse = await fetch('/api/hybrid-rag/status');
-        const ragData = await ragResponse.json();
+        const ragData = await Auth.apiCall('/api/hybrid-rag/status');
         if (ragData.quality_features && ragData.quality_features.reranker_model) {
             currentSettings.reranker_model = ragData.quality_features.reranker_model;
         }
