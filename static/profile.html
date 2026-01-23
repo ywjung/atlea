@@ -186,13 +186,32 @@
             const confirmPasswordInput = document.getElementById('confirmPassword');
             const newPassword = document.getElementById('newPassword');
 
+        // 안전한 날짜 파싱 함수
+        function formatDateTime(dateStr) {
+            if (!dateStr) return '없음';
+            try {
+                const date = new Date(dateStr);
+                if (isNaN(date.getTime())) return '없음';
+                return date.toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
+            } catch (e) {
+                return '없음';
+            }
+        }
+
         // 사용자 정보 표시
-        function displayUserInfo() {
-            const user = Auth.getUser();
+        async function displayUserInfo() {
+            // 서버에서 최신 사용자 정보 가져오기
+            let user = Auth.getUser();
+            try {
+                user = await Auth.getCurrentUser();
+            } catch (e) {
+                logger.warn('Failed to fetch latest user info, using cached data');
+            }
+
             const userInfoDiv = document.getElementById('userInfo');
 
-            const createdAt = new Date(user.created_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
-            const lastLogin = user.last_login ? new Date(user.last_login).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' }) : '없음';
+            const createdAt = formatDateTime(user.created_at);
+            const lastLogin = formatDateTime(user.last_login);
 
             userInfoDiv.innerHTML = `
                 <div class="user-info-label">사용자 ID</div>
@@ -361,7 +380,7 @@
             try {
                 await Auth.updateProfile(username);
                 Auth.showSuccess('프로필이 업데이트되었습니다', 'profile-success');
-                displayUserInfo();
+                await displayUserInfo();
                 usernameInput.value = '';
                 setTimeout(() => Auth.hideSuccess('profile-success'), 3000);
             } catch (error) {
@@ -467,7 +486,7 @@
         });
 
             // 초기 로드
-            displayUserInfo();
+            await displayUserInfo();
             loadSessions();
 
             // 전역 함수로 노출 (인라인 핸들러에서 사용)
