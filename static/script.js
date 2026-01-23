@@ -4549,6 +4549,9 @@ async function openSettingsPanel() {
     await loadAvailableModels();  // Load available models when opening settings
     loadCacheStats();
     loadCacheEnabled();
+
+    // Apply current settings to UI elements (refresh UI with latest values)
+    applySettings();
 }
 
 // Note: settingsBtn now uses toggleSettingsDropdown() from index.html onclick attribute
