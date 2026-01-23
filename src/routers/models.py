@@ -211,6 +211,13 @@ async def update_model_config(request: Request):
         if not backend or backend not in ["ollama", "local"]:
             raise HTTPException(status_code=400, detail="Invalid backend")
 
+        # 현재 LLM 모델 저장 (캐시 삭제 여부 판단용)
+        current_use_ollama = os.getenv("USE_OLLAMA", "false").lower() == "true"
+        if current_use_ollama:
+            current_llm_model = os.getenv("OLLAMA_LLM_MODEL", "")
+        else:
+            current_llm_model = os.getenv("LLM_MODEL", "")
+
         # .env 파일 업데이트
         env_path = Path(".env")
         env_lines = []
@@ -265,10 +272,22 @@ async def update_model_config(request: Request):
 
         logger.info(f"Model configuration updated: backend={backend}, llm={llm_model}, embedding={embedding_model_name}")
 
+        # LLM 모델이 변경되었는지 확인하고 캐시 삭제
+        cache_cleared = 0
+        if llm_model and llm_model != current_llm_model:
+            try:
+                cache_cleared = cache_manager.clear_cache()
+                logger.info(f"🗑️ LLM model changed ({current_llm_model} → {llm_model}), cache cleared: {cache_cleared} entries")
+            except Exception as e:
+                logger.warning(f"Failed to clear cache after LLM model change: {e}")
+
         # 모델 즉시 적용 (callback을 통해)
         if model_reload_callback:
             try:
                 result = model_reload_callback(backend, llm_model, embedding_model_name)
+                # 캐시 삭제 정보 추가
+                if cache_cleared > 0:
+                    result["cache_cleared"] = cache_cleared
                 return result
             except Exception as e:
                 logger.error(f"Failed to reload models: {e}")
@@ -278,7 +297,8 @@ async def update_model_config(request: Request):
                     "embedding_changed": False,
                     "restart_required": True,
                     "message": "설정이 저장되었습니다. 서버를 재시작하여 적용하세요.",
-                    "error": str(e)
+                    "error": str(e),
+                    "cache_cleared": cache_cleared
                 }
         else:
             # Callback이 없는 경우 (재시작 필요)
@@ -286,7 +306,8 @@ async def update_model_config(request: Request):
                 "llm_changed": False,
                 "embedding_changed": False,
                 "restart_required": True,
-                "message": "설정이 저장되었습니다. 서버를 재시작하여 적용하세요."
+                "message": "설정이 저장되었습니다. 서버를 재시작하여 적용하세요.",
+                "cache_cleared": cache_cleared
             }
 
     except HTTPException:

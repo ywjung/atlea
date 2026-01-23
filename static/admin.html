@@ -8300,6 +8300,11 @@
                     message += '\n4. 재색인이 완료되면 새로운 임베딩으로 검색할 수 있습니다';
                 }
 
+                // LLM 모델 변경으로 캐시가 삭제된 경우
+                if (result.cache_cleared && result.cache_cleared > 0) {
+                    message += `\n\n🗑️ LLM 모델 변경으로 캐시가 삭제되었습니다 (${result.cache_cleared}개 항목)`;
+                }
+
                 // 메시지 표시
                 alert(message);
 
