@@ -331,8 +331,19 @@ class HybridRAGOrchestrator:
             # 재랭킹 활성화 시 Reranker 초기화 (지연 로딩)
             if self.reranking_enabled:
                 try:
-                    self.reranker = get_reranker(model_type="jina")
-                    logger.info("🎯 Reranker initialized (lazy loading)")
+                    # Redis에서 reranker 모델 설정 로드
+                    reranker_model_setting = self.cache.redis.get("config:reranker_model")
+                    reranker_model = (
+                        reranker_model_setting.decode()
+                        if reranker_model_setting
+                        else "dengcao/Qwen3-Reranker-8B:Q4_K_M"
+                    )
+
+                    self.reranker = get_reranker(
+                        model_type="ollama",
+                        model_name=reranker_model
+                    )
+                    logger.info(f"🎯 Reranker initialized (model: {reranker_model})")
                 except Exception as e:
                     logger.warning(f"⚠️ Failed to initialize reranker: {e}")
                     self.reranking_enabled = False

@@ -155,13 +155,14 @@ class RAGQualityConfig(BaseModel):
     """RAG 품질 설정 모델"""
     reranking_enabled: Optional[bool] = None
     query_rewrite_enabled: Optional[bool] = None
+    reranker_model: Optional[str] = None  # Ollama reranker 모델
 
 
 class RAGQualityConfigResponse(ConfigResponseBase):
     """RAG 품질 설정 응답 모델"""
     reranking_enabled: bool
     query_rewrite_enabled: bool
-    reranker_model: str = "jinaai/jina-reranker-v2-base-multilingual"
+    reranker_model: str = "dengcao/Qwen3-Reranker-8B:Q4_K_M"  # 기본 Ollama reranker
 
 
 class PasswordResetRequest(BaseModel):
@@ -1742,18 +1743,20 @@ async def get_rag_quality_config(
         pipe = cache_manager.redis.pipeline()
         pipe.get("config:reranking_enabled")
         pipe.get("config:query_rewrite_enabled")
+        pipe.get("config:reranker_model")
         results = pipe.execute()
 
-        reranking_raw, query_rewrite_raw = results
+        reranking_raw, query_rewrite_raw, reranker_model_raw = results
 
         # 기본값 설정
         reranking_enabled = reranking_raw.decode() == "true" if reranking_raw else False
         query_rewrite_enabled = query_rewrite_raw.decode() == "true" if query_rewrite_raw else False
+        reranker_model = reranker_model_raw.decode() if reranker_model_raw else "dengcao/Qwen3-Reranker-8B:Q4_K_M"
 
         return RAGQualityConfigResponse(
             reranking_enabled=reranking_enabled,
             query_rewrite_enabled=query_rewrite_enabled,
-            reranker_model="jinaai/jina-reranker-v2-base-multilingual",
+            reranker_model=reranker_model,
             message="RAG 품질 설정을 조회했습니다"
         )
 
@@ -1807,6 +1810,15 @@ async def update_rag_quality_config(
             query_rewrite_setting = cache_manager.redis.get("config:query_rewrite_enabled")
             query_rewrite_enabled = query_rewrite_setting.decode() == "true" if query_rewrite_setting else False
 
+        # Reranker 모델 설정
+        if config_update.reranker_model is not None:
+            cache_manager.redis.set("config:reranker_model", config_update.reranker_model)
+            reranker_model = config_update.reranker_model
+        else:
+            # 기존 값 유지
+            reranker_model_setting = cache_manager.redis.get("config:reranker_model")
+            reranker_model = reranker_model_setting.decode() if reranker_model_setting else "dengcao/Qwen3-Reranker-8B:Q4_K_M"
+
         # HybridRAGOrchestrator 설정 새로고침 트리거
         try:
             import sys
@@ -1820,7 +1832,8 @@ async def update_rag_quality_config(
 
         logger.info(
             f"RAG 품질 설정 업데이트: reranking={reranking_enabled}, "
-            f"query_rewrite={query_rewrite_enabled} by user={user.get('email', 'unknown')}"
+            f"query_rewrite={query_rewrite_enabled}, reranker_model={reranker_model} "
+            f"by user={user.get('email', 'unknown')}"
         )
 
         status_parts = []
@@ -1828,13 +1841,15 @@ async def update_rag_quality_config(
             status_parts.append(f"재랭킹 {'활성화' if reranking_enabled else '비활성화'}")
         if config_update.query_rewrite_enabled is not None:
             status_parts.append(f"쿼리 재작성 {'활성화' if query_rewrite_enabled else '비활성화'}")
+        if config_update.reranker_model is not None:
+            status_parts.append(f"Reranker 모델: {reranker_model}")
 
         status_msg = ", ".join(status_parts) if status_parts else "설정이 유지되었습니다"
 
         return RAGQualityConfigResponse(
             reranking_enabled=reranking_enabled,
             query_rewrite_enabled=query_rewrite_enabled,
-            reranker_model="jinaai/jina-reranker-v2-base-multilingual",
+            reranker_model=reranker_model,
             message=status_msg
         )
 

@@ -121,9 +121,10 @@ async def get_model_list(request: Request, backend: str = "ollama"):
 
                 models = data.get("models", [])
 
-                # LLM과 임베딩 모델 분류
+                # LLM, 임베딩, Reranker 모델 분류
                 llm_models = []
                 embedding_models = []
+                reranker_models = []
 
                 for model in models:
                     model_name = model.get("name", "")
@@ -136,15 +137,21 @@ async def get_model_list(request: Request, backend: str = "ollama"):
                         "modified_at": model.get("modified_at", "")
                     }
 
+                    model_name_lower = model_name.lower()
+
+                    # Reranker 모델 판별 (이름에 rerank가 포함된 경우)
+                    if "rerank" in model_name_lower:
+                        reranker_models.append(model_info)
                     # 임베딩 모델 판별 (이름에 embed, kure, bge 등이 포함된 경우)
-                    if any(keyword in model_name.lower() for keyword in ["embed", "kure", "bge", "e5", "gte"]):
+                    elif any(keyword in model_name_lower for keyword in ["embed", "kure", "bge", "e5", "gte"]):
                         embedding_models.append(model_info)
                     else:
                         llm_models.append(model_info)
 
                 return {
                     "llm_models": llm_models,
-                    "embedding_models": embedding_models
+                    "embedding_models": embedding_models,
+                    "reranker_models": reranker_models
                 }
 
             except httpx.HTTPError as e:
@@ -159,6 +166,9 @@ async def get_model_list(request: Request, backend: str = "ollama"):
                 ],
                 "embedding_models": [
                     {"name": "nlpai-lab/KURE-v1", "size": "1.2 GB", "description": "한국어 임베딩 모델"}
+                ],
+                "reranker_models": [
+                    {"name": "cross-encoder/ms-marco-MiniLM-L-12-v2", "size": "0.5 GB", "description": "MS MARCO Cross-encoder"}
                 ]
             }
         else:

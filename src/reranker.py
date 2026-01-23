@@ -1,106 +1,171 @@
 """
-Cross-encoder Reranker - 검색 결과 재랭킹 모듈
+Ollama Reranker - 검색 결과 재랭킹 모듈
 
-Cross-encoder 모델을 사용하여 쿼리와 문서 간의 의미적 관련성을
+Ollama API를 사용하여 쿼리와 문서 간의 의미적 관련성을
 재평가하고 검색 결과를 재정렬합니다.
 
 📝 Changelog:
+- 2026-01-23: Ollama Reranker로 전환
+  - Qwen3-Reranker 모델 지원
+  - Jina Reranker 제거
 - 2026-01-22: 초기 구현
-  - Jina Reranker v2 다국어 모델 지원
-  - 배치 처리 및 점수 정규화
-  - 비동기 처리 지원
 """
 
 import asyncio
-from typing import List, Dict, Optional
+import os
+from typing import List, Dict, Optional, Tuple
 from loguru import logger
+import httpx
 
 
-class JinaReranker:
+class OllamaReranker:
     """
-    Jina Reranker를 사용한 Cross-encoder 기반 재랭킹
+    Ollama API를 사용한 Reranker
 
-    Cross-encoder는 쿼리와 문서를 함께 인코딩하여
-    더 정확한 관련성 점수를 계산합니다.
+    Qwen3-Reranker 등 Ollama에서 제공하는 reranker 모델을 활용합니다.
     """
 
-    # 기본 모델: Jina Reranker v2 다국어 (한국어 포함)
-    DEFAULT_MODEL = "jinaai/jina-reranker-v2-base-multilingual"
+    # 기본 모델: Qwen3-Reranker-8B
+    DEFAULT_MODEL = "dengcao/Qwen3-Reranker-8B:Q4_K_M"
 
     def __init__(
         self,
         model_name: Optional[str] = None,
-        device: Optional[str] = None,
-        max_length: int = 512
+        base_url: Optional[str] = None,
+        timeout: float = 30.0
     ):
         """
-        Reranker 초기화
+        Ollama Reranker 초기화
 
         Args:
-            model_name: Cross-encoder 모델 이름 (기본: Jina Reranker v2)
-            device: 실행 장치 ('cuda', 'mps', 'cpu', None=auto)
-            max_length: 최대 입력 길이
+            model_name: Ollama reranker 모델 이름
+            base_url: Ollama API URL (기본: http://localhost:11434)
+            timeout: API 타임아웃 (초)
         """
-        self.model_name = model_name or self.DEFAULT_MODEL
-        self.max_length = max_length
-        self.model = None
-        self.device = device
-        self._initialized = False
+        self.model_name = model_name or os.getenv("OLLAMA_RERANKER_MODEL", self.DEFAULT_MODEL)
+        self.base_url = base_url or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+        self.timeout = timeout
+        self._client = None
 
-        logger.info(f"🎯 JinaReranker initialized (model: {self.model_name})")
+        logger.info(f"🎯 OllamaReranker initialized (model: {self.model_name}, url: {self.base_url})")
 
-    def _lazy_init(self):
-        """모델 지연 로딩 (첫 사용 시 초기화)"""
-        if self._initialized:
-            return
+    def _get_client(self) -> httpx.AsyncClient:
+        """HTTP 클라이언트 생성 (재사용)"""
+        if self._client is None:
+            self._client = httpx.AsyncClient(timeout=self.timeout)
+        return self._client
 
+    def _build_rerank_prompt(self, query: str, document: str) -> str:
+        """
+        Qwen3-Reranker 형식의 프롬프트 생성
+
+        Args:
+            query: 사용자 쿼리
+            document: 문서 내용
+
+        Returns:
+            Reranker 프롬프트
+        """
+        # Qwen3-Reranker 공식 프롬프트 형식
+        return f"""<|im_start|>system
+Judge whether the Document meets the requirements based on the Query and the Instruct provided. Note that the answer can only be "yes" or "no".
+<|im_end|>
+<|im_start|>user
+<Instruct>: Given a web search query, retrieve relevant passages that answer the query
+<Query>: {query}
+<Document>: {document}
+<|im_end|>
+<|im_start|>assistant
+"""
+
+    async def _score_single(self, query: str, document: str) -> float:
+        """
+        단일 문서의 관련성 점수 계산
+
+        Args:
+            query: 사용자 쿼리
+            document: 문서 내용
+
+        Returns:
+            관련성 점수 (0.0 ~ 1.0)
+        """
         try:
-            from transformers import AutoModelForSequenceClassification, AutoTokenizer
-            import torch
+            client = self._get_client()
+            prompt = self._build_rerank_prompt(query, document[:2000])  # 최대 2000자
 
-            # 장치 자동 감지
-            if self.device is None:
-                if torch.cuda.is_available():
-                    self.device = "cuda"
-                elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
-                    self.device = "mps"
-                else:
-                    self.device = "cpu"
-
-            logger.info(f"🔧 Loading reranker model on {self.device}...")
-
-            # 모델 및 토크나이저 로드
-            self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-
-            # MPS에서는 BFloat16이 지원되지 않으므로 Float32 사용
-            if self.device == "mps":
-                self.model = AutoModelForSequenceClassification.from_pretrained(
-                    self.model_name,
-                    trust_remote_code=True,
-                    torch_dtype=torch.float32
-                )
-            else:
-                self.model = AutoModelForSequenceClassification.from_pretrained(
-                    self.model_name,
-                    trust_remote_code=True
-                )
-            self.model.to(self.device)
-            self.model.eval()
-
-            self._initialized = True
-            logger.success(f"✅ Reranker model loaded successfully on {self.device}")
-
-        except ImportError as e:
-            logger.error(f"❌ Required packages not installed: {e}")
-            raise RuntimeError(
-                "Cross-encoder reranking requires transformers and torch. "
-                "Install with: pip install transformers torch"
+            response = await client.post(
+                f"{self.base_url}/api/generate",
+                json={
+                    "model": self.model_name,
+                    "prompt": prompt,
+                    "stream": False,
+                    "options": {
+                        "num_predict": 5,  # "yes" 또는 "no"만 필요
+                        "temperature": 0.0,  # 결정적 출력
+                    }
+                }
             )
-        except Exception as e:
-            logger.error(f"❌ Failed to load reranker model: {e}")
-            raise
+            response.raise_for_status()
+            result = response.json()
 
-    def rerank(
+            # 응답에서 yes/no 판단
+            answer = result.get("response", "").strip().lower()
+
+            # yes → 1.0, no → 0.0, 기타 → 0.5
+            if answer.startswith("yes"):
+                return 1.0
+            elif answer.startswith("no"):
+                return 0.0
+            else:
+                # 불확실한 경우 중간 점수
+                logger.debug(f"Uncertain reranker response: {answer}")
+                return 0.5
+
+        except Exception as e:
+            logger.warning(f"Reranking score failed: {e}")
+            return 0.5  # 오류 시 중간 점수
+
+    async def _score_batch(
+        self,
+        query: str,
+        documents: List[Dict],
+        max_concurrent: int = 5
+    ) -> List[Tuple[int, float]]:
+        """
+        배치 문서 점수 계산 (동시 처리)
+
+        Args:
+            query: 사용자 쿼리
+            documents: 문서 리스트
+            max_concurrent: 최대 동시 요청 수
+
+        Returns:
+            (인덱스, 점수) 튜플 리스트
+        """
+        semaphore = asyncio.Semaphore(max_concurrent)
+
+        async def score_with_index(idx: int, doc: Dict) -> Tuple[int, float]:
+            async with semaphore:
+                content = doc.get('content', '')
+                if not content:
+                    return (idx, 0.0)
+                score = await self._score_single(query, content)
+                return (idx, score)
+
+        tasks = [score_with_index(i, doc) for i, doc in enumerate(documents)]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # 예외 처리
+        scored = []
+        for result in results:
+            if isinstance(result, Exception):
+                logger.warning(f"Batch scoring exception: {result}")
+                continue
+            scored.append(result)
+
+        return scored
+
+    async def rerank_async(
         self,
         query: str,
         documents: List[Dict],
@@ -108,7 +173,7 @@ class JinaReranker:
         score_threshold: float = 0.0
     ) -> List[Dict]:
         """
-        검색 결과 재랭킹
+        비동기 검색 결과 재랭킹
 
         Args:
             query: 사용자 쿼리
@@ -122,51 +187,20 @@ class JinaReranker:
         if not documents:
             return []
 
-        # 지연 초기화
-        self._lazy_init()
-
-        import torch
-
         try:
-            # 쿼리-문서 쌍 생성
-            pairs = []
-            for doc in documents:
-                content = doc.get('content', '')
-                if content:
-                    # 최대 길이 제한
-                    truncated_content = content[:self.max_length * 4]  # 대략적인 토큰 추정
-                    pairs.append([query, truncated_content])
+            # 배치 점수 계산
+            scores = await self._score_batch(query, documents)
 
-            if not pairs:
-                return documents[:top_k]
-
-            # 토크나이징
-            inputs = self.tokenizer(
-                pairs,
-                padding=True,
-                truncation=True,
-                max_length=self.max_length,
-                return_tensors="pt"
-            ).to(self.device)
-
-            # 추론
-            with torch.no_grad():
-                outputs = self.model(**inputs)
-                scores = outputs.logits.squeeze(-1)
-
-                # Sigmoid로 0-1 범위 정규화
-                scores = torch.sigmoid(scores).cpu().numpy()
-
-            # 점수 추가 및 정렬
+            # 점수 추가 및 필터링
             reranked = []
-            for i, doc in enumerate(documents):
-                if i < len(scores):
-                    doc = doc.copy()
-                    doc['rerank_score'] = float(scores[i])
+            score_map = {idx: score for idx, score in scores}
 
-                    # 임계값 필터링
-                    if doc['rerank_score'] >= score_threshold:
-                        reranked.append(doc)
+            for i, doc in enumerate(documents):
+                doc = doc.copy()
+                doc['rerank_score'] = score_map.get(i, 0.5)
+
+                if doc['rerank_score'] >= score_threshold:
+                    reranked.append(doc)
 
             # 재랭킹 점수로 정렬
             reranked.sort(key=lambda x: x['rerank_score'], reverse=True)
@@ -180,7 +214,7 @@ class JinaReranker:
             # 실패 시 원본 반환
             return documents[:top_k]
 
-    async def rerank_async(
+    def rerank(
         self,
         query: str,
         documents: List[Dict],
@@ -188,7 +222,7 @@ class JinaReranker:
         score_threshold: float = 0.0
     ) -> List[Dict]:
         """
-        비동기 재랭킹 (동기 메서드를 ThreadPool에서 실행)
+        동기 검색 결과 재랭킹 (비동기 메서드 래퍼)
 
         Args:
             query: 사용자 쿼리
@@ -199,18 +233,28 @@ class JinaReranker:
         Returns:
             재랭킹된 문서 리스트
         """
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None,
-            lambda: self.rerank(query, documents, top_k, score_threshold)
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        return loop.run_until_complete(
+            self.rerank_async(query, documents, top_k, score_threshold)
         )
+
+    async def close(self):
+        """HTTP 클라이언트 정리"""
+        if self._client:
+            await self._client.aclose()
+            self._client = None
 
 
 class SentenceTransformerReranker:
     """
-    Sentence Transformers Cross-encoder 기반 재랭킹
+    Sentence Transformers Cross-encoder 기반 재랭킹 (대안)
 
-    대안적인 Cross-encoder 구현 (더 가벼움)
+    로컬에서 실행되는 가벼운 Cross-encoder 구현
     """
 
     # 기본 모델: MS MARCO 기반 다국어 모델
@@ -342,25 +386,27 @@ class SentenceTransformerReranker:
 
 
 def get_reranker(
-    model_type: str = "jina",
+    model_type: str = "ollama",
     model_name: Optional[str] = None,
+    base_url: Optional[str] = None,
     device: Optional[str] = None
 ):
     """
     Reranker 팩토리 함수
 
     Args:
-        model_type: 'jina' 또는 'sentence-transformer'
+        model_type: 'ollama' 또는 'sentence-transformer'
         model_name: 사용할 모델 이름 (None=기본값)
-        device: 실행 장치
+        base_url: Ollama API URL (ollama 타입 전용)
+        device: 실행 장치 (sentence-transformer 타입 전용)
 
     Returns:
         Reranker 인스턴스
     """
-    if model_type.lower() == "jina":
-        return JinaReranker(model_name=model_name, device=device)
+    if model_type.lower() == "ollama":
+        return OllamaReranker(model_name=model_name, base_url=base_url)
     elif model_type.lower() in ["sentence-transformer", "st", "cross-encoder"]:
         return SentenceTransformerReranker(model_name=model_name, device=device)
     else:
-        logger.warning(f"Unknown reranker type: {model_type}, using Jina")
-        return JinaReranker(model_name=model_name, device=device)
+        logger.warning(f"Unknown reranker type: {model_type}, using Ollama")
+        return OllamaReranker(model_name=model_name, base_url=base_url)

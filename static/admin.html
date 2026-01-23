@@ -2519,6 +2519,29 @@
                 </div>
             </div>
 
+            <!-- Reranker Model Selection Card -->
+            <div class="card" style="margin-bottom: 20px;">
+                <div class="card-header">
+                    <h3 style="margin: 0;">🎯 Reranker 모델 선택</h3>
+                </div>
+                <div class="card-body">
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: block; margin-bottom: 8px; font-weight: 600;">
+                            사용할 Reranker 모델
+                        </label>
+                        <select id="reranker-model-select" class="form-input" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #ddd;" onchange="onRerankerModelChange()">
+                            <option value="">모델 선택...</option>
+                        </select>
+                        <small style="display: block; margin-top: 8px; color: #666;">
+                            💡 Reranker는 검색 결과를 의미 기반으로 재정렬합니다. 하이브리드 RAG 설정에서 재랭킹을 활성화해야 사용됩니다.
+                        </small>
+                    </div>
+                    <div id="reranker-model-info" style="padding: 10px; background: #f9fafb; border-radius: 8px; display: none;">
+                        <p style="margin: 0; font-size: 14px; color: #666;"></p>
+                    </div>
+                </div>
+            </div>
+
             <!-- Save Button -->
             <div style="text-align: right;">
                 <button class="btn btn-primary" onclick="saveModelConfig()" id="save-model-btn">
@@ -3125,7 +3148,7 @@
                                 <div style="font-weight: 600; margin-bottom: 12px; color: #374151;">🚀 RAG 품질 개선</div>
 
                                 <!-- Reranking Toggle -->
-                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                                     <div>
                                         <div style="font-weight: 600; margin-bottom: 3px;">🎯 재랭킹 (Cross-encoder)</div>
                                         <div style="font-size: 12px; color: #666;">검색 결과를 의미 기반으로 재정렬</div>
@@ -3134,6 +3157,15 @@
                                         <input type="checkbox" id="rerankingToggle" onchange="toggleReranking()">
                                         <span class="toggle-slider"></span>
                                     </label>
+                                </div>
+
+                                <!-- Reranker Model Selector -->
+                                <div id="rerankerModelSection" style="margin-bottom: 15px; padding: 10px; background: #f9fafb; border-radius: 6px;">
+                                    <label style="display: block; margin-bottom: 5px; font-size: 12px; color: #666;">Reranker 모델</label>
+                                    <select id="rerankerModelSelect" onchange="changeRerankerModel()" style="width: 100%; padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px; background: white;">
+                                        <option value="dengcao/Qwen3-Reranker-8B:Q4_K_M">dengcao/Qwen3-Reranker-8B:Q4_K_M (기본)</option>
+                                    </select>
+                                    <div style="margin-top: 5px; font-size: 11px; color: #888;">Ollama에서 rerank 모델을 설치하면 자동으로 목록에 추가됩니다</div>
                                 </div>
 
                                 <!-- Query Rewrite Toggle -->
@@ -8138,6 +8170,33 @@
                     embeddingSelect.appendChild(option);
                 });
 
+                // Reranker 모델 목록 업데이트
+                const rerankerSelect = document.getElementById('reranker-model-select');
+                if (rerankerSelect) {
+                    rerankerSelect.innerHTML = '<option value="">모델 선택...</option>';
+
+                    // 기본 모델 추가
+                    const defaultModel = 'dengcao/Qwen3-Reranker-8B:Q4_K_M';
+                    const defaultOption = document.createElement('option');
+                    defaultOption.value = defaultModel;
+                    defaultOption.textContent = defaultModel + ' (기본)';
+                    rerankerSelect.appendChild(defaultOption);
+
+                    // Ollama에서 발견된 reranker 모델 추가
+                    const rerankerModels = data.reranker_models || [];
+                    rerankerModels.forEach(model => {
+                        if (model.name !== defaultModel) {
+                            const option = document.createElement('option');
+                            option.value = model.name;
+                            option.textContent = `${model.name} (${model.size})`;
+                            rerankerSelect.appendChild(option);
+                        }
+                    });
+
+                    // 현재 설정된 reranker 모델 로드
+                    await loadCurrentRerankerModel();
+                }
+
             } catch (error) {
                 logger.error('Error loading model list:', error);
                 if (error.message && error.message.includes('503')) {
@@ -8145,6 +8204,55 @@
                 } else {
                     Auth.showError('모델 목록을 불러오는데 실패했습니다: ' + error.message);
                 }
+            }
+        }
+
+        // 현재 설정된 Reranker 모델 로드
+        async function loadCurrentRerankerModel() {
+            try {
+                const data = await Auth.apiCall('/api/admin/rag-quality');
+                const rerankerSelect = document.getElementById('reranker-model-select');
+
+                if (rerankerSelect && data.reranker_model) {
+                    rerankerSelect.value = data.reranker_model;
+
+                    // 현재 모델이 목록에 없으면 추가
+                    if (rerankerSelect.value !== data.reranker_model) {
+                        const customOption = document.createElement('option');
+                        customOption.value = data.reranker_model;
+                        customOption.textContent = data.reranker_model + ' (현재)';
+                        rerankerSelect.appendChild(customOption);
+                        rerankerSelect.value = data.reranker_model;
+                    }
+                }
+            } catch (error) {
+                logger.error('Error loading current reranker model:', error);
+            }
+        }
+
+        // Reranker 모델 변경 시 (모델 설정 탭용)
+        async function onRerankerModelChange() {
+            const select = document.getElementById('reranker-model-select');
+            const modelName = select.value;
+
+            if (!modelName) return;
+
+            try {
+                const data = await Auth.apiCall('/api/admin/rag-quality', {
+                    method: 'PUT',
+                    body: JSON.stringify({
+                        reranker_model: modelName
+                    })
+                });
+
+                alert(`✅ Reranker 모델이 ${modelName}으로 변경되었습니다`);
+                logger.info('Reranker model changed:', modelName);
+
+            } catch (error) {
+                logger.error('Error changing reranker model:', error);
+                alert('❌ Reranker 모델 변경 실패: ' + error.message);
+                // 이전 선택으로 되돌리기
+                await loadCurrentRerankerModel();
             }
         }
 
@@ -12136,6 +12244,9 @@
                 document.getElementById('rerankingToggle').checked = data.reranking_enabled;
                 document.getElementById('queryRewriteToggle').checked = data.query_rewrite_enabled;
 
+                // Reranker 모델 목록 로드 및 현재 선택 설정
+                await loadRerankerModels(data.reranker_model);
+
                 // 상태 표시 업데이트
                 updateRagQualityStatus(data.reranking_enabled, data.query_rewrite_enabled);
 
@@ -12146,6 +12257,83 @@
                 document.getElementById('rerankingToggle').checked = false;
                 document.getElementById('queryRewriteToggle').checked = false;
                 updateRagQualityStatus(false, false);
+            }
+        }
+
+        /**
+         * Reranker 모델 목록 로드
+         */
+        async function loadRerankerModels(currentModel) {
+            const select = document.getElementById('rerankerModelSelect');
+            if (!select) return;
+
+            try {
+                const data = await Auth.apiCall('/api/admin/models/list?backend=ollama');
+                const rerankerModels = data.reranker_models || [];
+
+                // 기존 옵션 제거 (기본 옵션 제외)
+                select.innerHTML = '';
+
+                // 기본 모델 추가
+                const defaultModel = 'dengcao/Qwen3-Reranker-8B:Q4_K_M';
+                const defaultOption = document.createElement('option');
+                defaultOption.value = defaultModel;
+                defaultOption.textContent = defaultModel + ' (기본)';
+                select.appendChild(defaultOption);
+
+                // Ollama에서 발견된 reranker 모델 추가
+                rerankerModels.forEach(model => {
+                    if (model.name !== defaultModel) {
+                        const option = document.createElement('option');
+                        option.value = model.name;
+                        option.textContent = `${model.name} (${model.size})`;
+                        select.appendChild(option);
+                    }
+                });
+
+                // 현재 설정된 모델 선택
+                if (currentModel) {
+                    select.value = currentModel;
+                    // 현재 모델이 목록에 없으면 추가
+                    if (select.value !== currentModel) {
+                        const customOption = document.createElement('option');
+                        customOption.value = currentModel;
+                        customOption.textContent = currentModel + ' (현재)';
+                        select.appendChild(customOption);
+                        select.value = currentModel;
+                    }
+                }
+
+                logger.info('Reranker models loaded:', rerankerModels.length);
+            } catch (error) {
+                logger.error('Error loading reranker models:', error);
+            }
+        }
+
+        /**
+         * Reranker 모델 변경
+         */
+        async function changeRerankerModel() {
+            const select = document.getElementById('rerankerModelSelect');
+            const modelName = select.value;
+
+            try {
+                const data = await Auth.apiCall('/api/admin/rag-quality', {
+                    method: 'PUT',
+                    body: JSON.stringify({
+                        reranker_model: modelName
+                    })
+                });
+
+                showHybridRagSuccess(`Reranker 모델이 ${modelName}으로 변경되었습니다`);
+                setTimeout(() => hideHybridRagMessages(), 3000);
+                logger.info('Reranker model changed:', modelName);
+
+            } catch (error) {
+                logger.error('Error changing reranker model:', error);
+                showHybridRagError('Reranker 모델 변경 실패: ' + error.message);
+                // 이전 선택으로 되돌리기
+                loadRagQualityConfig();
             }
         }
 
