@@ -113,7 +113,8 @@ class User(BaseModel):
     """사용자 모델"""
     model_config = ConfigDict(
         json_encoders={
-            datetime: lambda v: v.isoformat() + 'Z' if v else None
+            # Convert +00:00 to Z for valid ISO 8601 UTC format
+            datetime: lambda v: v.isoformat().replace('+00:00', 'Z') if v else None
         }
     )
 
