@@ -47,7 +47,7 @@ AdminThemes.setTheme = function(theme, save = true) {
     console.log('[AdminThemes] setTheme called:', theme);
     this.currentTheme = theme;
 
-    // Save preference first (so it's persisted even if repaint is delayed)
+    // Save preference first
     if (save) {
         localStorage.setItem(this.STORAGE_KEY, theme);
     }
@@ -55,40 +55,31 @@ AdminThemes.setTheme = function(theme, save = true) {
     const html = document.documentElement;
     const body = document.body;
 
-    // Use setTimeout(0) to break out of the current call stack
-    // This allows the browser to process the repaint
-    setTimeout(() => {
-        // Remove old theme classes
-        html.classList.remove('theme-light', 'theme-dark');
-        body.classList.remove('theme-light', 'theme-dark');
+    // Update data-attribute on both html and body
+    html.setAttribute('data-theme', theme);
+    body.setAttribute('data-theme', theme);
 
-        // Add new theme class and data-attribute
-        html.classList.add(`theme-${theme}`);
-        body.classList.add(`theme-${theme}`);
-        html.setAttribute('data-theme', theme);
-        body.setAttribute('data-theme', theme);
+    // Update meta theme-color for mobile browsers
+    const metaThemeColor = document.querySelector('meta[name="theme-color"]');
+    if (metaThemeColor) {
+        metaThemeColor.content = theme === 'dark' ? '#0f172a' : '#667eea';
+    }
 
-        // Update meta theme-color for mobile browsers
-        const metaThemeColor = document.querySelector('meta[name="theme-color"]');
-        if (metaThemeColor) {
-            metaThemeColor.content = theme === 'dark' ? '#0f172a' : '#667eea';
-        }
+    // Update toggle button icons
+    this.updateToggleButtons();
 
-        // Update toggle button icons
-        this.updateToggleButtons();
+    // FORCE REPAINT: Nuclear option - hide and show body
+    // This guarantees a repaint by forcing layout recalculation
+    body.style.display = 'none';
+    // Force synchronous reflow
+    void body.offsetHeight;
+    body.style.display = '';
 
-        // Force layout recalculation
-        void body.offsetHeight;
-
-        // Use another setTimeout to ensure the repaint completes
-        setTimeout(() => {
-            // Emit theme change event
-            if (typeof AdminCore !== 'undefined') {
-                AdminCore.emit('themeChange', { theme });
-            }
-            console.log('[AdminThemes] Theme change complete:', theme);
-        }, 0);
-    }, 0);
+    // Emit theme change event
+    if (typeof AdminCore !== 'undefined') {
+        AdminCore.emit('themeChange', { theme });
+    }
+    console.log('[AdminThemes] Theme change complete:', theme);
 };
 
 AdminThemes.toggle = function() {

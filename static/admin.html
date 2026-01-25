@@ -1437,18 +1437,14 @@
                         var current = html.getAttribute('data-theme') || 'light';
                         var newTheme = current === 'light' ? 'dark' : 'light';
 
-                        // Use setTimeout to break out of event handler stack
-                        setTimeout(function() {
-                            html.setAttribute('data-theme', newTheme);
-                            body.setAttribute('data-theme', newTheme);
-                            html.classList.remove('theme-light', 'theme-dark');
-                            body.classList.remove('theme-light', 'theme-dark');
-                            html.classList.add('theme-' + newTheme);
-                            body.classList.add('theme-' + newTheme);
-                            localStorage.setItem('admin-theme', newTheme);
-                            // Force reflow
-                            void body.offsetHeight;
-                        }, 0);
+                        html.setAttribute('data-theme', newTheme);
+                        body.setAttribute('data-theme', newTheme);
+                        localStorage.setItem('admin-theme', newTheme);
+
+                        // Force repaint: hide and show body
+                        body.style.display = 'none';
+                        void body.offsetHeight;
+                        body.style.display = '';
                     }
                 });
                 </script>
