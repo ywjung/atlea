@@ -1431,13 +1431,24 @@
                     if (typeof AdminThemes !== 'undefined') {
                         AdminThemes.toggle();
                     } else {
-                        // Fallback: toggle data-theme directly
+                        // Fallback: toggle data-theme directly with forced repaint
                         var html = document.documentElement;
+                        var body = document.body;
                         var current = html.getAttribute('data-theme') || 'light';
                         var newTheme = current === 'light' ? 'dark' : 'light';
-                        html.setAttribute('data-theme', newTheme);
-                        document.body.setAttribute('data-theme', newTheme);
-                        localStorage.setItem('admin-theme', newTheme);
+
+                        // Use setTimeout to break out of event handler stack
+                        setTimeout(function() {
+                            html.setAttribute('data-theme', newTheme);
+                            body.setAttribute('data-theme', newTheme);
+                            html.classList.remove('theme-light', 'theme-dark');
+                            body.classList.remove('theme-light', 'theme-dark');
+                            html.classList.add('theme-' + newTheme);
+                            body.classList.add('theme-' + newTheme);
+                            localStorage.setItem('admin-theme', newTheme);
+                            // Force reflow
+                            void body.offsetHeight;
+                        }, 0);
                     }
                 });
                 </script>
