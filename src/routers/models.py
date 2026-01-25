@@ -63,21 +63,49 @@ async def get_model_backend(request: Request):
         redis_client = cache_manager.redis
         require_admin(request, redis_client)
 
-        use_ollama = os.getenv("USE_OLLAMA", "false").lower() == "true"
-        backend = "ollama" if use_ollama else "local"
+        # Redis에서 모델 설정 읽기 (멀티 워커 환경에서 일관성 보장)
+        redis_config = redis_client.hgetall("config:model")
 
-        config = {
-            "backend": backend,
-            "ollama": {
-                "base_url": os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
-                "llm_model": os.getenv("OLLAMA_LLM_MODEL", ""),
-                "embedding_model": os.getenv("OLLAMA_EMBEDDING_MODEL", "")
-            },
-            "local": {
-                "llm_model": os.getenv("LLM_MODEL", "mlx-community/Qwen3-30B-A3B-4bit"),
-                "embedding_model": os.getenv("EMBEDDING_MODEL", "nlpai-lab/KURE-v1")
+        if redis_config:
+            # Redis에 설정이 있으면 사용
+            def get_redis_value(key, default=""):
+                val = redis_config.get(key.encode()) or redis_config.get(key)
+                if val is None:
+                    return default
+                return val.decode() if isinstance(val, bytes) else val
+
+            use_ollama = get_redis_value("use_ollama", "false").lower() == "true"
+            backend = "ollama" if use_ollama else "local"
+
+            config = {
+                "backend": backend,
+                "ollama": {
+                    "base_url": get_redis_value("ollama_base_url", os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")),
+                    "llm_model": get_redis_value("ollama_llm_model", os.getenv("OLLAMA_LLM_MODEL", "")),
+                    "embedding_model": get_redis_value("ollama_embedding_model", os.getenv("OLLAMA_EMBEDDING_MODEL", ""))
+                },
+                "local": {
+                    "llm_model": get_redis_value("local_llm_model", os.getenv("LLM_MODEL", "mlx-community/Qwen3-30B-A3B-4bit")),
+                    "embedding_model": get_redis_value("local_embedding_model", os.getenv("EMBEDDING_MODEL", "nlpai-lab/KURE-v1"))
+                }
             }
-        }
+        else:
+            # Redis에 설정이 없으면 환경변수에서 읽기 (기존 동작)
+            use_ollama = os.getenv("USE_OLLAMA", "false").lower() == "true"
+            backend = "ollama" if use_ollama else "local"
+
+            config = {
+                "backend": backend,
+                "ollama": {
+                    "base_url": os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
+                    "llm_model": os.getenv("OLLAMA_LLM_MODEL", ""),
+                    "embedding_model": os.getenv("OLLAMA_EMBEDDING_MODEL", "")
+                },
+                "local": {
+                    "llm_model": os.getenv("LLM_MODEL", "mlx-community/Qwen3-30B-A3B-4bit"),
+                    "embedding_model": os.getenv("EMBEDDING_MODEL", "nlpai-lab/KURE-v1")
+                }
+            }
 
         return config
 
@@ -269,6 +297,25 @@ async def update_model_config(request: Request):
         # .env 파일 저장
         with open(env_path, 'w', encoding='utf-8') as f:
             f.writelines(env_lines)
+
+        # Redis에 모델 설정 저장 (멀티 워커 환경에서 일관성 보장)
+        redis_config = {
+            "use_ollama": "true" if backend == "ollama" else "false",
+            "ollama_base_url": os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
+        }
+        if backend == "ollama":
+            if llm_model:
+                redis_config["ollama_llm_model"] = llm_model
+            if embedding_model_name:
+                redis_config["ollama_embedding_model"] = embedding_model_name
+        else:
+            if llm_model:
+                redis_config["local_llm_model"] = llm_model
+            if embedding_model_name:
+                redis_config["local_embedding_model"] = embedding_model_name
+
+        redis_client.hset("config:model", mapping=redis_config)
+        logger.info(f"Model configuration saved to Redis: {redis_config}")
 
         logger.info(f"Model configuration updated: backend={backend}, llm={llm_model}, embedding={embedding_model_name}")
 

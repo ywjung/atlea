@@ -227,7 +227,7 @@ class AuthService:
         score = timestamp.timestamp()
 
         history_entry = {
-            "timestamp": timestamp.isoformat() + 'Z',
+            "timestamp": timestamp.isoformat().replace('+00:00', 'Z'),
             "email": email,
             "username": username or "unknown",
             "ip_address": ip_address or "unknown",

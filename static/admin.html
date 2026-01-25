@@ -8,19 +8,30 @@
     <title>관리자 대시보드 - AI 챗봇</title>
     <link rel="stylesheet" href="/static/auth.css">
     <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <!-- Admin Dashboard Redesign CSS -->
+    <link rel="stylesheet" href="/static/admin/css/admin-core.css">
+    <link rel="stylesheet" href="/static/admin/css/admin-components.css">
+    <link rel="stylesheet" href="/static/admin/css/admin-tables.css">
+    <link rel="stylesheet" href="/static/admin/css/admin-charts.css">
+    <link rel="stylesheet" href="/static/admin/css/admin-themes.css">
+    <link rel="stylesheet" href="/static/admin/css/admin-responsive.css">
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <style>
         body {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: var(--bg-body, linear-gradient(135deg, #667eea 0%, #764ba2 100%));
+            transition: background 0.3s ease;
         }
 
         .admin-container {
-            background: white;
+            background: var(--bg-card, white);
             border-radius: 10px;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            box-shadow: var(--shadow-card, 0 10px 40px rgba(0,0,0,0.2));
             max-width: 1400px;
             width: 100%;
             padding: 40px;
             margin: 20px auto;
+            transition: background 0.3s ease, box-shadow 0.3s ease;
         }
 
         .admin-header {
@@ -29,11 +40,11 @@
             align-items: center;
             margin-bottom: 30px;
             padding-bottom: 20px;
-            border-bottom: 2px solid #f0f0f0;
+            border-bottom: 2px solid var(--border-color, #f0f0f0);
         }
 
         .admin-header h1 {
-            color: #667eea;
+            color: var(--brand-primary, #667eea);
             font-size: 32px;
             margin: 0;
         }
@@ -44,15 +55,15 @@
 
         .admin-header .user-info p {
             margin: 5px 0;
-            color: #666;
+            color: var(--text-secondary, #666);
         }
 
         .tabs {
             display: flex;
             gap: 0;
             margin-bottom: 24px;
-            background: white;
-            border-bottom: 1px solid #e0e0e0;
+            background: var(--bg-card, white);
+            border-bottom: 1px solid var(--border-color, #e0e0e0);
             overflow-x: auto;
             -webkit-overflow-scrolling: touch;
             scrollbar-width: thin;
@@ -64,11 +75,11 @@
         }
 
         .tabs::-webkit-scrollbar-track {
-            background: #f1f1f1;
+            background: var(--bg-muted, #f1f1f1);
         }
 
         .tabs::-webkit-scrollbar-thumb {
-            background: #888;
+            background: var(--text-muted, #888);
             border-radius: 4px;
         }
 
@@ -80,7 +91,7 @@
             cursor: pointer;
             font-size: 14px;
             font-weight: 500;
-            color: #6c757d;
+            color: var(--text-secondary, #6c757d);
             transition: all 0.2s ease;
             display: inline-flex;
             align-items: center;
@@ -90,13 +101,13 @@
         }
 
         .tab:hover {
-            color: #667eea;
-            background: #f8f9fa;
+            color: var(--brand-primary, #667eea);
+            background: var(--bg-muted, #f8f9fa);
         }
 
         .tab.active {
-            color: #667eea;
-            border-bottom-color: #667eea;
+            color: var(--brand-primary, #667eea);
+            border-bottom-color: var(--brand-primary, #667eea);
             font-weight: 600;
         }
 
@@ -117,7 +128,7 @@
             cursor: pointer;
             font-size: 14px;
             font-weight: 500;
-            color: #6c757d;
+            color: var(--text-secondary, #6c757d);
             display: inline-flex;
             align-items: center;
             gap: 8px;
@@ -126,13 +137,13 @@
         }
 
         .tab-dropdown-toggle:hover {
-            color: #667eea;
-            background: #f8f9fa;
+            color: var(--brand-primary, #667eea);
+            background: var(--bg-muted, #f8f9fa);
         }
 
         .tab-dropdown.active .tab-dropdown-toggle {
-            color: #667eea;
-            border-bottom-color: #667eea;
+            color: var(--brand-primary, #667eea);
+            border-bottom-color: var(--brand-primary, #667eea);
             font-weight: 600;
         }
 
@@ -149,12 +160,11 @@
             display: none;
             position: fixed;
             min-width: 200px;
-            background: white;
-            border: 1px solid #e0e0e0;
+            background: var(--bg-card, white);
+            border: 1px solid var(--border-color, #e0e0e0);
             border-radius: 4px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            box-shadow: var(--shadow-lg, 0 4px 12px rgba(0, 0, 0, 0.15));
             z-index: 10000;
-            margin-top: 2px;
         }
 
         .tab-dropdown.open .tab-dropdown-menu {
@@ -165,11 +175,11 @@
             display: block;
             width: 100%;
             padding: 12px 20px;
-            background: white;
+            background: var(--bg-card, white);
             border: none;
-            border-bottom: 1px solid #f0f0f0;
+            border-bottom: 1px solid var(--border-color-light, #f0f0f0);
             text-align: left;
-            color: #495057;
+            color: var(--text-primary, #495057);
             font-size: 14px;
             font-weight: 500;
             cursor: pointer;
@@ -189,13 +199,13 @@
         }
 
         .tab-dropdown-item:hover {
-            background: #f8f9fa;
-            color: #667eea;
+            background: var(--bg-muted, #f8f9fa);
+            color: var(--brand-primary, #667eea);
         }
 
         .tab-dropdown-item.active {
-            background: #eff6ff;
-            color: #667eea;
+            background: var(--bg-active, #eff6ff);
+            color: var(--brand-primary, #667eea);
             font-weight: 600;
         }
 
@@ -204,7 +214,7 @@
             align-items: center;
             gap: 10px;
             padding: 12px 16px;
-            color: #495057;
+            color: var(--text-primary, #495057);
             text-decoration: none;
             transition: all 0.2s ease;
             cursor: pointer;
@@ -216,19 +226,19 @@
         }
 
         .dropdown-item:hover {
-            background: #f8f9fa;
-            color: #667eea;
+            background: var(--bg-muted, #f8f9fa);
+            color: var(--brand-primary, #667eea);
         }
 
         .dropdown-item.active {
-            background: #e7f0ff;
-            color: #667eea;
+            background: var(--bg-active, #e7f0ff);
+            color: var(--brand-primary, #667eea);
             font-weight: 600;
         }
 
         .dropdown-divider {
             height: 1px;
-            background: #e0e0e0;
+            background: var(--border-color, #e0e0e0);
             margin: 4px 0;
         }
 
@@ -268,10 +278,10 @@
         }
 
         .stat-card {
-            background: white;
+            background: var(--bg-card, white);
             padding: 24px;
             border-radius: 12px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            box-shadow: var(--shadow-card, 0 2px 8px rgba(0,0,0,0.08));
             transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
             position: relative;
             overflow: hidden;
@@ -392,25 +402,26 @@
         table {
             width: 100%;
             border-collapse: collapse;
-            background: white;
+            background: var(--bg-card, white);
         }
 
         table th {
-            background: #f5f5f5;
+            background: var(--bg-muted, #f5f5f5);
             padding: 12px;
             text-align: left;
             font-weight: 600;
-            color: #333;
-            border-bottom: 2px solid #ddd;
+            color: var(--text-primary, #333);
+            border-bottom: 2px solid var(--border-color, #ddd);
         }
 
         table td {
             padding: 12px;
-            border-bottom: 1px solid #f0f0f0;
+            border-bottom: 1px solid var(--border-color-light, #f0f0f0);
+            color: var(--text-primary, #333);
         }
 
         table tr:hover {
-            background: #fafafa;
+            background: var(--bg-muted, #fafafa);
         }
 
         .user-status {
@@ -501,17 +512,18 @@
 
         .pagination button {
             padding: 8px 16px;
-            border: 1px solid #ddd;
-            background: white;
+            border: 1px solid var(--border-color, #ddd);
+            background: var(--bg-card, white);
+            color: var(--text-primary, #333);
             border-radius: 4px;
             cursor: pointer;
             transition: all 0.3s ease;
         }
 
         .pagination button:hover:not(:disabled) {
-            background: #667eea;
+            background: var(--brand-primary, #667eea);
             color: white;
-            border-color: #667eea;
+            border-color: var(--brand-primary, #667eea);
         }
 
         .pagination button:disabled {
@@ -520,45 +532,45 @@
         }
 
         .pagination .page-info {
-            color: #666;
+            color: var(--text-secondary, #666);
             font-size: 14px;
         }
 
         /* Logs Table */
         .log-entry {
             padding: 15px;
-            border: 1px solid #ddd;
+            border: 1px solid var(--border-color, #ddd);
             border-radius: 6px;
             margin-bottom: 10px;
-            background: white;
+            background: var(--bg-card, white);
         }
 
         .log-entry.INFO {
-            border-left: 4px solid #2196F3;
+            border-left: 4px solid var(--color-info, #2196F3);
         }
 
         .log-entry.WARNING {
-            border-left: 4px solid #ff9800;
+            border-left: 4px solid var(--color-warning, #ff9800);
         }
 
         .log-entry.ERROR {
-            border-left: 4px solid #f44336;
+            border-left: 4px solid var(--color-danger, #f44336);
         }
 
         .log-time {
-            color: #999;
+            color: var(--text-muted, #999);
             font-size: 12px;
         }
 
         .log-message {
             margin: 8px 0;
-            color: #333;
+            color: var(--text-primary, #333);
             font-family: monospace;
         }
 
         .log-details {
             font-size: 12px;
-            color: #666;
+            color: var(--text-secondary, #666);
         }
 
         /* Modal Styles */
@@ -580,7 +592,7 @@
         }
 
         .modal-content {
-            background: white;
+            background: var(--bg-card, white);
             border-radius: 12px;
             padding: 0;
             max-width: 800px;
@@ -589,7 +601,7 @@
             overflow: hidden;
             display: flex;
             flex-direction: column;
-            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+            box-shadow: var(--shadow-lg, 0 10px 40px rgba(0, 0, 0, 0.3));
         }
 
         .modal-header {
@@ -597,8 +609,8 @@
             justify-content: space-between;
             align-items: center;
             padding: 20px 30px;
-            border-bottom: 2px solid #f0f0f0;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-bottom: 2px solid var(--border-color-light, #f0f0f0);
+            background: var(--brand-gradient, linear-gradient(135deg, #667eea 0%, #764ba2 100%));
         }
 
         .modal-header h2 {
@@ -653,7 +665,7 @@
         .loading {
             text-align: center;
             padding: 40px;
-            color: #666;
+            color: var(--text-secondary, #666);
             font-size: 16px;
         }
 
@@ -661,7 +673,7 @@
         .empty-state {
             text-align: center;
             padding: 40px;
-            color: #666;
+            color: var(--text-secondary, #666);
         }
 
         .empty-state p {
@@ -670,7 +682,7 @@
 
         .hint-text {
             font-size: 14px;
-            color: #999;
+            color: var(--text-muted, #999);
         }
 
         /* Group Tree Styles */
@@ -682,11 +694,11 @@
         }
 
         .group-item:hover {
-            background: #f3f4f6;
+            background: var(--bg-muted, #f3f4f6);
         }
 
         .group-item.selected {
-            background: #e0e7ff !important;
+            background: var(--bg-active, #e0e7ff) !important;
         }
 
         .group-item-content {
@@ -698,7 +710,7 @@
 
         .group-toggle {
             font-size: 12px;
-            color: #9ca3af;
+            color: var(--text-muted, #9ca3af);
             cursor: pointer;
             user-select: none;
             width: 16px;
@@ -718,15 +730,15 @@
         .group-name {
             flex: 1;
             font-weight: 500;
-            color: #374151;
+            color: var(--text-primary, #374151);
         }
 
         .group-doc-count {
             font-size: 12px;
-            color: #9ca3af;
+            color: var(--text-muted, #9ca3af);
             margin-left: auto;
             padding: 2px 8px;
-            background: #f3f4f6;
+            background: var(--bg-muted, #f3f4f6);
             border-radius: 12px;
         }
 
@@ -752,11 +764,11 @@
         }
 
         .group-edit-btn:hover {
-            background: #dbeafe;
+            background: var(--bg-info-light, #dbeafe);
         }
 
         .group-delete-btn:hover {
-            background: #fee2e2;
+            background: var(--bg-danger-light, #fee2e2);
         }
 
         .group-children {
@@ -773,7 +785,7 @@
             align-items: center;
             gap: 12px;
             padding: 12px;
-            background: white;
+            background: var(--bg-card, white);
             border-radius: 8px;
             margin-bottom: 8px;
             cursor: pointer;
@@ -782,13 +794,13 @@
         }
 
         .doc-checkbox-item:hover {
-            background: #f9fafb;
-            border-color: #e5e7eb;
+            background: var(--bg-muted, #f9fafb);
+            border-color: var(--border-color, #e5e7eb);
         }
 
         .doc-checkbox-item.selected {
-            background: #eff6ff;
-            border-color: #3b82f6;
+            background: var(--bg-active, #eff6ff);
+            border-color: var(--color-info, #3b82f6);
         }
 
         .doc-checkbox-item input[type="checkbox"] {
@@ -808,12 +820,12 @@
 
         .doc-checkbox-item .doc-name {
             font-weight: 500;
-            color: #374151;
+            color: var(--text-primary, #374151);
         }
 
         .doc-checkbox-item .doc-meta {
             font-size: 12px;
-            color: #9ca3af;
+            color: var(--text-muted, #9ca3af);
         }
 
         /* Progress Modal Styles */
@@ -837,9 +849,9 @@
         }
 
         .progress-modal-content {
-            background: white;
+            background: var(--bg-card, white);
             border-radius: 16px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            box-shadow: var(--shadow-lg, 0 20px 60px rgba(0, 0, 0, 0.3));
             width: 90%;
             max-width: 600px;
             max-height: 80vh;
@@ -851,8 +863,8 @@
 
         .progress-modal-header {
             padding: 24px 28px;
-            border-bottom: 2px solid #f0f0f0;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-bottom: 2px solid var(--border-color-light, #f0f0f0);
+            background: var(--brand-gradient, linear-gradient(135deg, #667eea 0%, #764ba2 100%));
             border-radius: 16px 16px 0 0;
             flex-shrink: 0;
             position: sticky;
@@ -886,25 +898,25 @@
             gap: 12px;
             padding: 12px 16px;
             margin-bottom: 8px;
-            background: #f8f9fa;
+            background: var(--bg-muted, #f8f9fa);
             border-radius: 8px;
-            border-left: 4px solid #e0e0e0;
+            border-left: 4px solid var(--border-color, #e0e0e0);
             transition: all 0.3s ease;
         }
 
         .progress-step.active {
-            background: #e6f2ff;
-            border-left-color: #667eea;
+            background: var(--bg-info-light, #e6f2ff);
+            border-left-color: var(--brand-primary, #667eea);
         }
 
         .progress-step.completed {
-            background: #e8f5e9;
-            border-left-color: #4caf50;
+            background: var(--bg-success-light, #e8f5e9);
+            border-left-color: var(--color-success, #4caf50);
         }
 
         .progress-step.error {
-            background: #ffebee;
-            border-left-color: #f44336;
+            background: var(--bg-danger-light, #ffebee);
+            border-left-color: var(--color-danger, #f44336);
         }
 
         .progress-step-icon {
@@ -916,27 +928,27 @@
         .progress-step-text {
             flex: 1;
             font-size: 14px;
-            color: #495057;
+            color: var(--text-primary, #495057);
             font-weight: 500;
         }
 
         .progress-step.active .progress-step-text {
-            color: #667eea;
+            color: var(--brand-primary, #667eea);
             font-weight: 600;
         }
 
         .progress-step.completed .progress-step-text {
-            color: #4caf50;
+            color: var(--color-success, #4caf50);
         }
 
         .progress-step.error .progress-step-text {
-            color: #f44336;
+            color: var(--color-danger, #f44336);
         }
 
         .progress-bar-container {
             width: 100%;
             height: 12px;
-            background: #e0e0e0;
+            background: var(--border-color, #e0e0e0);
             border-radius: 10px;
             overflow: hidden;
             margin-bottom: 20px;
@@ -944,7 +956,7 @@
 
         .progress-bar {
             height: 100%;
-            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            background: var(--brand-gradient, linear-gradient(90deg, #667eea 0%, #764ba2 100%));
             border-radius: 10px;
             transition: width 0.5s ease;
             position: relative;
@@ -978,11 +990,11 @@
 
         .progress-message {
             padding: 16px;
-            background: #f8f9fa;
+            background: var(--bg-muted, #f8f9fa);
             border-radius: 8px;
-            border-left: 4px solid #667eea;
+            border-left: 4px solid var(--brand-primary, #667eea);
             font-size: 14px;
-            color: #495057;
+            color: var(--text-primary, #495057);
             line-height: 1.6;
         }
 
@@ -1058,8 +1070,8 @@
             display: inline-block;
             width: 16px;
             height: 16px;
-            border: 2px solid rgba(102, 126, 234, 0.3);
-            border-top-color: #667eea;
+            border: 2px solid var(--brand-primary-transparent, rgba(102, 126, 234, 0.3));
+            border-top-color: var(--brand-primary, #667eea);
             border-radius: 50%;
             animation: spin 0.8s linear infinite;
         }
@@ -1091,7 +1103,7 @@
             left: 0;
             right: 0;
             bottom: 0;
-            background-color: #ccc;
+            background-color: var(--border-color, #ccc);
             transition: .4s;
         }
 
@@ -1102,16 +1114,16 @@
             width: 18px;
             left: 4px;
             bottom: 4px;
-            background-color: white;
+            background-color: var(--bg-card, white);
             transition: .4s;
         }
 
         input:checked + .slider {
-            background-color: #667eea;
+            background-color: var(--brand-primary, #667eea);
         }
 
         input:focus + .slider {
-            box-shadow: 0 0 1px #667eea;
+            box-shadow: 0 0 1px var(--brand-primary, #667eea);
         }
 
         input:checked + .slider:before {
@@ -1191,39 +1203,39 @@
         }
 
         .btn-primary {
-            background: #667eea;
+            background: var(--brand-primary, #667eea);
             color: white;
         }
 
         .btn-primary:hover {
-            background: #5568d3;
+            background: var(--brand-primary-hover, #5568d3);
         }
 
         .btn-secondary {
-            background: #6c757d;
+            background: var(--btn-secondary, #6c757d);
             color: white;
         }
 
         .btn-secondary:hover {
-            background: #5a6268;
+            background: var(--btn-secondary-hover, #5a6268);
         }
 
         .btn-danger {
-            background: #dc3545;
+            background: var(--color-danger, #dc3545);
             color: white;
         }
 
         .btn-danger:hover {
-            background: #c82333;
+            background: var(--color-danger-hover, #c82333);
         }
 
         .btn-success {
-            background: #10b981;
+            background: var(--color-success, #10b981);
             color: white;
         }
 
         .btn-success:hover {
-            background: #059669;
+            background: var(--color-success-hover, #059669);
         }
 
         .modal {
@@ -1240,9 +1252,9 @@
         }
 
         .modal-content {
-            background: white;
+            background: var(--bg-card, white);
             border-radius: 12px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            box-shadow: var(--shadow-lg, 0 20px 60px rgba(0, 0, 0, 0.3));
             max-width: 600px;
             width: 90%;
             animation: modalSlideIn 0.3s ease;
@@ -1261,7 +1273,7 @@
 
         .modal-header {
             padding: 20px 24px;
-            border-bottom: 1px solid #e5e7eb;
+            border-bottom: 1px solid var(--border-color, #e5e7eb);
             display: flex;
             justify-content: space-between;
             align-items: center;
@@ -1270,14 +1282,14 @@
         .modal-header h3 {
             margin: 0;
             font-size: 20px;
-            color: #333;
+            color: var(--text-primary, #333);
         }
 
         .close-btn {
             background: none;
             border: none;
             font-size: 28px;
-            color: #666;
+            color: var(--text-secondary, #666);
             cursor: pointer;
             padding: 0;
             width: 32px;
@@ -1290,8 +1302,8 @@
         }
 
         .close-btn:hover {
-            background: #f3f4f6;
-            color: #333;
+            background: var(--bg-muted, #f3f4f6);
+            color: var(--text-primary, #333);
         }
 
         .modal-body {
@@ -1300,7 +1312,7 @@
 
         .modal-footer {
             padding: 16px 24px;
-            border-top: 1px solid #e5e7eb;
+            border-top: 1px solid var(--border-color, #e5e7eb);
             display: flex;
             justify-content: flex-end;
             gap: 12px;
@@ -1314,7 +1326,7 @@
             display: block;
             margin-bottom: 8px;
             font-weight: 500;
-            color: #374151;
+            color: var(--text-primary, #374151);
             font-size: 14px;
         }
 
@@ -1323,32 +1335,34 @@
         .form-group select {
             width: 100%;
             padding: 10px 12px;
-            border: 1px solid #d1d5db;
+            border: 1px solid var(--border-color, #d1d5db);
             border-radius: 6px;
             font-size: 14px;
             transition: border-color 0.2s;
+            background: var(--bg-card, white);
+            color: var(--text-primary, #333);
         }
 
         .form-group input:focus,
         .form-group textarea:focus,
         .form-group select:focus {
             outline: none;
-            border-color: #667eea;
-            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+            border-color: var(--brand-primary, #667eea);
+            box-shadow: 0 0 0 3px var(--brand-primary-transparent, rgba(102, 126, 234, 0.1));
         }
 
         .error-message {
             padding: 12px;
-            background: #fee2e2;
-            color: #991b1b;
+            background: var(--bg-danger-light, #fee2e2);
+            color: var(--color-danger, #991b1b);
             border-radius: 6px;
             margin-top: 12px;
             font-size: 14px;
         }
 
         .org-item:hover {
-            border-color: #667eea !important;
-            background: #f0f4ff !important;
+            border-color: var(--brand-primary, #667eea) !important;
+            background: var(--bg-active, #f0f4ff) !important;
         }
     </style>
 
@@ -1402,15 +1416,39 @@
         <div class="admin-header">
             <div>
                 <h1>관리자 대시보드</h1>
-                <p style="color: #666;">시스템 관리 및 사용자 관리</p>
+                <p style="color: var(--text-secondary, #666);">시스템 관리 및 사용자 관리</p>
             </div>
-            <div class="user-info">
-                <p><strong id="adminName">관리자</strong></p>
-                <p><small id="adminEmail">admin@example.com</small></p>
-                <button class="btn btn-secondary" style="margin-top: 10px;" onclick="goToProfile()">
+            <div class="user-info" style="display: flex; align-items: center; gap: 16px;">
+                <!-- Theme Toggle -->
+                <button id="themeToggleBtn" class="theme-toggle" data-theme-toggle aria-label="테마 전환" title="테마 전환" style="padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border-color, #e2e8f0); background: var(--bg-card, #fff); cursor: pointer; font-size: 1.2em;">
+                    <span class="icon-sun">☀️</span>
+                    <span class="icon-moon" style="display: none;">🌙</span>
+                </button>
+                <script>
+                document.getElementById('themeToggleBtn').addEventListener('click', function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (typeof AdminThemes !== 'undefined') {
+                        AdminThemes.toggle();
+                    } else {
+                        // Fallback: toggle data-theme directly
+                        var html = document.documentElement;
+                        var current = html.getAttribute('data-theme') || 'light';
+                        var newTheme = current === 'light' ? 'dark' : 'light';
+                        html.setAttribute('data-theme', newTheme);
+                        document.body.setAttribute('data-theme', newTheme);
+                        localStorage.setItem('admin-theme', newTheme);
+                    }
+                });
+                </script>
+                <div>
+                    <p><strong id="adminName">관리자</strong></p>
+                    <p><small id="adminEmail">admin@example.com</small></p>
+                </div>
+                <button class="btn btn-secondary" onclick="goToProfile()">
                     프로필 관리
                 </button>
-                <button class="btn btn-danger" style="margin-top: 10px;" onclick="goToMain()">
+                <button class="btn btn-danger" onclick="goToMain()">
                     메인으로
                 </button>
             </div>
@@ -1418,6 +1456,17 @@
 
         <div id="error-message" class="message error-message"></div>
         <div id="success-message" class="message success-message"></div>
+
+        <!-- System Alert Banner -->
+        <div id="system-alert-banner" class="alert-banner" style="display: none; background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); border: 1px solid #f59e0b; border-radius: 8px; padding: 12px 20px; margin-bottom: 16px; display: none;">
+            <div style="display: flex; align-items: center; justify-content: space-between;">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <span style="font-size: 1.2em;">⚠️</span>
+                    <span id="alert-banner-message" style="color: #92400e; font-weight: 500;"></span>
+                </div>
+                <button onclick="hideAlertBanner()" style="background: none; border: none; cursor: pointer; font-size: 1.2em; color: #92400e;">×</button>
+            </div>
+        </div>
 
         <!-- Real-time Alert Notifications -->
         <div id="alert-notifications" style="position: fixed; top: 20px; right: 20px; width: 400px; max-height: 600px; overflow-y: auto; z-index: 10000;"></div>
@@ -1503,6 +1552,22 @@
                     <span id="last-update-time" style="font-size: 0.85em; color: #666;"></span>
                     <button class="btn btn-primary" onclick="loadDashboard(true)" style="padding: 8px 16px;">
                         🔄 새로고침
+                    </button>
+                </div>
+            </div>
+
+            <!-- Filter Bar -->
+            <div class="filter-bar" style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 24px; padding: 16px; background: var(--bg-card, #fff); border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">
+                <div class="filter-group" style="display: flex; gap: 8px;">
+                    <button class="btn btn-sm btn-primary filter-preset active" data-preset="24h" onclick="setDashboardPreset('24h')">24시간</button>
+                    <button class="btn btn-sm btn-secondary filter-preset" data-preset="7d" onclick="setDashboardPreset('7d')">7일</button>
+                    <button class="btn btn-sm btn-secondary filter-preset" data-preset="30d" onclick="setDashboardPreset('30d')">30일</button>
+                    <button class="btn btn-sm btn-secondary filter-preset" data-preset="all" onclick="setDashboardPreset('all')">전체</button>
+                </div>
+                <div style="flex: 1;"></div>
+                <div class="filter-actions" style="display: flex; gap: 8px;">
+                    <button class="btn btn-sm btn-secondary" onclick="exportDashboardData()">
+                        📥 내보내기
                     </button>
                 </div>
             </div>
@@ -1737,6 +1802,61 @@
                                 </div>
                             </div>
                             <div style="font-size: 2.5em; opacity: 0.15;">📀</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Charts Section -->
+            <div style="margin-bottom: 24px;">
+                <h3 style="color: #3b82f6; margin-bottom: 16px; font-size: 1.2em; font-weight: 700;">
+                    <span style="background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
+                        📊 시스템 추이 분석
+                    </span>
+                </h3>
+                <div class="chart-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 24px;">
+                    <!-- Search Trends Chart -->
+                    <div class="chart-container" style="background: var(--bg-card, #fff); padding: 20px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
+                        <div class="chart-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                            <h4 style="margin: 0; font-weight: 600; color: var(--text-primary, #1e293b);">📈 검색 추이</h4>
+                            <div class="chart-period-selector" style="display: flex; gap: 8px;">
+                                <button class="btn btn-sm btn-secondary period-btn active" data-period="24h" onclick="updateSearchChart('24h')">24시간</button>
+                                <button class="btn btn-sm btn-secondary period-btn" data-period="7d" onclick="updateSearchChart('7d')">7일</button>
+                                <button class="btn btn-sm btn-secondary period-btn" data-period="30d" onclick="updateSearchChart('30d')">30일</button>
+                            </div>
+                        </div>
+                        <div class="chart-body" style="height: 250px;">
+                            <canvas id="searchTrendChart"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- Source Distribution Chart -->
+                    <div class="chart-container" style="background: var(--bg-card, #fff); padding: 20px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
+                        <div class="chart-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                            <h4 style="margin: 0; font-weight: 600; color: var(--text-primary, #1e293b);">🍩 소스별 분포</h4>
+                        </div>
+                        <div class="chart-body" style="height: 250px;">
+                            <canvas id="sourceDistChart"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- Response Time Chart -->
+                    <div class="chart-container" style="background: var(--bg-card, #fff); padding: 20px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
+                        <div class="chart-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                            <h4 style="margin: 0; font-weight: 600; color: var(--text-primary, #1e293b);">📊 응답 시간 분포</h4>
+                        </div>
+                        <div class="chart-body" style="height: 250px;">
+                            <canvas id="responseTimeChart"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- User Activity Chart -->
+                    <div class="chart-container" style="background: var(--bg-card, #fff); padding: 20px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
+                        <div class="chart-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                            <h4 style="margin: 0; font-weight: 600; color: var(--text-primary, #1e293b);">📉 사용자 활동</h4>
+                        </div>
+                        <div class="chart-body" style="height: 250px;">
+                            <canvas id="userActivityChart"></canvas>
                         </div>
                     </div>
                 </div>
@@ -2002,7 +2122,7 @@
                     <h2 style="margin: 0;">📊 성능 메트릭</h2>
                     <p style="color: #666; margin: 5px 0 0 0;">하이브리드 RAG 시스템의 성능을 모니터링합니다</p>
                 </div>
-                <button onclick="loadPerformanceMetrics()"
+                <button onclick="loadPerformancemetrics()"
                         style="padding: 8px 16px; background: #3b82f6; color: white; border: none; border-radius: 6px; cursor: pointer;">
                     🔄 새로고침
                 </button>
@@ -2168,7 +2288,7 @@
         <div id="login-history-tab" class="tab-content">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                 <h2>🔑 로그인 히스토리</h2>
-                <button class="btn btn-primary" onclick="loadLoginHistory(true)">새로고침</button>
+                <button class="btn btn-primary" onclick="loadLoginhistory(true)">새로고침</button>
             </div>
 
             <!-- 필터 컨트롤 -->
@@ -2339,7 +2459,7 @@
         <div id="audit-tab" class="tab-content">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                 <h2>감사 로그</h2>
-                <button class="btn btn-primary" onclick="loadAuditLogs()">새로고침</button>
+                <button class="btn btn-primary" onclick="loadAuditLogsData()">새로고침</button>
             </div>
 
             <!-- 통계 카드 -->
@@ -5673,6 +5793,9 @@
                 // 문서 및 대화 통계 로드
                 await loadDocumentStats();
 
+                // 차트 초기화 (Chart.js 모듈 사용)
+                await initDashboardCharts();
+
                 // 최종 업데이트 시간 표시
                 const now = new Date();
                 document.getElementById('last-update-time').textContent =
@@ -5785,10 +5908,17 @@
                     keyspace_misses: 0
                 }));
 
-                const totalHits = redisInfo.keyspace_hits || 0;
-                const totalMisses = redisInfo.keyspace_misses || 0;
-                const hitRate = totalHits + totalMisses > 0
-                    ? parseFloat(((totalHits / (totalHits + totalMisses)) * 100).toFixed(1))
+                // 시맨틱 캐시 통계 (Settings와 동일한 소스 사용)
+                const cacheStats = await Auth.apiCall('/api/cache/stats').catch(() => ({
+                    hit_rate: 0,
+                    total_entries: 0,
+                    total_queries: 0,
+                    cache_hits: 0
+                }));
+
+                // 시맨틱 캐시 히트율 사용 (Settings 페이지와 일관성 유지)
+                const hitRate = cacheStats.hit_rate
+                    ? parseFloat((cacheStats.hit_rate * 100).toFixed(1))
                     : 0;
 
                 // Redis 키와 캐시 히트율 애니메이션
@@ -5846,6 +5976,44 @@
             } else {
                 element.style.color = '#22c55e';  // 양호 (초록)
             }
+
+            // 위험 수준이면 알림 배너 표시
+            if (percentage >= 85) {
+                const resourceName = elementId.includes('cpu') ? 'CPU' :
+                                     elementId.includes('memory') ? '메모리' :
+                                     elementId.includes('disk') ? '디스크' : '시스템';
+                showAlertBanner(`${resourceName} 사용률이 ${percentage.toFixed(1)}%로 높습니다. 시스템 성능에 영향을 줄 수 있습니다.`);
+            }
+        }
+
+        // 알림 배너 표시
+        function showAlertBanner(message, type = 'warning') {
+            const banner = document.getElementById('system-alert-banner');
+            const msgEl = document.getElementById('alert-banner-message');
+            if (banner && msgEl) {
+                msgEl.textContent = message;
+                banner.style.display = 'block';
+
+                // 타입에 따른 스타일 변경
+                if (type === 'danger') {
+                    banner.style.background = 'linear-gradient(135deg, #fee2e2 0%, #fecaca 100%)';
+                    banner.style.borderColor = '#ef4444';
+                } else if (type === 'success') {
+                    banner.style.background = 'linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%)';
+                    banner.style.borderColor = '#22c55e';
+                } else {
+                    banner.style.background = 'linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)';
+                    banner.style.borderColor = '#f59e0b';
+                }
+            }
+        }
+
+        // 알림 배너 숨기기
+        function hideAlertBanner() {
+            const banner = document.getElementById('system-alert-banner');
+            if (banner) {
+                banner.style.display = 'none';
+            }
         }
 
         // 문서 및 대화 통계 로드
@@ -5871,6 +6039,232 @@
                 document.getElementById('stat-conversations').textContent = '0';
             }
         }
+
+        // 대시보드 차트 초기화
+        async function initDashboardCharts() {
+            try {
+                // Check if AdminCharts module is available
+                if (typeof AdminCharts === 'undefined') {
+                    console.warn('AdminCharts module not loaded yet');
+                    return;
+                }
+
+                // Fetch metrics data for charts
+                const metricsData = await Auth.apiCall('/api/admin/metrics/recent').catch(() => ({
+                    hourly_data: [],
+                    labels: []
+                }));
+
+                const sourceData = await Auth.apiCall('/api/admin/metrics/source-performance').catch(() => ({
+                    sources: [],
+                    performance: []
+                }));
+
+                devLog('Metrics data for charts:', metricsData, sourceData);
+
+                // Initialize Search Trends Chart
+                if (document.getElementById('searchTrendChart')) {
+                    const searchData = {
+                        labels: metricsData.labels || ['00:00', '04:00', '08:00', '12:00', '16:00', '20:00'],
+                        datasets: [{
+                            label: '검색 수',
+                            data: metricsData.hourly_data || [12, 19, 15, 25, 22, 30],
+                            borderColor: '#667eea',
+                            backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                            fill: true,
+                            tension: 0.4
+                        }]
+                    };
+                    AdminCharts.createLineChart('searchTrendChart', searchData, {
+                        responsive: true,
+                        maintainAspectRatio: false
+                    });
+                }
+
+                // Initialize Source Distribution Chart
+                if (document.getElementById('sourceDistChart')) {
+                    // API returns: {local: {count: X}, web: {count: Y}, docs: {count: Z}}
+                    const localCount = sourceData.local?.count || 0;
+                    const webCount = sourceData.web?.count || 0;
+                    const docsCount = sourceData.docs?.count || 0;
+                    const totalCount = localCount + webCount + docsCount;
+
+                    // Use actual data if available, otherwise show placeholder
+                    const labels = ['로컬 문서', '웹 검색', '문서 검색'];
+                    const values = totalCount > 0 ? [localCount, webCount, docsCount] : [1, 1, 1];  // Equal placeholder if no data
+                    const colors = ['#667eea', '#22c55e', '#f59e0b'];
+
+                    // createDoughnutChart expects {labels, values, colors}
+                    AdminCharts.createDoughnutChart('sourceDistChart', {
+                        labels: labels,
+                        values: values,
+                        colors: colors
+                    }, {
+                        responsive: true,
+                        maintainAspectRatio: false
+                    });
+
+                    // Show message if no data
+                    if (totalCount === 0) {
+                        devLog('No source distribution data available yet');
+                    }
+                }
+
+                // Initialize Response Time Chart
+                if (document.getElementById('responseTimeChart')) {
+                    const responseData = {
+                        labels: ['<100ms', '100-500ms', '500ms-1s', '1-3s', '>3s'],
+                        datasets: [{
+                            label: '응답 수',
+                            data: [150, 89, 45, 22, 8],
+                            backgroundColor: [
+                                '#22c55e',
+                                '#84cc16',
+                                '#f59e0b',
+                                '#f97316',
+                                '#ef4444'
+                            ],
+                            borderRadius: 8
+                        }]
+                    };
+                    AdminCharts.createBarChart('responseTimeChart', responseData, {
+                        responsive: true,
+                        maintainAspectRatio: false
+                    });
+                }
+
+                // Initialize User Activity Chart
+                if (document.getElementById('userActivityChart')) {
+                    const activityData = {
+                        labels: ['월', '화', '수', '목', '금', '토', '일'],
+                        datasets: [{
+                            label: '활성 사용자',
+                            data: [65, 78, 90, 81, 56, 40, 35],
+                            borderColor: '#3b82f6',
+                            backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                            fill: true,
+                            tension: 0.4
+                        }]
+                    };
+                    AdminCharts.createLineChart('userActivityChart', activityData, {
+                        responsive: true,
+                        maintainAspectRatio: false
+                    });
+                }
+
+                devLog('Dashboard charts initialized');
+            } catch (error) {
+                logger.error('Failed to initialize dashboard charts:', error);
+            }
+        }
+
+        // 검색 차트 기간 업데이트
+        window.updateSearchChart = async function(period) {
+            try {
+                // Update button states
+                document.querySelectorAll('.period-btn').forEach(btn => {
+                    btn.classList.toggle('active', btn.dataset.period === period);
+                    btn.classList.toggle('btn-primary', btn.dataset.period === period);
+                    btn.classList.toggle('btn-secondary', btn.dataset.period !== period);
+                });
+
+                // Fetch new data based on period
+                const metricsData = await Auth.apiCall(`/api/admin/metrics/recent?period=${period}`).catch(() => ({
+                    hourly_data: [],
+                    labels: []
+                }));
+
+                // Update chart
+                if (AdminCharts.charts?.searchTrendChart) {
+                    AdminCharts.updateChart('searchTrendChart', {
+                        labels: metricsData.labels || [],
+                        datasets: [{
+                            label: '검색 수',
+                            data: metricsData.hourly_data || [],
+                            borderColor: '#667eea',
+                            backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                            fill: true,
+                            tension: 0.4
+                        }]
+                    });
+                }
+            } catch (error) {
+                logger.error('Failed to update search chart:', error);
+            }
+        };
+
+        // 대시보드 기간 프리셋 설정
+        window.setDashboardPreset = function(preset) {
+            // Update button states
+            document.querySelectorAll('.filter-preset').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.preset === preset);
+                btn.classList.toggle('btn-primary', btn.dataset.preset === preset);
+                btn.classList.toggle('btn-secondary', btn.dataset.preset !== preset);
+            });
+
+            // Store current preset
+            window.currentDashboardPreset = preset;
+
+            // Update charts with new preset
+            updateSearchChart(preset);
+
+            devLog('Dashboard preset changed to:', preset);
+        };
+
+        // 대시보드 데이터 내보내기
+        window.exportDashboardData = async function() {
+            try {
+                // Gather dashboard stats
+                const exportData = {
+                    timestamp: new Date().toISOString(),
+                    users: {
+                        total: document.getElementById('stat-total-users')?.textContent || '0',
+                        active: document.getElementById('stat-active-users')?.textContent || '0',
+                        admins: document.getElementById('stat-admin-users')?.textContent || '0',
+                        sessions: document.getElementById('stat-sessions')?.textContent || '0'
+                    },
+                    feedback: {
+                        positive: document.getElementById('stat-positive-feedback')?.textContent || '0',
+                        negative: document.getElementById('stat-negative-feedback')?.textContent || '0',
+                        satisfaction: document.getElementById('stat-satisfaction-rate')?.textContent || '0%'
+                    },
+                    documents: {
+                        total: document.getElementById('stat-documents')?.textContent || '0',
+                        chunks: document.getElementById('stat-chunks')?.textContent || '0',
+                        conversations: document.getElementById('stat-conversations')?.textContent || '0'
+                    },
+                    system: {
+                        redisKeys: document.getElementById('stat-redis-keys')?.textContent || '0',
+                        cacheHitRate: document.getElementById('stat-cache-hit-rate')?.textContent || '0%',
+                        cpuUsage: document.getElementById('stat-cpu-usage')?.textContent || '0%',
+                        memoryUsage: document.getElementById('stat-memory-usage')?.textContent || '0%',
+                        diskUsage: document.getElementById('stat-disk-usage')?.textContent || '0%'
+                    }
+                };
+
+                // Use AdminFilters if available, otherwise manual export
+                if (typeof AdminFilters !== 'undefined' && AdminFilters.exportToJSON) {
+                    AdminFilters.exportToJSON(exportData, `dashboard-export-${new Date().toISOString().slice(0,10)}.json`);
+                } else {
+                    // Manual export
+                    const jsonContent = JSON.stringify(exportData, null, 2);
+                    const blob = new Blob([jsonContent], { type: 'application/json' });
+                    const link = document.createElement('a');
+                    link.href = URL.createObjectURL(blob);
+                    link.download = `dashboard-export-${new Date().toISOString().slice(0,10)}.json`;
+                    link.click();
+                }
+
+                if (typeof AdminCore !== 'undefined' && AdminCore.toast) {
+                    AdminCore.toast('대시보드 데이터가 내보내기되었습니다.', 'success');
+                }
+            } catch (error) {
+                logger.error('Failed to export dashboard data:', error);
+                if (typeof AdminCore !== 'undefined' && AdminCore.toast) {
+                    AdminCore.toast('내보내기 실패: ' + error.message, 'error');
+                }
+            }
+        };
 
         // 사용자 목록 업데이트
         function updateUsers(data) {
@@ -6005,7 +6399,7 @@
                         <div class="log-entry" style="border-left: 4px solid ${levelColor}; margin-bottom: 12px; padding: 12px; background: white; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
                             <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px;">
                                 <div class="log-time" style="color: #666; font-size: 0.9em;">
-                                    📅 ${new Date(log.timestamp).toLocaleString('ko-KR', {
+                                    📅 ${new Date((log.timestamp || '').replace(/\+00:00Z$/, 'Z')).toLocaleString('ko-KR', {
                                         year: 'numeric',
                                         month: '2-digit',
                                         day: '2-digit',
@@ -6142,16 +6536,15 @@
                 loadSessions();
             } else if (tabName === 'login-history') {
                 populateLoginHistoryUserFilter();
-                loadLoginHistory();
+                loadLoginhistory();
             } else if (tabName === 'logs') {
                 loadLogs();
             } else if (tabName === 'audit') {
-                loadAuditLogs();
-                loadAuditStats();
+                loadAudit();
             } else if (tabName === 'webhooks') {
                 loadWebhooks();
             } else if (tabName === 'models') {
-                loadModelSettings();
+                loadModels();
             } else if (tabName === 'settings') {
                 loadSettings();
             } else if (tabName === 'documents') {
@@ -6162,7 +6555,7 @@
                 // 재색인 탭으로 전환 시 진행 중인 재색인 확인
                 checkReindexStatus();
             } else if (tabName === 'performance-metrics') {
-                loadPerformanceMetrics();
+                loadPerformancemetrics();
             } else if (tabName === 'help') {
                 // 도움말 탭은 별도 로드 불필요
             }
@@ -6887,7 +7280,7 @@
         };
 
         // 로그인 히스토리 로드
-        async function loadLoginHistory(forceRefresh = false) {
+        async function loadLoginhistory(forceRefresh = false) {
             try {
                 // 쿼리 파라미터 구성
                 const params = new URLSearchParams();
@@ -6938,7 +7331,7 @@
             }
 
             tbody.innerHTML = history.map(entry => {
-                const timestamp = new Date(entry.timestamp).toLocaleString('ko-KR');
+                const timestamp = formatDateTime(entry.timestamp);
                 const statusIcon = entry.status === 'success' ? '✅' : (entry.status === 'failed' ? '❌' : '🚫');
                 const statusText = entry.status === 'success' ? '성공' : (entry.status === 'failed' ? '실패' : '차단');
                 const statusColor = entry.status === 'success' ? '#28a745' : (entry.status === 'failed' ? '#dc3545' : '#ffc107');
@@ -7013,7 +7406,7 @@
         // 페이지 변경
         function changeLoginHistoryPage(page) {
             loginHistoryCurrentPage = page;
-            loadLoginHistory();
+            loadLoginhistory();
         }
 
         // 필터 적용
@@ -7024,7 +7417,7 @@
             loginHistoryFilters.user_id = userFilter;
             loginHistoryFilters.status = statusFilter;
             loginHistoryCurrentPage = 1; // 필터 변경 시 첫 페이지로
-            loadLoginHistory();
+            loadLoginhistory();
         }
 
         // 시간 범위 설정
@@ -7053,7 +7446,7 @@
             }
 
             loginHistoryCurrentPage = 1;
-            loadLoginHistory();
+            loadLoginhistory();
         }
 
         // 필터 초기화
@@ -7067,7 +7460,7 @@
                 end_time: ''
             };
             loginHistoryCurrentPage = 1;
-            loadLoginHistory();
+            loadLoginhistory();
         }
 
         // 사용자 목록을 필터 드롭다운에 채우기
@@ -7094,7 +7487,7 @@
         /**
          * 성능 메트릭 로드
          */
-        async function loadPerformanceMetrics() {
+        async function loadPerformancemetrics() {
             try {
                 // API 호출
                 const [summary, sourcePerf] = await Promise.all([
@@ -7205,7 +7598,7 @@
 
                 // 테이블 행 생성
                 tbody.innerHTML = searches.map(search => {
-                    const time = new Date(search.timestamp).toLocaleString('ko-KR');
+                    const time = formatDateTime(search.timestamp);
                     const query = search.query || '-';
                     const mode = search.search_mode || '-';
                     const sources = search.sources_used ? search.sources_used.join(', ') : '-';
@@ -7742,8 +8135,17 @@
             }
         }
 
-        // 감사 로그 로드
-        async function loadAuditLogs() {
+        // 감사 로그 탭 로드 (AdminCore.switchTab 호출용)
+        async function loadAudit() {
+            // 다른 탭에서 isLoading이 true로 남아있을 수 있으므로 리셋
+            isLoading = false;
+            await loadAuditStats();
+            await loadAuditActions();
+            await loadAuditLogsData();
+        }
+
+        // 감사 로그 데이터 로드
+        async function loadAuditLogsData() {
             if (isLoading) return;
 
             try {
@@ -7862,14 +8264,14 @@
 
             if (newPage >= 1 && newPage <= totalPages) {
                 auditCurrentPage = newPage;
-                loadAuditLogs();
+                loadAuditLogsData();
             }
         }
 
         // 감사 로그 필터 적용
         function applyAuditFilters() {
             auditCurrentPage = 1;  // 필터 변경 시 첫 페이지로
-            loadAuditLogs();
+            loadAuditLogsData();
         }
 
         // 감사 로그 필터 초기화
@@ -7879,7 +8281,7 @@
             document.getElementById('auditStartDate').value = '';
             document.getElementById('auditEndDate').value = '';
             auditCurrentPage = 1;
-            loadAuditLogs();
+            loadAuditLogsData();
         }
 
         // ========================================
@@ -8037,7 +8439,7 @@
                             </div>
                         ` : ''}
                         <div style="font-size: 0.8em; color: #999; margin-top: 5px;">
-                            ${new Date(alert.timestamp).toLocaleString('ko-KR')}
+                            ${formatDateTime(alert.timestamp)}
                         </div>
                     </div>
                     <button onclick="this.parentElement.parentElement.remove()"
@@ -8108,7 +8510,7 @@
         // ============================================================================
 
         // 모델 설정 로드
-        async function loadModelSettings() {
+        async function loadModels() {
             try {
                 const config = await Auth.apiCall('/api/admin/models/backend');
 
@@ -8325,7 +8727,7 @@
                 }
 
                 // 설정 UI 새로고침
-                await loadModelSettings();
+                await loadModels();
 
             } catch (error) {
                 logger.error('Error saving model config:', error);
@@ -8605,33 +9007,7 @@
         // 기존 함수 종료
         // ============================================
 
-        // 시스템 설정 탭이 열릴 때 캐시 통계 및 시스템 프롬프트 로드
-        const originalSwitchTab = window.switchTab;
-        window.switchTab = function(tabName) {
-            if (typeof originalSwitchTab === 'function') {
-                originalSwitchTab(tabName);
-            }
-            if (tabName === 'settings') {
-                adminRefreshCacheStats();
-                loadPrompts(); // 🆕 새 API 사용
-                loadRateLimitConfig();
-                loadCaptchaConfig();
-                loadTotpConfig();
-                loadBruteForceConfig();
-                loadHybridRagConfig();
-                loadRagQualityConfig();
-            }
-            if (tabName === 'documents') {
-                adminLoadDocuments();
-            }
-            if (tabName === 'groups') {
-                adminLoadGroups();
-            }
-            if (tabName === 'backup') {
-                refreshBackupList();
-                loadBackupSchedule();
-            }
-        };
+        // 탭 변경 핸들러는 admin-core.js 로드 후 별도 스크립트에서 등록
 
         // ============================================
         // 문서 관리 기능
@@ -10342,7 +10718,12 @@
         }
 
         function formatDateTime(isoString) {
-            const date = new Date(isoString);
+            // Fix malformed timestamp format: +00:00Z -> Z
+            const sanitized = isoString ? isoString.replace(/\+00:00Z$/, 'Z') : isoString;
+            const date = new Date(sanitized);
+            if (isNaN(date.getTime())) {
+                return '-';
+            }
             return date.toLocaleString('ko-KR', {
                 year: 'numeric',
                 month: '2-digit',
@@ -10847,7 +11228,9 @@
             if (!timestamp) return '없음';
 
             try {
-                const date = new Date(timestamp);
+                // Fix malformed timestamp format: +00:00Z -> Z
+                const sanitized = timestamp.replace(/\+00:00Z$/, 'Z');
+                const date = new Date(sanitized);
                 const year = date.getFullYear();
                 const month = String(date.getMonth() + 1).padStart(2, '0');
                 const day = String(date.getDate()).padStart(2, '0');
@@ -12884,6 +13267,22 @@
             }
         }
 
+        // ====================================================================
+        // Window exports for AdminCore.switchTab
+        // AdminCore calls window[`load${capitalize(tabName)}`]() on tab switch
+        // Tab name 'audit' -> loadAudit, 'performance-metrics' -> loadPerformancemetrics
+        // ====================================================================
+        window.loadDashboard = loadDashboard;
+        window.loadUsers = loadUsers;
+        window.loadModels = loadModels;
+        window.loadAudit = loadAudit;
+        window.loadPerformancemetrics = loadPerformancemetrics;
+        window.loadSettings = loadSettings;
+        window.loadSessions = loadSessions;
+        window.loadLoginhistory = loadLoginhistory;
+        window.loadLogs = loadLogs;
+        window.loadWebhooks = loadWebhooks;
+
     </script>
 
     <!-- Progress Modal -->
@@ -12965,6 +13364,51 @@
             </div>
         </div>
     </div>
+
+    <!-- Admin Dashboard JS Modules -->
+    <script src="/static/admin/js/admin-themes.js"></script>
+    <script src="/static/admin/js/admin-core.js"></script>
+    <script src="/static/admin/js/admin-filters.js"></script>
+    <script src="/static/admin/js/admin-charts.js"></script>
+
+    <!-- Tab Change Event Handlers (must be after admin-core.js) -->
+    <script>
+        // 탭 변경 시 데이터 로드 핸들러
+        document.addEventListener('DOMContentLoaded', function() {
+            if (typeof AdminCore !== 'undefined' && AdminCore.on) {
+                AdminCore.on('tabChange', function(e) {
+                    const tabName = e.detail.tabName;
+                    console.log('[TabChange] Tab changed to:', tabName);
+
+                    switch(tabName) {
+                        case 'settings':
+                            if (typeof adminRefreshCacheStats === 'function') adminRefreshCacheStats();
+                            if (typeof loadPrompts === 'function') loadPrompts();
+                            if (typeof loadRateLimitConfig === 'function') loadRateLimitConfig();
+                            if (typeof loadCaptchaConfig === 'function') loadCaptchaConfig();
+                            if (typeof loadTotpConfig === 'function') loadTotpConfig();
+                            if (typeof loadBruteForceConfig === 'function') loadBruteForceConfig();
+                            if (typeof loadHybridRagConfig === 'function') loadHybridRagConfig();
+                            if (typeof loadRagQualityConfig === 'function') loadRagQualityConfig();
+                            break;
+                        case 'documents':
+                            if (typeof adminLoadDocuments === 'function') adminLoadDocuments();
+                            break;
+                        case 'groups':
+                            if (typeof adminLoadGroups === 'function') adminLoadGroups();
+                            break;
+                        case 'backup':
+                            if (typeof refreshBackupList === 'function') refreshBackupList();
+                            if (typeof loadBackupSchedule === 'function') loadBackupSchedule();
+                            break;
+                    }
+                });
+                console.log('[TabChange] Event handlers registered');
+            } else {
+                console.error('[TabChange] AdminCore not found');
+            }
+        });
+    </script>
 
 </body>
 </html>

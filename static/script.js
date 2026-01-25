@@ -1676,7 +1676,7 @@ async function sendMessage(regenerate = false) {
                     return res;
                 }
             ),
-            60000 // 60 second timeout (increased for LLM response generation)
+            120000 // 120 second timeout (increased for slower LLM models)
         );
 
         // Create message container for streaming first

@@ -111,6 +111,13 @@ class WebhookService:
                 return default
             return raw.decode() if isinstance(raw, bytes) else raw
 
+        def parse_datetime(dt_str: str) -> datetime:
+            """Parse datetime string and ensure timezone-aware (UTC)"""
+            dt = datetime.fromisoformat(dt_str)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt
+
         return Webhook(
             webhook_id=get_field("webhook_id"),
             name=get_field("name"),
@@ -118,15 +125,15 @@ class WebhookService:
             events=json.loads(get_field("events", "[]")),
             secret=get_field("secret") or None,
             is_active=get_field("is_active") == "True",
-            created_at=datetime.fromisoformat(get_field("created_at")),
-            updated_at=datetime.fromisoformat(get_field("updated_at")),
+            created_at=parse_datetime(get_field("created_at")),
+            updated_at=parse_datetime(get_field("updated_at")),
             created_by=get_field("created_by"),
             total_deliveries=int(get_field("total_deliveries", 0)),
             successful_deliveries=int(get_field("successful_deliveries", 0)),
             failed_deliveries=int(get_field("failed_deliveries", 0)),
-            last_delivery_at=datetime.fromisoformat(get_field("last_delivery_at")) if get_field("last_delivery_at") else None,
-            last_success_at=datetime.fromisoformat(get_field("last_success_at")) if get_field("last_success_at") else None,
-            last_failure_at=datetime.fromisoformat(get_field("last_failure_at")) if get_field("last_failure_at") else None,
+            last_delivery_at=parse_datetime(get_field("last_delivery_at")) if get_field("last_delivery_at") else None,
+            last_success_at=parse_datetime(get_field("last_success_at")) if get_field("last_success_at") else None,
+            last_failure_at=parse_datetime(get_field("last_failure_at")) if get_field("last_failure_at") else None,
             retry_count=int(get_field("retry_count", 3)),
             timeout_seconds=int(get_field("timeout_seconds", 30))
         )
@@ -163,6 +170,13 @@ class WebhookService:
                     return default
                 return raw.decode() if isinstance(raw, bytes) else raw
 
+            def parse_datetime(dt_str: str) -> datetime:
+                """Parse datetime string and ensure timezone-aware (UTC)"""
+                dt = datetime.fromisoformat(dt_str)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                return dt
+
             try:
                 webhook = Webhook(
                     webhook_id=get_field("webhook_id"),
@@ -171,15 +185,15 @@ class WebhookService:
                     events=json.loads(get_field("events", "[]")),
                     secret=get_field("secret") or None,
                     is_active=get_field("is_active") == "True",
-                    created_at=datetime.fromisoformat(get_field("created_at")),
-                    updated_at=datetime.fromisoformat(get_field("updated_at")),
+                    created_at=parse_datetime(get_field("created_at")),
+                    updated_at=parse_datetime(get_field("updated_at")),
                     created_by=get_field("created_by"),
                     total_deliveries=int(get_field("total_deliveries", 0)),
                     successful_deliveries=int(get_field("successful_deliveries", 0)),
                     failed_deliveries=int(get_field("failed_deliveries", 0)),
-                    last_delivery_at=datetime.fromisoformat(get_field("last_delivery_at")) if get_field("last_delivery_at") else None,
-                    last_success_at=datetime.fromisoformat(get_field("last_success_at")) if get_field("last_success_at") else None,
-                    last_failure_at=datetime.fromisoformat(get_field("last_failure_at")) if get_field("last_failure_at") else None,
+                    last_delivery_at=parse_datetime(get_field("last_delivery_at")) if get_field("last_delivery_at") else None,
+                    last_success_at=parse_datetime(get_field("last_success_at")) if get_field("last_success_at") else None,
+                    last_failure_at=parse_datetime(get_field("last_failure_at")) if get_field("last_failure_at") else None,
                     retry_count=int(get_field("retry_count", 3)),
                     timeout_seconds=int(get_field("timeout_seconds", 30))
                 )

@@ -197,6 +197,10 @@ async def create_redis_backup(
                 try:
                     docker_container = validate_docker_container(result.stdout.strip())
                     logger.info(f"📦 Detected Redis running in Docker container: {docker_container}")
+                    # Docker 컨테이너 내부의 기본 Redis 데이터 경로 사용
+                    # (로컬 Redis 설정과 다를 수 있음)
+                    redis_dir = "/data"
+                    logger.info(f"📁 Using Docker Redis data directory: {redis_dir}")
                 except ValueError as ve:
                     logger.error(f"❌ Invalid Docker container name: {ve}")
                     raise HTTPException(
@@ -378,6 +382,9 @@ async def restore_redis_backup(
                 try:
                     docker_container = validate_docker_container(result.stdout.strip())
                     logger.info(f"🔍 Step 2/7: Docker container detected: {docker_container}")
+                    # Docker 컨테이너 내부의 기본 Redis 데이터 경로 사용
+                    redis_dir = "/data"
+                    logger.info(f"📁 Using Docker Redis data directory: {redis_dir}")
                 except ValueError as ve:
                     logger.error(f"❌ Invalid Docker container name: {ve}")
                     raise HTTPException(

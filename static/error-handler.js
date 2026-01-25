@@ -15,7 +15,7 @@ class ErrorHandler {
     constructor() {
         this.maxRetries = 3;
         this.baseDelay = 1000; // 1 second
-        this.timeout = 60000; // 60 seconds (increased for LLM response generation)
+        this.timeout = 120000; // 120 seconds (increased for slower LLM models like glm-4.7-flash)
         this.retryCount = 0;
     }
 
