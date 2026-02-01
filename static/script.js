@@ -1,4 +1,63 @@
+// ========================================
+// XSS Protection with DOMPurify
+// ========================================
+
+/**
+ * Sanitize HTML content using DOMPurify
+ * @param {string} dirty - Potentially unsafe HTML
+ * @param {Object} config - DOMPurify configuration
+ * @returns {string} - Sanitized HTML
+ */
+function sanitizeHTML(dirty, config = {}) {
+    if (typeof DOMPurify === 'undefined') {
+        console.error('DOMPurify is not loaded! Falling back to text content only.');
+        // Fallback: strip all HTML tags
+        const div = document.createElement('div');
+        div.textContent = dirty;
+        return div.innerHTML;
+    }
+
+    // Default config: allow most HTML but remove dangerous elements
+    const defaultConfig = {
+        ALLOWED_TAGS: [
+            'a', 'abbr', 'b', 'blockquote', 'br', 'code', 'dd', 'del', 'div',
+            'dl', 'dt', 'em', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr', 'i',
+            'img', 'ins', 'kbd', 'li', 'mark', 'ol', 'p', 'pre', 's', 'span',
+            'strong', 'sub', 'sup', 'table', 'tbody', 'td', 'tfoot', 'th',
+            'thead', 'tr', 'u', 'ul'
+        ],
+        ALLOWED_ATTR: [
+            'class', 'id', 'href', 'title', 'alt', 'src', 'width', 'height',
+            'data-*', 'aria-*', 'role', 'target', 'rel'
+        ],
+        ALLOW_DATA_ATTR: true,
+        ALLOW_ARIA_ATTR: true,
+        // Prevent data: URIs in images (XSS vector)
+        FORBID_ATTR: ['onerror', 'onload', 'onclick'],
+        FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'link', 'style'],
+        ...config
+    };
+
+    return DOMPurify.sanitize(dirty, defaultConfig);
+}
+
+/**
+ * Safely set innerHTML with DOMPurify sanitization
+ * @param {HTMLElement} element - Target element
+ * @param {string} html - HTML content to set
+ * @param {Object} config - DOMPurify configuration
+ */
+function safeSetInnerHTML(element, html, config = {}) {
+    if (!element) {
+        console.error('safeSetInnerHTML: element is null or undefined');
+        return;
+    }
+    element.innerHTML = sanitizeHTML(html, config);
+}
+
+// ========================================
 // ASCII art detection function (shared between renderer and highlighter)
+// ========================================
 function isAsciiArt(code, language) {
     // If language is specified and it's a known programming language, it's not ASCII art
     if (language && ['javascript', 'python', 'java', 'cpp', 'c', 'csharp', 'go', 'rust',
@@ -1865,7 +1924,7 @@ async function sendMessage(regenerate = false) {
 
                             // Server already filters <think> tags, so just render
                             try {
-                                contentDiv.innerHTML = marked.parse(fullText);
+                                contentDiv.innerHTML = sanitizeHTML(marked.parse(fullText);
 
                                 // Highlight code blocks first
                                 contentDiv.querySelectorAll('pre code').forEach((block) => {
@@ -1917,7 +1976,7 @@ async function sendMessage(regenerate = false) {
                             devLog('🔧 [REPLACE] Received corrected response (garbled citation fix)');
                             fullText = data.data;
                             try {
-                                contentDiv.innerHTML = marked.parse(fullText);
+                                contentDiv.innerHTML = sanitizeHTML(marked.parse(fullText);
                                 contentDiv.querySelectorAll('pre code').forEach((block) => {
                                     if (!block.dataset.highlighted) {
                                         normalizeLanguageClass(block);
@@ -1942,7 +2001,7 @@ async function sendMessage(regenerate = false) {
                             if (!fullText || fullText.trim().length === 0) {
                                 logger.warn('⚠️ Empty response received from server');
                                 fullText = '죄송합니다. 응답을 생성하지 못했습니다. 다시 시도해 주세요.\n\n**가능한 원인:**\n- 모델이 응답을 생성하지 못함\n- 요청 시간 초과\n- 서버 부하로 인한 응답 실패';
-                                contentDiv.innerHTML = marked.parse(fullText);
+                                contentDiv.innerHTML = sanitizeHTML(marked.parse(fullText);
                             }
 
                             // Show completion (StreamingVisualizer)
@@ -2151,7 +2210,7 @@ function addMessage(text, type, sources = null) {
 
     if (type === 'bot') {
         // Render markdown
-        contentDiv.innerHTML = marked.parse(text);
+        contentDiv.innerHTML = sanitizeHTML(marked.parse(text);
 
         // Highlight code blocks
         contentDiv.querySelectorAll('pre code').forEach((block) => {
@@ -7159,7 +7218,7 @@ function restoreChatUI() {
             const contentDiv = messageDiv.querySelector('.message-content');
 
             // Render markdown
-            contentDiv.innerHTML = marked.parse(msg.content);
+            contentDiv.innerHTML = sanitizeHTML(marked.parse(msg.content);
 
             // Apply syntax highlighting
             contentDiv.querySelectorAll('pre code').forEach((block) => {
