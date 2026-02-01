@@ -151,6 +151,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self.burst = burst
         self.enabled = enabled
         self._limiter: Optional[RedisRateLimiter] = None
+        # rate limit enabled 상태 인메모리 캐시
+        self._enabled_cache = {"value": None, "timestamp": 0, "ttl": 10}
 
     def _get_limiter(self, request: Request) -> Optional[RedisRateLimiter]:
         """Redis 인스턴스를 app.state에서 가져와 limiter 생성"""
@@ -176,33 +178,43 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             "/docs",
             "/redoc",
             "/openapi.json",
-            "/api/auth/admin/"  # 관리자 API는 rate limit 제외
         ]
 
         return any(request.url.path.startswith(path) for path in exempt_paths)
 
     def _is_rate_limit_enabled(self, request: Request) -> bool:
         """
-        Rate limiting 활성화 상태 확인 (Redis에서 동적으로 확인)
+        Rate limiting 활성화 상태 확인 (인메모리 캐시 + Redis)
 
         Returns:
             bool: Rate limiting 활성화 여부
         """
+        # 인메모리 캐시 확인
+        now = time.time()
+        if (self._enabled_cache["value"] is not None and
+                now - self._enabled_cache["timestamp"] < self._enabled_cache["ttl"]):
+            return self._enabled_cache["value"]
+
         try:
             # Redis에서 설정 확인
             redis = getattr(request.app.state, 'cache_manager', None)
             if redis and hasattr(redis, 'redis'):
                 enabled_str = redis.redis.get("config:rate_limit_enabled")
                 if enabled_str is not None:
-                    # Redis에 설정이 있으면 그 값 사용
-                    return enabled_str.decode() == "true"
+                    result = enabled_str.decode() == "true"
+                    self._enabled_cache["value"] = result
+                    self._enabled_cache["timestamp"] = now
+                    return result
 
             # Redis 설정이 없으면 기본값 사용
+            self._enabled_cache["value"] = self.enabled
+            self._enabled_cache["timestamp"] = now
             return self.enabled
 
         except Exception as e:
             logger.warning(f"Failed to check rate limit status from Redis: {e}")
-            # 에러 시 기본값 사용
+            self._enabled_cache["value"] = self.enabled
+            self._enabled_cache["timestamp"] = now
             return self.enabled
 
     async def dispatch(self, request: Request, call_next):

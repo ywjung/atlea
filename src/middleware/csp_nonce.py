@@ -58,20 +58,22 @@ class CSPNonceMiddleware(BaseHTTPMiddleware):
         # Process request
         response = await call_next(request)
 
-        # Optionally modify CSP header if it exists
-        # This is for gradual migration - can be enabled later
-        # if "Content-Security-Policy" in response.headers:
-        #     csp = response.headers["Content-Security-Policy"]
-        #     # Replace 'unsafe-inline' with nonce for scripts and styles
-        #     csp = csp.replace(
-        #         "script-src 'self' 'unsafe-inline'",
-        #         f"script-src 'self' 'nonce-{nonce}'"
-        #     )
-        #     csp = csp.replace(
-        #         "style-src 'self' 'unsafe-inline'",
-        #         f"style-src 'self' 'nonce-{nonce}'"
-        #     )
-        #     response.headers["Content-Security-Policy"] = csp
+        # CSP 헤더 적용: 기존 헤더가 있으면 nonce로 업그레이드, 없으면 새로 설정
+        if "Content-Security-Policy" in response.headers:
+            csp = response.headers["Content-Security-Policy"]
+            # 'unsafe-inline'을 nonce로 교체
+            csp = csp.replace(
+                "script-src 'self' 'unsafe-inline'",
+                f"script-src 'self' 'nonce-{nonce}'"
+            )
+            csp = csp.replace(
+                "style-src 'self' 'unsafe-inline'",
+                f"style-src 'self' 'nonce-{nonce}'"
+            )
+            response.headers["Content-Security-Policy"] = csp
+        else:
+            # CSP 헤더가 없는 경우 기본 CSP 설정
+            response.headers["Content-Security-Policy"] = build_csp_with_nonce(nonce)
 
         return response
 

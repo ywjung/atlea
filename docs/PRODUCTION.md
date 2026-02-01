@@ -31,7 +31,18 @@ REQUIRE_HTTPS=true
 RATE_LIMIT_ENABLED=true
 RATE_LIMIT_PER_MINUTE=60
 RATE_LIMIT_BURST=10
+
+# Ollama LLM 백엔드 (선택 - Ollama 사용 시)
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_LLM_MODEL=alibayram/Qwen3-30B-A3B-Instruct-2507:latest
+
+# 웹 검색 - Hybrid RAG (선택)
+SEARXNG_URL=http://searxng:8888
+CRAWL4AI_API_TOKEN=your-crawl4ai-token
+TAVILY_API_KEY=your-tavily-api-key
 ```
+
+> **참고**: 2FA 강제 적용, CAPTCHA, TTS, 감사 로그, Brute Force 방어 설정은 관리자 웹 UI 또는 Redis 설정 키로 관리됩니다. 프로덕션 배포 시 아래 보안 체크리스트를 참고하세요.
 
 ### 2. SECRET_KEY 생성
 
@@ -85,7 +96,7 @@ uvicorn src.web_server:app \
 
 ```ini
 [Unit]
-Description=RAG Chatbot Service
+Description=ATLEA Service
 After=network.target redis.service
 
 [Service]
@@ -203,6 +214,11 @@ KEEPALIVE_TIMEOUT=5        # Keep-alive 타임아웃 (초)
 - [ ] 로그 파일 권한 확인
 - [ ] 방화벽 설정 (필요한 포트만 개방)
 - [ ] API 문서 비활성화 확인 (프로덕션에서는 /docs 자동 비활성화됨)
+- [ ] 2FA 강제 적용 활성화 (`config:totp_enabled=true`)
+- [ ] 로그인 CAPTCHA 활성화 (`config:captcha_login_enabled=true`)
+- [ ] 회원가입 CAPTCHA 활성화 (`config:captcha_register_enabled=true`)
+- [ ] 감사 로그 보관 기간 확인 (기본 90일)
+- [ ] Brute Force 방어 설정 확인 (5회 실패 → 15분 잠금)
 
 ## 🔍 트러블슈팅
 
@@ -384,6 +400,52 @@ networks:
 
 ```bash
 docker-compose up -d
+```
+
+### SearXNG + Crawl4AI (웹 검색 기능)
+
+Hybrid RAG 웹 검색 기능을 사용하려면 SearXNG와 Crawl4AI 서비스를 추가로 실행합니다:
+
+```bash
+# SearXNG + Crawl4AI 시작
+docker compose -f docker-compose.searxng.yml up -d
+
+# 상태 확인
+docker ps | grep -E "searxng|crawl4ai"
+
+# 헬스체크
+curl http://localhost:8888/healthz      # SearXNG
+curl http://localhost:11235/health      # Crawl4AI
+```
+
+관리자 페이지에서 웹 검색 프로바이더를 `SearXNG (자체 호스팅)`으로 설정하고 URL을 `http://searxng:8888`로 입력하세요.
+
+### document-service (Java) systemd 서비스
+
+Java 문서 처리 서비스를 Docker 없이 직접 실행하는 경우:
+
+```ini
+# /etc/systemd/system/document-service.service
+[Unit]
+Description=ATLEA Document Processing Service (Java)
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/path/to/chatbot_redis/document-service
+ExecStart=/usr/bin/java -jar build/libs/document-service.jar --server.port=8081
+Restart=always
+RestartSec=10
+Environment=JAVA_OPTS=-Xmx2g
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl enable document-service
+sudo systemctl start document-service
 ```
 
 ## 📝 변경 이력

@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 import random
 
 # Log file path
-LOG_FILE = "server.log"
+LOG_FILE = "logs/server.log"
 
 # Generate test events
 test_events = [

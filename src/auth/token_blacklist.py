@@ -158,9 +158,9 @@ class TokenBlacklist:
 
         except Exception as e:
             logger.error(f"Error checking token blacklist: {e}")
-            # Redis 오류 시 안전하게 False 반환 (fail-open)
-            # 프로덕션에서는 더 엄격한 정책 고려 필요
-            return False
+            # Redis 오류 시 안전하게 True 반환 (fail-closed)
+            # 블랙리스트 확인 불가 시 토큰을 거부하여 보안 유지
+            return True
 
     def revoke_user_tokens(self, user_id: str, secret_key: str, reason: str = "security") -> int:
         """특정 사용자의 모든 토큰 무효화
@@ -207,7 +207,7 @@ class TokenBlacklist:
             while True:
                 cursor, keys = self.redis.scan(cursor, match=pattern, count=100)
                 # user: 키 제외하고 실제 토큰만 카운트
-                tokens = [k for k in keys if not k.decode().endswith(b"user:")]
+                tokens = [k for k in keys if ":user:" not in k.decode()]
                 total_tokens += len(tokens)
 
                 if cursor == 0:

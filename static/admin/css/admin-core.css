@@ -33,6 +33,24 @@
     --color-info-light: #dbeafe;
     --color-info-dark: #2563eb;
 
+    /* Semantic Box Colors - Light Theme */
+    --warning-bg: #fff3cd;
+    --warning-border: #ffc107;
+    --warning-text: #856404;
+    --info-bg: #e7f3ff;
+    --info-border: #2196f3;
+    --info-text: #1565c0;
+    --error-text: #f44336;
+    --success-bg: #d4edda;
+    --success-border: #28a745;
+    --success-text: #155724;
+
+    /* Primary Color Alias */
+    --primary-color: #667eea;
+
+    /* Tertiary Background */
+    --bg-tertiary: #f3f4f6;
+
     /* Neutral Colors - Light Theme */
     --bg-body: #f8fafc;
     --bg-card: #ffffff;

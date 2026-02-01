@@ -1,6 +1,6 @@
 # Multi-Platform Deployment Guide
 
-이 문서는 Mac (Apple Silicon), Linux (NVIDIA GPU), Linux (CPU) 환경에서 RAG 챗봇을 배포하는 방법을 설명합니다.
+이 문서는 Mac (Apple Silicon), Linux (NVIDIA GPU), Linux (CPU) 환경에서 ATLEA를 배포하는 방법을 설명합니다.
 
 ## 목차
 1. [Mac (Apple Silicon) 배포](#mac-apple-silicon-배포)
@@ -282,6 +282,130 @@ deploy:
 
 ---
 
+## Ollama 배포
+
+Ollama는 로컬에서 LLM을 실행할 수 있는 범용 서버로, MLX(Apple Silicon 전용)의 대안으로 모든 플랫폼에서 사용할 수 있습니다.
+
+### Ollama 설치
+
+#### macOS
+```bash
+# Homebrew로 설치
+brew install ollama
+
+# 또는 공식 설치 스크립트
+curl -fsSL https://ollama.com/install.sh | sh
+```
+
+#### Linux
+```bash
+curl -fsSL https://ollama.com/install.sh | sh
+```
+
+#### Docker
+```bash
+docker run -d --name ollama -p 11434:11434 -v ollama:/root/.ollama ollama/ollama
+```
+
+### 모델 다운로드
+
+```bash
+# Ollama 서버 시작 (설치 후 자동 시작되지 않은 경우)
+ollama serve
+
+# 기본 LLM 모델 다운로드
+ollama pull alibayram/Qwen3-30B-A3B-Instruct-2507:latest
+
+# 경량 모델 (메모리 부족 시)
+ollama pull qwen2.5:3b
+
+# 설치된 모델 확인
+ollama list
+```
+
+### 환경변수 설정
+
+```bash
+# .env 파일에 추가
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_LLM_MODEL=alibayram/Qwen3-30B-A3B-Instruct-2507:latest
+
+# 임베딩 모델 (선택사항 - 기본적으로 Sentence Transformers 사용)
+# OLLAMA_EMBEDDING_MODEL=nomic-embed-text
+```
+
+### Ollama를 systemd 서비스로 실행 (Linux)
+
+```ini
+# /etc/systemd/system/ollama.service
+[Unit]
+Description=Ollama LLM Server
+After=network.target
+
+[Service]
+Type=simple
+User=ollama
+ExecStart=/usr/local/bin/ollama serve
+Restart=always
+RestartSec=10
+Environment=OLLAMA_HOST=0.0.0.0
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl enable ollama
+sudo systemctl start ollama
+
+# 상태 확인
+curl http://localhost:11434/api/version
+```
+
+### 헬스 체크
+
+```bash
+# Ollama 서버 상태
+curl http://localhost:11434/api/version
+
+# 모델 목록
+curl http://localhost:11434/api/tags
+
+# 간단한 추론 테스트
+curl http://localhost:11434/api/generate -d '{"model":"alibayram/Qwen3-30B-A3B-Instruct-2507:latest","prompt":"안녕하세요","stream":false}'
+```
+
+### 문제 해결
+
+**Ollama 서버 연결 실패**:
+```bash
+# 서버 실행 여부 확인
+curl http://localhost:11434/api/version
+
+# 포트 사용 확인
+lsof -i :11434
+
+# 서버 재시작
+ollama serve
+```
+
+**모델 다운로드 실패**:
+```bash
+# 디스크 공간 확인 (30B 모델은 약 20GB 필요)
+df -h
+
+# 다운로드 재시도
+ollama pull alibayram/Qwen3-30B-A3B-Instruct-2507:latest
+```
+
+**GPU 메모리 부족 시**:
+```bash
+# 경량 모델 사용
+OLLAMA_LLM_MODEL=qwen2.5:3b
+```
+
+---
+
 ## 플랫폼 자동 감지
 
 프로그램은 시작 시 자동으로 플랫폼을 감지하고 최적의 백엔드를 선택합니다:
@@ -328,6 +452,13 @@ Platform Information:
 - `mlx-community/Qwen3-30B-A3B-4bit`
 - `mlx-community/rnj-1-instruct-4bit`
 - MLX Hub의 모든 양자화 모델
+
+### Ollama 모델 (모든 플랫폼)
+- `alibayram/Qwen3-30B-A3B-Instruct-2507:latest` (기본, ~20GB)
+- `qwen2.5:3b` (경량, ~2GB)
+- `qwen2.5:1.5b` (초경량, ~1GB)
+- Ollama 라이브러리의 모든 모델 (`ollama.com/library`)
+- GGUF 형식 직접 지원
 
 ### Transformers 모델 (모든 플랫폼)
 - HuggingFace Hub의 모든 모델
@@ -408,6 +539,9 @@ sudo systemctl restart redis-server
 | Mac M2 Max | MLX | 1.5x | 통합 메모리 |
 | RTX 4090 | Transformers+CUDA | 3-4x | 24GB |
 | RTX 3090 | Transformers+CUDA | 2-3x | 24GB |
+| Mac M1 Pro | Ollama | 0.8-1.0x | 통합 메모리 |
+| Linux (NVIDIA) | Ollama | 2-3x | GPU 메모리 |
+| CPU (16코어) | Ollama | 0.1-0.3x | 시스템 RAM |
 | CPU (16코어) | Transformers+CPU | 0.1-0.2x | 시스템 RAM |
 
 ---

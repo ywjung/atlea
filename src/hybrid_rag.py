@@ -240,7 +240,7 @@ class HybridRAGOrchestrator:
             client = {
                 'base_url': crawl4ai_url.rstrip('/'),
                 'http_client': httpx.AsyncClient(
-                    timeout=30.0,  # 크롤링은 시간이 걸릴 수 있음
+                    timeout=15.0,  # 크롤링 타임아웃 (개별 URL은 10초)
                     headers=headers
                 )
             }
@@ -292,7 +292,7 @@ class HybridRAGOrchestrator:
                         'Authorization': f'Bearer {api_key}',
                         'Content-Type': 'application/json'
                     },
-                    timeout=15.0
+                    timeout=8.0
                 )
             }
 
@@ -448,7 +448,9 @@ class HybridRAGOrchestrator:
         search_mode: str = 'smart',
         system_prompt: Optional[str] = None,
         top_k: int = 5,
-        document_ids: Optional[List[str]] = None
+        document_ids: Optional[List[str]] = None,
+        query_embedding=None,
+        stream: bool = False
     ) -> Dict:
         """
         하이브리드 검색 및 답변 생성
@@ -466,6 +468,8 @@ class HybridRAGOrchestrator:
             system_prompt: 시스템 프롬프트 (Optional)
             top_k: 검색할 문서 개수 (기본값: 5)
             document_ids: 검색할 문서 ID/파일명 목록 (Optional)
+            query_embedding: 라우터에서 미리 생성한 쿼리 임베딩 (Optional, 중복 생성 방지)
+            stream: 스트리밍 모드 여부 (True면 generator 반환)
 
         Returns:
             {
@@ -498,7 +502,7 @@ class HybridRAGOrchestrator:
 
         # 로컬 문서 검색 (재작성된 쿼리 사용)
         if 'local' in sources_to_use:
-            search_tasks.append(self._search_local(search_query, group_ids, top_k, document_ids))
+            search_tasks.append(self._search_local(search_query, group_ids, top_k, document_ids, query_embedding=query_embedding))
         else:
             search_tasks.append(asyncio.sleep(0, result=[]))
 
@@ -532,8 +536,13 @@ class HybridRAGOrchestrator:
         if self.reranking_enabled and merged_results:
             merged_results = await self._rerank_results(query, merged_results, top_k=10)
 
-        # 5. LLM 답변 생성
-        answer = await self._generate_answer(query, merged_results, analysis, system_prompt)
+        # 5. LLM 답변 생성 (스트리밍 또는 일반)
+        generator = None
+        if stream:
+            generator = self._generate_answer_stream(query, merged_results, analysis, system_prompt)
+            answer = ""  # 스트리밍 모드에서는 generator로 전달
+        else:
+            answer = await self._generate_answer(query, merged_results, analysis, system_prompt)
 
         # 6. 검색 요약 정보
         search_summary = {
@@ -572,6 +581,7 @@ class HybridRAGOrchestrator:
 
         return {
             'answer': answer,
+            'generator': generator,
             'sources': merged_results,
             'search_summary': search_summary,
             'rewritten_query': search_query if search_query != query else None,
@@ -642,7 +652,7 @@ class HybridRAGOrchestrator:
         return sources
 
     @log_slow_query(threshold_seconds=2.0)
-    async def _search_local(self, query: str, group_ids: List[str], top_k: int = 5, document_ids: Optional[List[str]] = None) -> List[Dict]:
+    async def _search_local(self, query: str, group_ids: List[str], top_k: int = 5, document_ids: Optional[List[str]] = None, query_embedding=None) -> List[Dict]:
         """
         로컬 문서 검색 (기존 RAG 시스템)
 
@@ -651,6 +661,7 @@ class HybridRAGOrchestrator:
             group_ids: 검색할 그룹 ID 목록
             top_k: 검색할 문서 개수 (기본값: 5)
             document_ids: 검색할 문서 ID/파일명 목록 (Optional)
+            query_embedding: 미리 생성된 쿼리 임베딩 (Optional, 중복 생성 방지)
         """
         try:
             if document_ids:
@@ -658,21 +669,24 @@ class HybridRAGOrchestrator:
             else:
                 logger.info(f"📚 Local search: top_k={top_k}")
 
-            # Vector DB 직접 사용 (embedding 생성 포함)
-            from .embeddings import EmbeddingModel
-            import os
+            # 전달받은 임베딩이 없으면 직접 생성
+            if query_embedding is None:
+                from .embeddings import EmbeddingModel
+                import os
 
-            # Initialize embedding model (lazy loading)
-            if not hasattr(self, '_embedding_model'):
-                use_ollama = os.getenv("USE_OLLAMA", "false").lower() == "true"
-                if use_ollama:
-                    self._embedding_model = EmbeddingModel()
-                else:
-                    model_name = os.getenv("EMBEDDING_MODEL", "BAAI/bge-m3")
-                    self._embedding_model = EmbeddingModel(model_name=model_name)
+                # Initialize embedding model (lazy loading)
+                if not hasattr(self, '_embedding_model'):
+                    use_ollama = os.getenv("USE_OLLAMA", "false").lower() == "true"
+                    if use_ollama:
+                        self._embedding_model = EmbeddingModel()
+                    else:
+                        model_name = os.getenv("EMBEDDING_MODEL", "BAAI/bge-m3")
+                        self._embedding_model = EmbeddingModel(model_name=model_name)
 
-            # Generate query embedding
-            query_embedding = self._embedding_model.encode(query)[0]
+                # Generate query embedding
+                query_embedding = self._embedding_model.encode(query)[0]
+            else:
+                logger.debug("♻️ Reusing pre-computed query embedding")
 
             # Hybrid search on vector DB
             results = self.local_rag.vector_db.hybrid_search(
@@ -849,7 +863,7 @@ class HybridRAGOrchestrator:
         return text.strip()
 
     async def _enrich_with_crawl4ai(self, searxng_results: List[Dict]) -> List[Dict]:
-        """Crawl4AI를 사용하여 SearXNG 검색 결과의 콘텐츠를 추출"""
+        """Crawl4AI를 사용하여 SearXNG 검색 결과의 콘텐츠를 병렬 추출"""
         if not self.crawl4ai_client:
             return []
 
@@ -857,70 +871,84 @@ class HybridRAGOrchestrator:
             http_client = self.crawl4ai_client['http_client']
             base_url = self.crawl4ai_client['base_url']
 
-            # URL 목록 추출
-            urls = [r.get('url') for r in searxng_results if r.get('url')]
+            # URL 목록 추출 (최대 5개)
+            urls = [r.get('url') for r in searxng_results if r.get('url')][:5]
             if not urls:
                 return []
 
-            logger.info(f"🕷️ Crawl4AI extracting content from {len(urls)} URLs")
+            logger.info(f"🕷️ Crawl4AI extracting content from {len(urls)} URLs (parallel)")
 
-            # Crawl4AI API 호출 (배치 크롤링)
             crawl_url = f"{base_url}/crawl"
-            payload = {
-                "urls": urls
-            }
 
-            response = await http_client.post(crawl_url, json=payload)
+            # 개별 URL 비동기 병렬 크롤링 (각각 10초 타임아웃)
+            async def crawl_single_url(url):
+                try:
+                    payload = {"urls": [url]}
+                    response = await asyncio.wait_for(
+                        http_client.post(crawl_url, json=payload),
+                        timeout=10.0
+                    )
+                    if response.status_code == 200:
+                        return url, response.json()
+                except asyncio.TimeoutError:
+                    logger.debug(f"⏱️ Crawl4AI timeout for: {url[:80]}")
+                except Exception as e:
+                    logger.debug(f"⚠️ Crawl4AI error for {url[:80]}: {e}")
+                return url, None
 
-            if response.status_code != 200:
-                logger.warning(f"⚠️ Crawl4AI request failed: {response.status_code}")
-                return []
+            # 모든 URL 동시 크롤링
+            tasks = [crawl_single_url(url) for url in urls]
+            raw_results = await asyncio.gather(*tasks, return_exceptions=True)
 
-            crawl_results = response.json()
-
-            # 크롤링 결과를 URL 기준으로 매핑
+            # 결과를 content_map으로 변환
             content_map = {}
-            results_list = crawl_results.get('results', [])
+            for item in raw_results:
+                if isinstance(item, Exception):
+                    continue
+                url, crawl_data = item
+                if not crawl_data:
+                    continue
 
-            # results가 리스트인 경우
-            if isinstance(results_list, list):
-                for cr in results_list:
-                    url = cr.get('url', '')
-                    if not cr.get('success'):
+                # 크롤링 결과 파싱 (리스트 또는 딕셔너리 형태)
+                results_list = crawl_data.get('results', crawl_data)
+
+                cr_list = results_list if isinstance(results_list, list) else [results_list]
+                for cr in cr_list:
+                    if not isinstance(cr, dict) or not cr.get('success'):
                         continue
 
-                    # markdown이 충분히 길면 사용, 아니면 cleaned_html을 텍스트로 변환
-                    markdown = cr.get('markdown', '') or ''
+                    cr_url = cr.get('url', url)
+                    raw_markdown = cr.get('markdown', '') or ''
                     cleaned_html = cr.get('cleaned_html', '') or ''
 
-                    if len(markdown.strip()) > 100:
-                        content_map[url] = markdown[:2000]
+                    # Crawl4AI v0.4+: markdown이 dict일 수 있음
+                    # {"raw_markdown": "...", "markdown_with_citations": "...", ...}
+                    if isinstance(raw_markdown, dict):
+                        markdown = (
+                            raw_markdown.get('raw_markdown', '')
+                            or raw_markdown.get('markdown_with_citations', '')
+                            or raw_markdown.get('fit_markdown', '')
+                            or ''
+                        )
+                    else:
+                        markdown = str(raw_markdown) if raw_markdown else ''
+
+                    if isinstance(cleaned_html, dict):
+                        cleaned_html = cleaned_html.get('html', '') or ''
+
+                    if markdown and len(markdown.strip()) > 100:
+                        content_map[cr_url] = markdown[:2000]
                     elif cleaned_html:
                         text_content = self._html_to_text(cleaned_html)
                         if len(text_content) > 100:
-                            content_map[url] = text_content[:2000]
-
-            # results가 딕셔너리인 경우 (단일 URL 요청)
-            elif isinstance(results_list, dict):
-                cr = results_list
-                url = cr.get('url', '')
-                if cr.get('success'):
-                    markdown = cr.get('markdown', '') or ''
-                    cleaned_html = cr.get('cleaned_html', '') or ''
-
-                    if len(markdown.strip()) > 100:
-                        content_map[url] = markdown[:2000]
-                    elif cleaned_html:
-                        text_content = self._html_to_text(cleaned_html)
-                        if len(text_content) > 100:
-                            content_map[url] = text_content[:2000]
+                            content_map[cr_url] = text_content[:2000]
 
             # 결과가 없으면 빈 리스트 반환
             if not content_map:
                 logger.warning("⚠️ Crawl4AI returned no content")
                 return []
 
-            logger.info(f"✅ Crawl4AI extracted content from {len(content_map)} URLs")
+            logger.info(f"✅ Crawl4AI extracted content from {len(content_map)}/{len(urls)} URLs")
 
             # SearXNG 결과와 Crawl4AI 콘텐츠 결합
             web_chunks = []
@@ -991,16 +1019,23 @@ class HybridRAGOrchestrator:
             http_client = self.context7_client['http_client']
             base_url = self.context7_client['base_url']
 
-            # 1단계: Library 검색 (GET /libs/search)
+            # 1단계: Library 검색 (GET /libs/search) — 3초 타임아웃
             search_params = {
                 "libraryName": tech_stack_name,
                 "query": query
             }
 
-            search_response = await http_client.get(
-                f"{base_url}/libs/search",
-                params=search_params
-            )
+            try:
+                search_response = await asyncio.wait_for(
+                    http_client.get(
+                        f"{base_url}/libs/search",
+                        params=search_params
+                    ),
+                    timeout=3.0
+                )
+            except asyncio.TimeoutError:
+                logger.warning(f"⚠️  Context7 library search timed out (3s) for: {tech_stack_name}")
+                return []
 
             if search_response.status_code != 200:
                 logger.warning(f"⚠️  Context7 library search failed: {search_response.status_code}")
@@ -1010,7 +1045,7 @@ class HybridRAGOrchestrator:
             results = search_data.get('results', [])
 
             if not results:
-                logger.warning(f"⚠️  No libraries found for: {tech_stack}")
+                logger.warning(f"⚠️  No libraries found for: {tech_stack_name}")
                 return []
 
             # 첫 번째 매칭 라이브러리 사용
@@ -1023,16 +1058,23 @@ class HybridRAGOrchestrator:
 
             logger.info(f"📖 Found library: {library.get('name', library_id)}")
 
-            # 2단계: 문서 컨텍스트 조회 (GET /context)
+            # 2단계: 문서 컨텍스트 조회 (GET /context) — 4초 타임아웃
             context_params = {
                 "libraryId": library_id,
                 "query": query
             }
 
-            context_response = await http_client.get(
-                f"{base_url}/context",
-                params=context_params
-            )
+            try:
+                context_response = await asyncio.wait_for(
+                    http_client.get(
+                        f"{base_url}/context",
+                        params=context_params
+                    ),
+                    timeout=4.0
+                )
+            except asyncio.TimeoutError:
+                logger.warning(f"⚠️  Context7 context fetch timed out (4s) for: {library_id}")
+                return []
 
             if context_response.status_code != 200:
                 logger.warning(f"⚠️  Context7 context fetch failed: {context_response.status_code}")
@@ -1236,7 +1278,48 @@ class HybridRAGOrchestrator:
             temperature=0.5
         )
 
+        # ⚠️ 빈 응답 체크
+        if not answer or len(answer.strip()) == 0:
+            logger.warning("⚠️ Empty answer from LLM in hybrid RAG")
+            answer = "죄송합니다. 응답을 생성하지 못했습니다. 다시 시도해 주세요."
+
         return answer
+
+    def _generate_answer_stream(
+        self,
+        query: str,
+        merged_results: List[Dict],
+        analysis: Dict,
+        system_prompt: Optional[str] = None
+    ):
+        """스트리밍 답변 생성 - 토큰 단위로 yield하는 generator 반환"""
+
+        # 소스별로 그룹화
+        local_chunks = [r for r in merged_results if r['source_type'] == 'local']
+        web_chunks = [r for r in merged_results if r['source_type'] == 'web']
+        doc_chunks = [r for r in merged_results if r['source_type'] == 'docs']
+
+        # 강화된 프롬프트 생성
+        prompt = self._build_hybrid_prompt(
+            query,
+            local_chunks,
+            web_chunks,
+            doc_chunks,
+            analysis
+        )
+
+        # LLM 메시지 구성
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+
+        # 동기 스트리밍 generator 반환 (query.py에서 isgenerator로 감지)
+        return self.local_rag.llm._stream_response(
+            messages=messages,
+            max_tokens=2000,
+            temperature=0.5
+        )
 
     def _build_hybrid_prompt(
         self,
@@ -1246,7 +1329,19 @@ class HybridRAGOrchestrator:
         docs: List[Dict],
         analysis: Dict
     ) -> str:
-        """하이브리드 RAG 프롬프트 생성"""
+        """하이브리드 RAG 프롬프트 생성 (컨텍스트 압축 적용)"""
+
+        MAX_TOTAL_CONTEXT_CHARS = 4000  # 글로벌 컨텍스트 한도
+        MAX_PER_DOC_CHARS = 600        # 문서당 한도
+
+        # 소스 타입별 최대 개수 제한
+        # Note: score 필드가 없는 결과도 포함 (score 필터링 제거 - 검색 엔진이 이미 관련도 순으로 정렬)
+        local = local[:5]
+        web = web[:3]
+        docs = docs[:2]
+        logger.debug(f"📊 [PROMPT] Context compression: local={len(local)}, web={len(web)}, docs={len(docs)}")
+
+        used_chars = 0
 
         prompt = f"""질문: {query}
 
@@ -1258,97 +1353,97 @@ class HybridRAGOrchestrator:
         if local:
             prompt += f"## 📁 내부 문서 ({len(local)}개) ⭐ 최우선 참조\n\n"
             for i, chunk in enumerate(local, 1):
+                if used_chars >= MAX_TOTAL_CONTEXT_CHARS:
+                    break
                 meta = chunk['metadata']
                 filename = meta.get('filename', 'Unknown')
+                doc_name = filename.rsplit('.', 1)[0] if '.' in filename else filename
                 score = chunk.get('score', 0.0)
                 freshness = chunk.get('freshness', 0.5)
 
-                prompt += f"""[내부-{i}] {filename}
+                remaining = min(MAX_PER_DOC_CHARS, MAX_TOTAL_CONTEXT_CHARS - used_chars)
+                content_slice = chunk['content'][:remaining]
+                used_chars += len(content_slice)
+
+                prompt += f"""[내부:{doc_name}] (파일: {filename})
 관련도: {score:.0%} | 신선도: {freshness:.0%}
 ---
-{chunk['content'][:800]}
+{content_slice}
 ...
 
 """
 
         # 웹 검색 결과
-        if web:
+        if web and used_chars < MAX_TOTAL_CONTEXT_CHARS:
             prompt += f"\n## 🌐 최신 웹 정보 ({len(web)}개)\n\n"
             for i, chunk in enumerate(web, 1):
+                if used_chars >= MAX_TOTAL_CONTEXT_CHARS:
+                    break
                 meta = chunk['metadata']
                 title = meta.get('title', 'Unknown')
                 url = meta.get('url', '')
                 pub_date = meta.get('published_date', '최근')
 
+                remaining = min(MAX_PER_DOC_CHARS, MAX_TOTAL_CONTEXT_CHARS - used_chars)
+                content_slice = chunk['content'][:remaining]
+                used_chars += len(content_slice)
+
                 prompt += f"""[웹-{i}] {title}
 출처: {url}
 발행일: {pub_date}
 ---
-{chunk['content'][:800]}
+{content_slice}
 ...
 
 """
 
         # 공식 문서
-        if docs:
+        if docs and used_chars < MAX_TOTAL_CONTEXT_CHARS:
             prompt += f"\n## 📚 공식 문서 ({len(docs)}개)\n\n"
             for i, chunk in enumerate(docs, 1):
+                if used_chars >= MAX_TOTAL_CONTEXT_CHARS:
+                    break
                 meta = chunk['metadata']
                 library = meta.get('library', 'Unknown')
                 version = meta.get('version', '')
 
+                remaining = min(MAX_PER_DOC_CHARS, MAX_TOTAL_CONTEXT_CHARS - used_chars)
+                content_slice = chunk['content'][:remaining]
+                used_chars += len(content_slice)
+
                 prompt += f"""[문서-{i}] {library} {version}
 ---
-{chunk['content'][:800]}
+{content_slice}
 ...
 
 """
 
-        # 답변 작성 지침
-        prompt += """
-# 답변 작성 지침
+        # 답변 작성 지침 (시스템 프롬프트와 중복 제거 — 핵심만 유지)
+        prompt += "\n# 지침\n"
 
-## 🔴 중요: 정보 우선순위 (절대 규칙)
-"""
-
-        # 로컬 문서가 있는 경우 강력한 우선순위 지침 추가
         if local:
-            prompt += f"""
-⭐ **내부 문서가 {len(local)}개 제공되었습니다. 반드시 먼저 확인하세요!**
-
-1. **내부 문서 최우선**: 질문에 대한 답변이 내부 문서에 있다면, 반드시 내부 문서를 기반으로 답변하세요.
-2. **"정보 없음" 금지**: 내부 문서에 관련 정보가 조금이라도 있다면, "제공된 문서에 정보가 없습니다"라고 답하지 마세요.
-3. **부분 정보도 활용**: 내부 문서에 완전한 답은 없더라도 관련 정보가 있다면 그것을 기반으로 답변하세요.
-4. **보조 자료로 활용**: 내부 문서가 주 답변이고, 웹/공식 문서는 보충 설명용입니다.
-
-"""
-        else:
-            prompt += """
-1. **정보 우선순위**: 내부 문서 > 공식 문서 > 웹 정보
-   - 내부 문서가 있으면 반드시 최우선으로 참조
-   - 정보 충돌 시 내부 문서 내용을 기준으로 판단
-
+            prompt += f"⭐ 내부 문서 {len(local)}개 최우선 참조. 부분 정보라도 활용. 웹/공식 문서는 보충용.\n"
+        prompt += """출처 형식: [내부:실제문서명], [웹:사이트명], [문서:라이브러리명] — 번호 표기 금지
 """
 
-        prompt += """
-## 기본 원칙
-1. **정보 통합**: 제공된 모든 소스를 종합하여 포괄적인 답변 제공
-2. **출처 명시**: 각 주장마다 출처 표시
-   - 내부 문서: [내부:파일명]
-   - 웹 정보: [웹:사이트명]
-   - 공식 문서: [문서:라이브러리명]
-3. **최신성 표시**: 웹 정보 인용 시 발행 날짜 명시
+        # 🔴 문서명 참조 리스트 추가 — LLM이 정확한 이름을 복사하도록 유도
+        doc_names = []
+        if local:
+            for chunk in local:
+                meta = chunk['metadata']
+                filename = meta.get('filename', 'Unknown')
+                doc_name = filename.rsplit('.', 1)[0] if '.' in filename else filename
+                if doc_name not in doc_names and doc_name != 'Unknown':
+                    doc_names.append(doc_name)
 
-## 답변 구조
-1. 핵심 답변 (2-3문장) - 내부 문서 기반 우선
-2. 상세 설명 - 내부 문서 내용 중심
-3. 추가 정보 - 웹/공식 문서로 보충 (필요시)
-
-## 특수 상황
-- 정보 부족: 모든 소스를 확인한 후에만 "제공된 자료에는 [내용]에 대한 정보가 부족합니다"라고 답변
-- 정보 충돌: 내부 문서 우선, 다른 소스는 "참고로, [출처]에서는..."으로 보충
-
-답변을 작성해주세요.
+        if doc_names:
+            prompt += """## 🔴 출처 표기용 정확한 문서명 목록 (반드시 이 목록에서 복사하여 사용)
+아래 문서명을 인용할 때 한 글자도 변경하지 말고 그대로 복사하세요:
 """
+            for name in doc_names:
+                prompt += f"- [내부:{name}]\n"
+            prompt += "\n"
+
+        prompt += "답변을 작성해주세요.\n"
 
         return prompt

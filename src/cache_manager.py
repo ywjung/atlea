@@ -18,7 +18,7 @@ from src.redis_helpers import (
 from src.constants import CacheTTL
 
 # Module load timestamp for debugging
-logger.warning(f"🔄 cache_manager.py loaded at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - Version: FIXED_OLLAMA_ENCODE")
+logger.debug(f"🔄 cache_manager.py loaded at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - Version: FIXED_OLLAMA_ENCODE")
 
 
 class CacheManager:
@@ -36,13 +36,6 @@ class CacheManager:
         cache_ttl: int = CacheTTL.LONG,  # 1 hour in seconds (default for dynamic data)
         memory_cache_size: int = 50  # Number of entries to keep in memory
     ):
-        # TTL configuration by content type (in seconds)
-        self.ttl_config = {
-            'static_docs': CacheTTL.VERY_LONG,  # 24 hours for regulations, policies
-            'dynamic_data': CacheTTL.LONG,       # 1 hour for frequently changing content
-            'realtime': CacheTTL.STANDARD,       # 5 minutes for time-sensitive data
-            'default': CacheTTL.LONG             # Default: 1 hour
-        }
         """
         Initialize cache manager.
 
@@ -53,6 +46,13 @@ class CacheManager:
             cache_ttl: Time-to-live for cached responses in seconds
             memory_cache_size: Maximum number of cache entries to keep in memory (LRU)
         """
+        # TTL configuration by content type (in seconds)
+        self.ttl_config = {
+            'static_docs': CacheTTL.VERY_LONG,  # 24 hours for regulations, policies
+            'dynamic_data': CacheTTL.LONG,       # 1 hour for frequently changing content
+            'realtime': CacheTTL.STANDARD,       # 5 minutes for time-sensitive data
+            'default': CacheTTL.LONG             # Default: 1 hour
+        }
         self.redis = redis_client
         self.embedding_model = embedding_model
         self.similarity_threshold = similarity_threshold

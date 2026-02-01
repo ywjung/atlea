@@ -1,7 +1,7 @@
-# PDF RAG 챗봇 개선 분석 보고서
+# ATLEA 개선 분석 보고서
 
 > **📌 참고 (2025-12-17)**: 이 문서는 Phase 1 이전의 초기 분석 보고서입니다.
-> 현재 진행 상태와 최신 정보는 [`IMPROVEMENTS.md`](IMPROVEMENTS.md)를 참조하세요.
+> 현재 진행 상태와 최신 정보는 [`IMPROVEMENTS.md`](../IMPROVEMENTS.md)를 참조하세요.
 >
 > **Phase 2에서 완료된 주요 개선사항**:
 > - ✅ 스트리밍 시각화 (1.4)

@@ -1,10 +1,10 @@
 # 멀티플랫폼 지원 완료
 
-이 문서는 RAG 챗봇의 멀티플랫폼 지원 구현 내용을 설명합니다.
+이 문서는 ATLEA의 멀티플랫폼 지원 구현 내용을 설명합니다.
 
 ## 개요
 
-이제 RAG 챗봇은 다음 플랫폼에서 자동으로 최적화되어 실행됩니다:
+이제 ATLEA는 다음 플랫폼에서 자동으로 최적화되어 실행됩니다:
 - **Mac (Apple Silicon)**: MLX 백엔드 사용
 - **Linux (NVIDIA GPU)**: Transformers + CUDA 백엔드 사용
 - **Linux/Mac (CPU)**: Transformers + CPU 백엔드 사용

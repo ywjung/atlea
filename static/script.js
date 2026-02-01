@@ -336,10 +336,72 @@ function showSuccess(message) {
     logger.info('✅', message);
 }
 
+// Toast-style notification
+function showNotification(message, type = 'info') {
+    // Remove existing notification if any
+    const existing = document.querySelector('.toast-notification');
+    if (existing) {
+        existing.remove();
+    }
+
+    const icons = {
+        info: 'ℹ️',
+        success: '✅',
+        warning: '⚠️',
+        error: '❌'
+    };
+
+    const colors = {
+        info: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
+        success: 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)',
+        warning: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+        error: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)'
+    };
+
+    const notification = document.createElement('div');
+    notification.className = 'toast-notification';
+    notification.innerHTML = `<span class="toast-icon">${icons[type] || icons.info}</span><span class="toast-message">${message}</span>`;
+    notification.style.cssText = `
+        position: fixed;
+        bottom: 100px;
+        left: 50%;
+        transform: translateX(-50%) translateY(20px);
+        background: ${colors[type] || colors.info};
+        color: white;
+        padding: 12px 24px;
+        border-radius: 12px;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+        z-index: 10000;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 14px;
+        font-weight: 500;
+        opacity: 0;
+        transition: opacity 0.3s ease, transform 0.3s ease;
+    `;
+
+    document.body.appendChild(notification);
+
+    // Animate in
+    requestAnimationFrame(() => {
+        notification.style.opacity = '1';
+        notification.style.transform = 'translateX(-50%) translateY(0)';
+    });
+
+    // Auto-remove after 3 seconds
+    setTimeout(() => {
+        notification.style.opacity = '0';
+        notification.style.transform = 'translateX(-50%) translateY(20px)';
+        setTimeout(() => notification.remove(), 300);
+    }, 3000);
+}
+
 // DOM elements
 const chatContainer = document.getElementById('chatContainer');
 const userInput = document.getElementById('userInput');
 const sendBtn = document.getElementById('sendBtn');
+const voiceBtn = document.getElementById('voiceBtn');
 const clearBtn = document.getElementById('clearBtn');
 const exportBtn = document.getElementById('exportBtn');
 const importBtn = document.getElementById('importBtn');
@@ -420,6 +482,7 @@ async function init() {
     initTheme();
     setupEventListeners();
     setupScrollButton();
+    initVoiceButton();
 
     // Load settings from localStorage
     loadSettings();
@@ -1178,6 +1241,12 @@ async function loadConversation(sessionId) {
 
         currentSessionId = sessionId;
 
+        // Stop all TTS activity before loading new conversation
+        stopAllTTS();
+
+        // Invalidate TTS cache so it re-checks availability for new conversation
+        invalidateTTSCache();
+
         // Clear current chat UI
         clearChatUI();
 
@@ -1348,6 +1417,9 @@ function formatTimestamp(timestamp) {
 
 // Clear chat UI only (no confirmation)
 function clearChatUI() {
+    // Stop all TTS before clearing the UI (buttons/audio will be removed)
+    stopAllTTS();
+
     const chatContainer = document.getElementById('chatContainer');
     if (chatContainer) {
         chatContainer.innerHTML = '';
@@ -1438,6 +1510,9 @@ async function initConversationHistory() {
             await createNewConversation();
             await showWelcomeScreen();
         }
+
+        // Refresh TTS buttons after conversations are loaded
+        refreshTTSButtons();
 
         devLog('Conversation history initialized');
     } catch (error) {
@@ -1613,7 +1688,7 @@ async function sendMessage(regenerate = false) {
             search_mode: ['smart', 'local-only', 'web-enhanced', 'comprehensive', 'tools-only'].includes(currentSettings.searchMode)
                 ? currentSettings.searchMode : 'smart',
             temperature: Math.max(0, Math.min(2, parseFloat(currentSettings.temperature) || 0.7)),
-            max_tokens: Math.max(1, Math.min(8192, parseInt(currentSettings.max_tokens) || 2048)),
+            max_tokens: Math.max(1, Math.min(32768, parseInt(currentSettings.max_tokens) || 2048)),
             system_prompt: currentSettings.system_prompt || null,
             cache_threshold: Math.max(0, Math.min(1, parseFloat(currentSettings.cache_threshold) || 0.95)),
             cache_ttl: parseInt(currentSettings.cache_ttl) || 60,
@@ -1690,11 +1765,15 @@ async function sendMessage(regenerate = false) {
         // Show streaming progress inside message container
         streamingVisualizer.showStreamingProgress(messageDiv);
 
+        // Start streaming TTS if enabled
+        streamingTTS.start();
+
         let sources = null;
         let fullText = '';
         let tokenCount = 0;
         let tokenStats = null;  // Store token generation statistics
         let isFirstChunk = true;  // Track first chunk to hide progress indicator
+        let inlineFollowUpQs = null;  // Store follow-up questions from SSE stream
 
         // Read stream
         const reader = response.body.getReader();
@@ -1778,6 +1857,9 @@ async function sendMessage(regenerate = false) {
 
                             fullText += data.data;
 
+                            // Feed chunk to streaming TTS
+                            streamingTTS.addChunk(data.data);
+
                             // Update token count (approximate by splitting on spaces)
                             tokenCount = fullText.split(/\s+/).filter(w => w.length > 0).length;
 
@@ -1806,9 +1888,62 @@ async function sendMessage(regenerate = false) {
                             // Capture token generation statistics
                             tokenStats = data.data;
                             devLog('📊 [STATS] Received token statistics:', tokenStats);
+                        } else if (data.type === 'follow_up_questions') {
+                            // 후속 질문 수신 즉시 표시 (done 전후 모두 처리)
+                            inlineFollowUpQs = data.data;
+                            console.log('💬 [FOLLOW-UP] Received follow-up questions:', inlineFollowUpQs, 'contentDiv:', !!contentDiv);
+                            if (inlineFollowUpQs && inlineFollowUpQs.length > 0 && contentDiv) {
+                                try {
+                                    followUpQuestions.display(contentDiv, inlineFollowUpQs, (selectedQuestion) => {
+                                        userInput.value = selectedQuestion;
+                                        autoResize();
+                                        updateSendButton();
+                                        sendMessage();
+                                    });
+                                    scrollToBottom();
+                                    console.log('💬 [FOLLOW-UP] Display completed successfully');
+                                } catch (e) {
+                                    console.error('💬 [FOLLOW-UP] Display failed:', e);
+                                }
+                            } else {
+                                console.warn('💬 [FOLLOW-UP] Skipped display:', {
+                                    hasData: !!inlineFollowUpQs,
+                                    length: inlineFollowUpQs?.length,
+                                    hasContentDiv: !!contentDiv
+                                });
+                            }
+                        } else if (data.type === 'replace') {
+                            // 서버에서 깨진 문서명 인용 수정 후 전체 텍스트 교체
+                            devLog('🔧 [REPLACE] Received corrected response (garbled citation fix)');
+                            fullText = data.data;
+                            try {
+                                contentDiv.innerHTML = marked.parse(fullText);
+                                contentDiv.querySelectorAll('pre code').forEach((block) => {
+                                    if (!block.dataset.highlighted) {
+                                        normalizeLanguageClass(block);
+                                        hljs.highlightElement(block);
+                                    }
+                                });
+                                renderSpecialContent(contentDiv);
+                            } catch (renderError) {
+                                logger.error('Replace render error:', renderError);
+                            }
+                        } else if (data.type === 'confidence') {
+                            // 신뢰도 점수 수신
+                            devLog('📊 [CONFIDENCE] Received confidence score:', data.data);
                         } else if (data.type === 'done') {
+                            // Finish streaming TTS
+                            streamingTTS.finish();
+
                             // Calculate response time
                             const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+
+                            // Check for empty response
+                            if (!fullText || fullText.trim().length === 0) {
+                                logger.warn('⚠️ Empty response received from server');
+                                fullText = '죄송합니다. 응답을 생성하지 못했습니다. 다시 시도해 주세요.\n\n**가능한 원인:**\n- 모델이 응답을 생성하지 못함\n- 요청 시간 초과\n- 서버 부하로 인한 응답 실패';
+                                contentDiv.innerHTML = marked.parse(fullText);
+                            }
 
                             // Show completion (StreamingVisualizer)
                             streamingVisualizer.showCompletion(tokenCount, parseFloat(elapsed));
@@ -1878,21 +2013,8 @@ async function sendMessage(regenerate = false) {
                                 });
                             }
 
-                            // Generate and display follow-up questions
-                            try {
-                                const followUpQs = await followUpQuestions.generate(question, fullText, [], currentSessionId);
-                                if (followUpQs && followUpQs.length > 0) {
-                                    followUpQuestions.display(contentDiv, followUpQs, (selectedQuestion) => {
-                                        // When user clicks a follow-up question, populate input and send
-                                        userInput.value = selectedQuestion;
-                                        autoResize();
-                                        updateSendButton();
-                                        sendMessage();
-                                    });
-                                }
-                            } catch (error) {
-                                logger.error('Failed to generate/display follow-up questions:', error);
-                            }
+                            // 후속 질문은 follow_up_questions 이벤트에서 직접 표시됨 (done 이후 도착)
+                            // 캐시 응답의 경우 done 전에 이미 표시 완료
                         }
                     } catch (parseError) {
                         logger.error('JSON parse error:', parseError, 'Line:', line);
@@ -1913,9 +2035,11 @@ async function sendMessage(regenerate = false) {
         // Handle abort (user stopped generation)
         if (error.name === 'AbortError') {
             addMessage('⚠️ 응답 생성이 중단되었습니다.', 'bot');
+            streamingTTS.stop(); // Stop streaming TTS on abort
         } else {
             // Show error message with retry option if available
             errorHandler.showErrorMessage(errorInfo, errorInfo.canRetry);
+            streamingTTS.stop(); // Stop streaming TTS on error
         }
     } finally {
         isLoading = false;
@@ -1925,6 +2049,8 @@ async function sendMessage(regenerate = false) {
 
         // Reset StreamingVisualizer
         streamingVisualizer.reset();
+
+        // Note: Don't stop streaming TTS here - let it finish playing the queued audio
 
         // Refresh conversation list to update title after message (only if sidebar is open)
         if (currentSessionId && conversationSidebar.classList.contains('active')) {
@@ -1947,14 +2073,15 @@ function displaySearchInfo(messageDiv, searchSummary) {
     // Create search info container
     const searchInfoDiv = document.createElement('div');
     searchInfoDiv.className = 'search-info';
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
     searchInfoDiv.style.cssText = `
         margin: 8px 0 12px 0;
         padding: 8px 12px;
-        background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
-        border-left: 3px solid #0ea5e9;
+        background: ${isDark ? 'linear-gradient(135deg, rgba(14, 165, 233, 0.15) 0%, rgba(56, 189, 248, 0.10) 100%)' : 'linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%)'};
+        border-left: 3px solid ${isDark ? '#38bdf8' : '#0ea5e9'};
         border-radius: 6px;
         font-size: 13px;
-        color: #0c4a6e;
+        color: ${isDark ? '#7dd3fc' : '#0c4a6e'};
         display: flex;
         align-items: center;
         gap: 12px;
@@ -1976,7 +2103,7 @@ function displaySearchInfo(messageDiv, searchSummary) {
     // Add separator
     const separator = document.createElement('span');
     separator.textContent = '|';
-    separator.style.cssText = 'color: #94a3b8; font-weight: 300;';
+    separator.style.cssText = `color: ${isDark ? '#64748b' : '#94a3b8'}; font-weight: 300;`;
     searchInfoDiv.appendChild(separator);
 
     // Source counts
@@ -1996,7 +2123,7 @@ function displaySearchInfo(messageDiv, searchSummary) {
 
     const sourcesText = document.createElement('span');
     sourcesText.textContent = sourcesInfo.join(' · ');
-    sourcesText.style.cssText = 'color: #0369a1; font-size: 12px;';
+    sourcesText.style.cssText = `color: ${isDark ? '#38bdf8' : '#0369a1'}; font-size: 12px;`;
     searchInfoDiv.appendChild(sourcesText);
 
     // Insert before message content
@@ -2663,10 +2790,33 @@ function addActionButtons(contentDiv, text) {
     downloadContainer.appendChild(downloadBtn);
     downloadContainer.appendChild(downloadMenu);
 
+    // TTS (Text-to-Speech) button
+    const ttsBtn = document.createElement('button');
+    ttsBtn.className = 'action-btn tts-btn';
+    ttsBtn.setAttribute('title', '음성으로 읽기');
+    ttsBtn.setAttribute('aria-label', '음성으로 읽기');
+    ttsBtn.innerHTML = `
+        <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor">
+            <path d="M8 3L4 6H2v4h2l4 3V3z" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M11 5c1.2 1.2 1.2 4.6 0 6" stroke-width="1.5" stroke-linecap="round"/>
+            <path d="M13 3c2.4 2.4 2.4 7.6 0 10" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+    `;
+    ttsBtn.onclick = () => playTTS(text, ttsBtn);
+
+    // Initially hide TTS button, show based on availability
+    ttsBtn.style.display = 'none';
+    checkTTSAvailability().then(available => {
+        if (available) {
+            ttsBtn.style.display = 'inline-flex';
+        }
+    });
+
     actionsDiv.appendChild(feedbackDiv);
     actionsDiv.appendChild(copyBtn);
     actionsDiv.appendChild(regenerateBtn);
     actionsDiv.appendChild(downloadContainer);
+    actionsDiv.appendChild(ttsBtn);
     contentDiv.appendChild(actionsDiv);
 }
 
@@ -2822,11 +2972,1746 @@ function addActionButtonsToWrapper(wrapperDiv, text) {
     downloadContainer.appendChild(downloadBtn);
     downloadContainer.appendChild(downloadMenu);
 
+    // TTS (Text-to-Speech) button
+    const ttsBtn = document.createElement('button');
+    ttsBtn.className = 'action-btn tts-btn';
+    ttsBtn.setAttribute('title', '음성으로 읽기');
+    ttsBtn.setAttribute('aria-label', '음성으로 읽기');
+    ttsBtn.innerHTML = `
+        <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor">
+            <path d="M8 3L4 6H2v4h2l4 3V3z" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M11 5c1.2 1.2 1.2 4.6 0 6" stroke-width="1.5" stroke-linecap="round"/>
+            <path d="M13 3c2.4 2.4 2.4 7.6 0 10" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+    `;
+    ttsBtn.onclick = () => playTTS(text, ttsBtn);
+
+    // Initially hide TTS button, show based on availability
+    ttsBtn.style.display = 'none';
+    checkTTSAvailability().then(available => {
+        if (available) {
+            ttsBtn.style.display = 'inline-flex';
+        }
+    });
+
     actionsDiv.appendChild(feedbackDiv);
     actionsDiv.appendChild(copyBtn);
     actionsDiv.appendChild(regenerateBtn);
     actionsDiv.appendChild(downloadContainer);
+    actionsDiv.appendChild(ttsBtn);
     wrapperDiv.appendChild(actionsDiv);
+}
+
+// ====================================================================
+// TTS (Text-to-Speech) Functions
+// ====================================================================
+
+// Global TTS state
+let ttsAudio = null;
+let ttsCacheAvailable = null;
+let ttsSessionId = null;              // Track which session TTS was started for
+let ttsAbortController = null;        // Abort controller for on-demand playTTS fetch
+let ttsStopping = false;              // Flag: stopAllTTS is in progress (suppress error UI)
+
+/**
+ * Stop all TTS activity (both on-demand and streaming).
+ * Call this when navigating away, loading a new conversation, or cleaning up.
+ */
+function stopAllTTS() {
+    ttsStopping = true;
+
+    // Abort in-flight on-demand TTS fetch
+    if (ttsAbortController) {
+        ttsAbortController.abort();
+        ttsAbortController = null;
+    }
+
+    // Stop on-demand TTS audio playback
+    if (ttsAudio) {
+        try {
+            ttsAudio.pause();
+            ttsAudio.src = '';
+            ttsAudio = null;
+        } catch (e) { /* ignore */ }
+    }
+    if (currentTTSButton) {
+        safeUpdateTTSButton(currentTTSButton, (btn) => {
+            btn.classList.remove('tts-playing');
+            btn.disabled = false;
+            resetTTSButton(btn);
+        });
+        currentTTSButton = null;
+    }
+    hideTTSIndicator();
+
+    // Stop streaming TTS
+    streamingTTS.stop();
+
+    ttsSessionId = null;
+
+    // Reset the stopping flag after a delay so in-flight onerror/catch blocks see it
+    setTimeout(() => { ttsStopping = false; }, 500);
+}
+
+// Check if TTS is available
+async function checkTTSAvailability() {
+    // Use cached result if available
+    if (ttsCacheAvailable !== null) {
+        return ttsCacheAvailable;
+    }
+
+    try {
+        const response = await fetch('/api/tts/available');
+        if (response.ok) {
+            const data = await response.json();
+            // enabled만 확인 - available은 lazy loading으로 첫 사용 시 true가 됨
+            ttsCacheAvailable = data.enabled;
+            return ttsCacheAvailable;
+        }
+    } catch (error) {
+        devLog('TTS availability check failed:', error);
+    }
+
+    ttsCacheAvailable = false;
+    return false;
+}
+
+// TTS model name mapping for display
+const TTS_MODEL_NAMES = {
+    'edge-tts': 'Edge TTS (Fast)',
+    'Qwen/Qwen3-TTS-12Hz-0.6B-Base': 'Qwen3 TTS 0.6B (Fast Local)',
+    'Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice': 'Qwen3 TTS 1.7B (High Quality)',
+};
+
+// Load TTS status for settings panel
+async function loadTTSStatus() {
+    const ttsStatusIcon = document.getElementById('ttsStatusIcon');
+    const ttsStatusText = document.getElementById('ttsStatusText');
+    const ttsModelDisplay = document.getElementById('ttsModelDisplay');
+    const ttsStatusDisplay = document.getElementById('ttsStatusDisplay');
+
+    if (!ttsStatusIcon || !ttsStatusText || !ttsModelDisplay) {
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/tts/available');
+        if (response.ok) {
+            const data = await response.json();
+
+            if (data.enabled) {
+                ttsStatusIcon.textContent = '✅';
+                ttsStatusText.textContent = '활성화됨';
+                ttsStatusDisplay.style.background = '#ecfdf5';
+                ttsStatusDisplay.style.borderColor = '#10b981';
+            } else {
+                ttsStatusIcon.textContent = '⛔';
+                ttsStatusText.textContent = '비활성화됨';
+                ttsStatusDisplay.style.background = '#fef2f2';
+                ttsStatusDisplay.style.borderColor = '#ef4444';
+            }
+
+            // Get model info from the public endpoint
+            const modelId = data.model_id || 'edge-tts';
+            const modelName = TTS_MODEL_NAMES[modelId] || modelId;
+            ttsModelDisplay.textContent = modelName;
+            ttsModelDisplay.style.color = data.enabled ? '#059669' : '#6b7280';
+        } else {
+            ttsStatusIcon.textContent = '❌';
+            ttsStatusText.textContent = 'TTS 서비스 오류';
+            ttsStatusDisplay.style.background = '#fef2f2';
+            ttsStatusDisplay.style.borderColor = '#ef4444';
+            ttsModelDisplay.textContent = '확인 불가';
+        }
+    } catch (error) {
+        devLog('Failed to load TTS status:', error);
+        ttsStatusIcon.textContent = '❌';
+        ttsStatusText.textContent = '연결 실패';
+        ttsStatusDisplay.style.background = '#fef2f2';
+        ttsStatusDisplay.style.borderColor = '#ef4444';
+        ttsModelDisplay.textContent = '확인 불가';
+    }
+}
+
+// Global reference for current TTS button (for background playback support)
+let currentTTSButton = null;
+
+// Safely update TTS button if it still exists in DOM
+function safeUpdateTTSButton(button, callback) {
+    if (button && document.body.contains(button)) {
+        try {
+            callback(button);
+        } catch (e) {
+            devLog('TTS button update skipped (element may have been removed):', e);
+        }
+    }
+}
+
+// Play TTS for given text
+async function playTTS(text, button) {
+    // Early validation - check if input text exists
+    if (!text || typeof text !== 'string' || text.trim().length === 0) {
+        showToast('읽을 텍스트가 없습니다.', 'error');
+        return;
+    }
+
+    // Stop any currently playing audio
+    if (ttsAudio) {
+        ttsAudio.pause();
+        ttsAudio.currentTime = 0;
+        ttsAudio = null;
+        // Reset previous button if it exists
+        safeUpdateTTSButton(currentTTSButton, (btn) => {
+            btn.classList.remove('tts-playing');
+            resetTTSButton(btn);
+        });
+        hideTTSIndicator();
+    }
+
+    // Check if already playing (toggle off)
+    if (button && button.classList.contains('tts-playing')) {
+        button.classList.remove('tts-playing');
+        resetTTSButton(button);
+        currentTTSButton = null;
+        hideTTSIndicator();
+        return;
+    }
+
+    // Store current button reference
+    currentTTSButton = button;
+
+    // Update button to loading state
+    safeUpdateTTSButton(button, (btn) => {
+        btn.innerHTML = `
+            <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" class="tts-loading">
+                <circle cx="8" cy="8" r="6" stroke-width="1.5" stroke-dasharray="20" stroke-dashoffset="0">
+                    <animate attributeName="stroke-dashoffset" dur="1s" repeatCount="indefinite" values="0;40"/>
+                </circle>
+            </svg>
+        `;
+        btn.setAttribute('title', '음성 생성 중...');
+        btn.disabled = true;
+    });
+
+    try {
+        const token = localStorage.getItem('access_token');
+        if (!token) {
+            throw new Error('로그인이 필요합니다.');
+        }
+
+        // Strip markdown and HTML for TTS
+        const cleanText = stripMarkdownForTTS(text);
+
+        // Debug log
+        devLog('TTS input text length:', text.length, 'clean text length:', cleanText.length);
+
+        // Check if text is empty after stripping
+        if (!cleanText || cleanText.trim().length === 0) {
+            throw new Error('읽을 수 있는 텍스트가 없습니다.');
+        }
+
+        // Truncate text if too long (server limit is typically 1000-5000 chars)
+        const maxLength = 4500;  // Leave some margin under 5000 char server limit
+        let finalText = cleanText;
+        if (cleanText.length > maxLength) {
+            // Find a good breaking point (end of sentence)
+            let cutPoint = cleanText.lastIndexOf('. ', maxLength);
+            if (cutPoint < maxLength * 0.7) {
+                cutPoint = maxLength;  // If no good break point, just cut
+            }
+            finalText = cleanText.substring(0, cutPoint + 1);
+            devLog(`TTS text truncated from ${cleanText.length} to ${finalText.length} chars`);
+        }
+
+        // Track which session this TTS request belongs to
+        const ttsRequestSession = currentSessionId;
+        ttsSessionId = ttsRequestSession;
+
+        // Request TTS synthesis with timeout
+        // Use global controller so stopAllTTS() can abort this in-flight fetch
+        ttsAbortController = new AbortController();
+        const timeoutMs = 180000; // 3 minutes (matches backend max)
+        const timeoutId = setTimeout(() => {
+            if (ttsAbortController) ttsAbortController.abort();
+        }, timeoutMs);
+
+        let response;
+        let ttsStartTime = Date.now();
+        try {
+            response = await fetch('/api/tts/synthesize', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    text: finalText,
+                    language: 'ko'
+                }),
+                signal: ttsAbortController.signal
+            });
+            clearTimeout(timeoutId);
+            devLog(`TTS synthesis completed in ${((Date.now() - ttsStartTime) / 1000).toFixed(1)}s`);
+        } catch (fetchError) {
+            clearTimeout(timeoutId);
+            ttsAbortController = null;
+            // If stopAllTTS() triggered this abort, exit silently
+            if (ttsStopping) {
+                devLog('TTS fetch aborted by stopAllTTS — suppressing error');
+                return;
+            }
+            // Ensure button is reset on timeout/abort
+            safeUpdateTTSButton(button, (btn) => {
+                btn.classList.remove('tts-playing');
+                resetTTSButton(btn);
+            });
+            if (fetchError.name === 'AbortError') {
+                const elapsedTime = ((Date.now() - ttsStartTime) / 1000).toFixed(0);
+                devLog(`TTS timeout after ${elapsedTime}s - server may still be processing`);
+                throw new Error(`TTS 생성 시간이 초과되었습니다 (${elapsedTime}초). 텍스트가 너무 길거나 서버가 바쁠 수 있습니다. 잠시 후 다시 시도하거나 관리자 설정에서 Edge TTS로 변경해보세요.`);
+            }
+            throw fetchError;
+        }
+
+        // Fetch completed — clear the global abort controller
+        ttsAbortController = null;
+
+        // Guard: if user navigated away during synthesis, discard result
+        if (currentSessionId !== ttsRequestSession) {
+            devLog('TTS discarded: session changed during synthesis');
+            return;
+        }
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ detail: 'TTS 생성 실패' }));
+            throw new Error(errorData.detail || errorData.error || 'TTS 생성 실패');
+        }
+
+        const result = await response.json();
+
+        // Create and play audio
+        ttsAudio = new Audio(result.audio_url + '?token=' + encodeURIComponent(token));
+
+        // Update button to playing state (safely)
+        safeUpdateTTSButton(button, (btn) => {
+            btn.innerHTML = `
+                <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor">
+                    <rect x="4" y="3" width="3" height="10" rx="1" fill="currentColor"/>
+                    <rect x="9" y="3" width="3" height="10" rx="1" fill="currentColor"/>
+                </svg>
+            `;
+            btn.setAttribute('title', '재생 중지');
+            btn.classList.add('tts-playing');
+            btn.disabled = false;
+        });
+
+        // Play audio
+        ttsAudio.play();
+
+        // Show floating indicator for background playback
+        showTTSIndicator();
+
+        // Handle audio ended - safely update button if it still exists
+        ttsAudio.onended = () => {
+            safeUpdateTTSButton(currentTTSButton, (btn) => {
+                btn.classList.remove('tts-playing');
+                resetTTSButton(btn);
+            });
+            ttsAudio = null;
+            currentTTSButton = null;
+            hideTTSIndicator();
+            devLog('TTS playback completed');
+        };
+
+        // Handle audio error - safely update button if it still exists
+        ttsAudio.onerror = (e) => {
+            devLog('TTS audio error:', e);
+            // Suppress error if stopAllTTS() is running or page is navigating away
+            if (ttsStopping || window.allowNavigation) {
+                devLog('TTS audio error suppressed — stop/navigation in progress');
+                return;
+            }
+            safeUpdateTTSButton(currentTTSButton, (btn) => {
+                btn.classList.remove('tts-playing');
+                resetTTSButton(btn);
+            });
+            // Only show error if user is still on the same page
+            if (document.body.contains(button)) {
+                showError('음성 재생에 실패했습니다.');
+            }
+            ttsAudio = null;
+            currentTTSButton = null;
+            hideTTSIndicator();
+        };
+
+    } catch (error) {
+        devLog('TTS error:', error);
+        ttsAbortController = null;
+        // If stopAllTTS() is running or page is navigating away,
+        // suppress error UI entirely — cleanup is handled by stopAllTTS()
+        if (ttsStopping || window.allowNavigation) {
+            devLog('TTS error suppressed — stop/navigation in progress');
+            return;
+        }
+        // Always reset button state on error, even if page has changed
+        safeUpdateTTSButton(button, (btn) => {
+            btn.classList.remove('tts-playing');
+            btn.disabled = false;  // Ensure button is re-enabled
+            resetTTSButton(btn);
+        });
+        // Only show error if user is still on same page
+        if (document.body.contains(button)) {
+            showError(`TTS 오류: ${error.message}`);
+        }
+        currentTTSButton = null;
+        hideTTSIndicator();
+    }
+}
+
+// Reset TTS button to default state
+function resetTTSButton(button) {
+    button.innerHTML = `
+        <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor">
+            <path d="M8 3L4 6H2v4h2l4 3V3z" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M11 5c1.2 1.2 1.2 4.6 0 6" stroke-width="1.5" stroke-linecap="round"/>
+            <path d="M13 3c2.4 2.4 2.4 7.6 0 10" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+    `;
+    button.setAttribute('title', '음성으로 읽기');
+    button.disabled = false;
+}
+
+// Global TTS stop function - can be called from anywhere
+function stopTTS() {
+    if (ttsAudio) {
+        ttsAudio.pause();
+        ttsAudio.currentTime = 0;
+        ttsAudio = null;
+    }
+    safeUpdateTTSButton(currentTTSButton, (btn) => {
+        btn.classList.remove('tts-playing');
+        resetTTSButton(btn);
+    });
+    currentTTSButton = null;
+    hideTTSIndicator();
+    devLog('TTS stopped globally');
+}
+
+// Floating TTS indicator for background playback
+function showTTSIndicator() {
+    let indicator = document.getElementById('tts-floating-indicator');
+    if (!indicator) {
+        indicator = document.createElement('div');
+        indicator.id = 'tts-floating-indicator';
+        indicator.innerHTML = `
+            <div class="tts-indicator-content">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" class="tts-indicator-icon">
+                    <path d="M8 3L4 6H2v4h2l4 3V3z" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M11 5c1.2 1.2 1.2 4.6 0 6" stroke-width="1.5" stroke-linecap="round"/>
+                </svg>
+                <span>재생 중</span>
+                <button class="tts-indicator-stop" onclick="stopTTS()" title="중지">
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                        <rect x="3" y="3" width="10" height="10" rx="1"/>
+                    </svg>
+                </button>
+            </div>
+        `;
+        indicator.style.cssText = `
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 8px 12px;
+            border-radius: 20px;
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+            z-index: 10000;
+            font-size: 13px;
+            font-weight: 500;
+            animation: ttsIndicatorPulse 2s ease-in-out infinite;
+            display: none;
+        `;
+
+        // Add animation style if not exists
+        if (!document.getElementById('tts-indicator-style')) {
+            const style = document.createElement('style');
+            style.id = 'tts-indicator-style';
+            style.textContent = `
+                @keyframes ttsIndicatorPulse {
+                    0%, 100% { transform: scale(1); opacity: 1; }
+                    50% { transform: scale(1.02); opacity: 0.9; }
+                }
+                .tts-indicator-content {
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                }
+                .tts-indicator-icon {
+                    animation: ttsIconBounce 1s ease-in-out infinite;
+                }
+                @keyframes ttsIconBounce {
+                    0%, 100% { transform: translateY(0); }
+                    50% { transform: translateY(-2px); }
+                }
+                .tts-indicator-stop {
+                    background: rgba(255,255,255,0.2);
+                    border: none;
+                    border-radius: 50%;
+                    width: 24px;
+                    height: 24px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    cursor: pointer;
+                    transition: background 0.2s;
+                    color: white;
+                }
+                .tts-indicator-stop:hover {
+                    background: rgba(255,255,255,0.3);
+                }
+            `;
+            document.head.appendChild(style);
+        }
+
+        document.body.appendChild(indicator);
+    }
+    indicator.style.display = 'block';
+}
+
+function hideTTSIndicator() {
+    const indicator = document.getElementById('tts-floating-indicator');
+    if (indicator) {
+        indicator.style.display = 'none';
+    }
+}
+
+// Strip markdown formatting for TTS - natural speech conversion (Korean/English)
+function stripMarkdownForTTS(text) {
+    // Validate input
+    if (!text || typeof text !== 'string') {
+        devLog('stripMarkdownForTTS: invalid input', text);
+        return '내용을 읽을 수 없습니다.';
+    }
+
+    try {
+        // Korean ordinal number mapping for lists
+        const koreanOrdinals = ['첫째', '둘째', '셋째', '넷째', '다섯째', '여섯째', '일곱째', '여덟째', '아홉째', '열째',
+            '열한째', '열두째', '열셋째', '열넷째', '열다섯째', '열여섯째', '열일곱째', '열여덟째', '열아홉째', '스무째'];
+
+        // Programming language names for natural reading
+        const langNames = {
+            'js': '자바스크립트', 'javascript': '자바스크립트', 'jsx': '제이에스엑스',
+            'ts': '타입스크립트', 'typescript': '타입스크립트', 'tsx': '티에스엑스',
+            'py': '파이썬', 'python': '파이썬', 'python3': '파이썬 3',
+            'java': '자바', 'kotlin': '코틀린', 'scala': '스칼라', 'groovy': '그루비',
+            'cpp': '씨플러스플러스', 'c++': '씨플러스플러스', 'c': '씨 언어', 'h': '헤더 파일',
+            'cs': '씨샵', 'csharp': '씨샵', 'fsharp': '에프샵', 'vb': '비주얼베이직',
+            'rb': '루비', 'ruby': '루비', 'rails': '레일즈',
+            'go': '고', 'golang': '고랭',
+            'rs': '러스트', 'rust': '러스트',
+            'php': '피에이치피', 'laravel': '라라벨',
+            'swift': '스위프트', 'objc': '오브젝티브씨', 'objective-c': '오브젝티브씨',
+            'dart': '다트', 'flutter': '플러터',
+            'sql': '에스큐엘', 'mysql': '마이에스큐엘', 'postgresql': '포스트그레스큐엘', 'sqlite': '에스큐엘라이트',
+            'mongodb': '몽고디비', 'redis': '레디스', 'elasticsearch': '엘라스틱서치',
+            'html': '에이치티엠엘', 'html5': '에이치티엠엘 5', 'xhtml': '엑스에이치티엠엘',
+            'css': '씨에스에스', 'css3': '씨에스에스 3', 'scss': '에스씨에스에스', 'sass': '사스', 'less': '레스',
+            'json': '제이슨', 'xml': '엑스엠엘', 'yaml': '야믈', 'yml': '야믈', 'toml': '토믈',
+            'md': '마크다운', 'markdown': '마크다운', 'rst': '리스트럭처드텍스트',
+            'bash': '배쉬', 'shell': '쉘', 'sh': '쉘', 'zsh': '지쉘', 'powershell': '파워쉘', 'ps1': '파워쉘',
+            'dockerfile': '도커파일', 'docker': '도커', 'makefile': '메이크파일',
+            'nginx': '엔진엑스', 'apache': '아파치',
+            'graphql': '그래프큐엘', 'protobuf': '프로토버프',
+            'r': '알 언어', 'matlab': '매트랩', 'julia': '줄리아',
+            'lua': '루아', 'perl': '펄', 'haskell': '하스켈', 'elixir': '엘릭서', 'erlang': '얼랭',
+            'clojure': '클로저', 'lisp': '리스프', 'scheme': '스킴',
+            'assembly': '어셈블리', 'asm': '어셈블리', 'wasm': '웹어셈블리',
+            'solidity': '솔리디티', 'vyper': '바이퍼',
+            'terraform': '테라폼', 'ansible': '앤서블', 'puppet': '퍼핏',
+            'vue': '뷰', 'react': '리액트', 'angular': '앵귤러', 'svelte': '스벨트',
+            'nextjs': '넥스트제이에스', 'nuxt': '넉스트', 'gatsby': '개츠비',
+            'express': '익스프레스', 'fastapi': '패스트에이피아이', 'django': '장고', 'flask': '플라스크',
+            'spring': '스프링', 'springboot': '스프링부트'
+        };
+
+        // Comprehensive abbreviations dictionary
+        const abbreviations = {
+            // === 기술 일반 ===
+            'API': '에이피아이', 'APIs': '에이피아이들',
+            'UI': '유아이', 'UX': '유엑스', 'GUI': '지유아이', 'CLI': '커맨드라인',
+            'SDK': '에스디케이', 'IDE': '통합개발환경', 'CDN': '씨디엔',
+            'CMS': '콘텐츠관리시스템', 'CRM': '고객관계관리',
+            'ERP': '전사적자원관리', 'SCM': '공급망관리',
+
+            // === 데이터베이스 ===
+            'DB': '데이터베이스', 'DBMS': '데이터베이스관리시스템',
+            'SQL': '에스큐엘', 'NoSQL': '노에스큐엘',
+            'ACID': '에이씨아이디', 'CRUD': '크러드',
+            'ORM': '오알엠', 'ODM': '오디엠',
+            'ETL': '이티엘', 'OLAP': '올랩', 'OLTP': '올티피',
+
+            // === 네트워크/웹 ===
+            'HTTP': '에이치티티피', 'HTTPS': '에이치티티피에스',
+            'URL': '유알엘', 'URI': '유알아이', 'URN': '유알엔',
+            'DNS': '디엔에스', 'IP': '아이피', 'IPv4': '아이피버전4', 'IPv6': '아이피버전6',
+            'TCP': '티씨피', 'UDP': '유디피', 'FTP': '에프티피', 'SFTP': '에스에프티피',
+            'SSH': '에스에스에이치', 'SSL': '에스에스엘', 'TLS': '티엘에스',
+            'SMTP': '에스엠티피', 'IMAP': '아이맵', 'POP3': '팝쓰리',
+            'REST': '레스트', 'RESTful': '레스트풀', 'SOAP': '소프',
+            'GraphQL': '그래프큐엘', 'gRPC': '지알피씨', 'RPC': '알피씨',
+            'WebSocket': '웹소켓', 'WebRTC': '웹알티씨',
+            'CORS': '코어스', 'CSRF': '씨에스알에프', 'XSS': '크로스사이트스크립팅',
+            'VPN': '브이피엔', 'LAN': '랜', 'WAN': '완', 'WLAN': '더블유랜',
+            'NAT': '나트', 'DHCP': '디에이치씨피', 'ARP': '알피',
+            'BGP': '비지피', 'OSPF': '오에스피에프',
+
+            // === 데이터 형식 ===
+            'JSON': '제이슨', 'XML': '엑스엠엘', 'CSV': '씨에스브이',
+            'YAML': '야믈', 'TOML': '토믈', 'INI': '아이엔아이',
+            'HTML': '에이치티엠엘', 'CSS': '씨에스에스', 'JS': '자바스크립트',
+            'SVG': '에스브이지', 'PDF': '피디에프', 'RTF': '알티에프',
+            'ZIP': '집', 'TAR': '타르', 'GZIP': '지집',
+            'BASE64': '베이스64', 'UTF8': '유티에프8', 'ASCII': '아스키', 'UNICODE': '유니코드',
+
+            // === 클라우드/인프라 ===
+            'AWS': '아마존 웹 서비스', 'GCP': '구글 클라우드', 'Azure': '애저',
+            'EC2': '이씨투', 'S3': '에스쓰리', 'RDS': '알디에스', 'Lambda': '람다',
+            'ECS': '이씨에스', 'EKS': '이케이에스', 'ECR': '이씨알',
+            'VPC': '브이피씨', 'IAM': '아이에이엠', 'KMS': '케이엠에스',
+            'SaaS': '사스', 'PaaS': '파스', 'IaaS': '아이아스', 'FaaS': '파스',
+            'BaaS': '바스', 'DaaS': '다스', 'MaaS': '마스',
+            'VM': '가상머신', 'VPS': '브이피에스', 'Container': '컨테이너',
+            'K8s': '쿠버네티스', 'Kubernetes': '쿠버네티스', 'Docker': '도커',
+            'Terraform': '테라폼', 'Ansible': '앤서블',
+            'CI': '지속적통합', 'CD': '지속적배포', 'CICD': '씨아이씨디',
+            'DevOps': '데브옵스', 'MLOps': '엠엘옵스', 'DataOps': '데이터옵스', 'GitOps': '깃옵스',
+            'SRE': '사이트신뢰성엔지니어링', 'SLA': '서비스수준협약', 'SLO': '서비스수준목표',
+
+            // === AI/ML ===
+            'AI': '인공지능', 'ML': '머신러닝', 'DL': '딥러닝',
+            'LLM': '대규모 언어 모델', 'GPT': '지피티', 'BERT': '버트', 'LSTM': '엘에스티엠',
+            'NLP': '자연어처리', 'NLU': '자연어이해', 'NLG': '자연어생성',
+            'CV': '컴퓨터비전', 'CNN': '씨엔엔', 'RNN': '알엔엔', 'GAN': '갠',
+            'RL': '강화학습', 'SL': '지도학습', 'UL': '비지도학습',
+            'RAG': '랙', 'LangChain': '랭체인', 'HuggingFace': '허깅페이스',
+            'TensorFlow': '텐서플로', 'PyTorch': '파이토치', 'Keras': '케라스',
+            'OCR': '광학문자인식', 'TTS': '텍스트투스피치', 'STT': '음성인식', 'ASR': '자동음성인식',
+
+            // === 보안 ===
+            'OAuth': '오어스', 'OAuth2': '오어스2', 'OIDC': '오아이디씨',
+            'JWT': '제이더블유티', 'JWS': '제이더블유에스', 'JWE': '제이더블유이',
+            'SSO': '싱글사인온', 'MFA': '다중인증', '2FA': '이중인증', 'OTP': '일회용비밀번호',
+            'SAML': '샘엘', 'LDAP': '엘댑', 'AD': '액티브디렉토리',
+            'PKI': '공개키기반구조', 'RSA': '알에스에이', 'AES': '에이이에스', 'SHA': '에스에이치에이',
+            'MD5': '엠디파이브', 'HMAC': '에이치맥',
+            'RBAC': '역할기반접근제어', 'ABAC': '속성기반접근제어',
+            'WAF': '웹방화벽', 'IDS': '침입탐지시스템', 'IPS': '침입방지시스템',
+            'DDoS': '디도스', 'DoS': '도스', 'SQLi': '에스큐엘인젝션',
+            'OWASP': '오와스프', 'CVE': '씨브이이', 'CVSS': '씨브이에스에스',
+
+            // === 개발방법론 ===
+            'TDD': '테스트주도개발', 'BDD': '행위주도개발', 'DDD': '도메인주도설계',
+            'MVC': '엠브이씨', 'MVP': '엠브이피', 'MVVM': '엠브이브이엠',
+            'OOP': '객체지향프로그래밍', 'FP': '함수형프로그래밍',
+            'SOLID': '솔리드', 'DRY': '드라이', 'KISS': '키스', 'YAGNI': '야그니',
+            'Agile': '애자일', 'Scrum': '스크럼', 'Kanban': '칸반', 'XP': '익스트림프로그래밍',
+            'Waterfall': '워터폴', 'Lean': '린',
+            'PR': '풀리퀘스트', 'MR': '머지리퀘스트', 'CR': '코드리뷰',
+            'QA': '품질보증', 'UAT': '사용자인수테스트', 'E2E': '엔드투엔드',
+
+            // === 하드웨어/시스템 ===
+            'CPU': '씨피유', 'GPU': '지피유', 'TPU': '티피유', 'NPU': '엔피유',
+            'RAM': '램', 'ROM': '롬', 'SSD': '에스에스디', 'HDD': '하드디스크',
+            'NVMe': '엔브이엠이', 'SATA': '사타', 'SCSI': '스커지',
+            'BIOS': '바이오스', 'UEFI': '유이에프아이', 'GRUB': '그럽',
+            'USB': '유에스비', 'HDMI': '에이치디엠아이', 'DisplayPort': '디스플레이포트',
+            'PCIe': '피씨아이익스프레스', 'NIC': '네트워크카드',
+            'OS': '운영체제', 'POSIX': '포직스', 'UNIX': '유닉스', 'Linux': '리눅스',
+            'IoT': '사물인터넷', 'RTOS': '실시간운영체제',
+
+            // === 용량/단위 ===
+            'KB': '킬로바이트', 'MB': '메가바이트', 'GB': '기가바이트', 'TB': '테라바이트', 'PB': '페타바이트',
+            'Kbps': '킬로비트퍼세컨드', 'Mbps': '메가비트퍼세컨드', 'Gbps': '기가비트퍼세컨드',
+            'MHz': '메가헤르츠', 'GHz': '기가헤르츠',
+            'ms': '밀리초', 'μs': '마이크로초', 'ns': '나노초',
+            'px': '픽셀', 'dpi': '디피아이', 'ppi': '피피아이',
+
+            // === 비즈니스/일반 ===
+            'B2B': '비투비', 'B2C': '비투씨', 'C2C': '씨투씨', 'D2C': '디투씨',
+            'ROI': '투자수익률', 'KPI': '핵심성과지표', 'OKR': '목표및핵심결과',
+            'MVP': '최소기능제품', 'POC': '개념증명', 'PoC': '개념증명',
+            'SOP': '표준운영절차', 'FAQ': '자주묻는질문', 'Q&A': '질의응답',
+            'CEO': '최고경영자', 'CTO': '최고기술책임자', 'CFO': '최고재무책임자', 'COO': '최고운영책임자',
+            'PM': '프로젝트매니저', 'PO': '제품책임자', 'SM': '스크럼마스터',
+            'HR': '인사', 'R&D': '연구개발', 'M&A': '인수합병',
+            'IPO': '기업공개', 'VC': '벤처캐피탈', 'PE': '사모펀드',
+            'ASAP': '가능한빨리', 'FYI': '참고로', 'TBD': '미정', 'TBA': '추후공지', 'WIP': '작업중',
+            'ETA': '예상도착시간', 'EOD': '오늘업무종료', 'COB': '영업종료',
+
+            // === 일반 약어 ===
+            'etc': '등등', 'vs': '대', 'vs.': '대',
+            'e.g.': '예를 들어', 'i.e.': '즉', 'cf.': '참고',
+            'a.k.a.': '또는', 'aka': '또는',
+            'w/': '와 함께', 'w/o': '없이',
+            'approx': '대략', 'max': '최대', 'min': '최소', 'avg': '평균',
+            'req': '요청', 'res': '응답', 'err': '에러', 'msg': '메시지',
+            'src': '소스', 'dest': '목적지', 'tmp': '임시', 'temp': '임시',
+            'prev': '이전', 'next': '다음', 'curr': '현재', 'current': '현재',
+            'init': '초기화', 'config': '설정', 'cfg': '설정',
+            'auth': '인증', 'authz': '인가', 'authn': '인증',
+            'admin': '관리자', 'user': '사용자', 'guest': '게스트',
+            'dev': '개발', 'prod': '운영', 'stg': '스테이징', 'staging': '스테이징',
+            'env': '환경', 'var': '변수', 'const': '상수', 'func': '함수',
+            'obj': '객체', 'arr': '배열', 'str': '문자열', 'num': '숫자', 'bool': '불리언',
+            'int': '정수', 'float': '실수', 'char': '문자',
+            'param': '파라미터', 'arg': '인자', 'prop': '속성', 'attr': '속성',
+            'elem': '요소', 'node': '노드', 'idx': '인덱스', 'len': '길이',
+            'btn': '버튼', 'img': '이미지', 'vid': '비디오', 'aud': '오디오',
+            'doc': '문서', 'docs': '문서들', 'ref': '참조', 'refs': '참조들',
+            'repo': '저장소', 'repos': '저장소들', 'pkg': '패키지', 'lib': '라이브러리',
+            'deps': '의존성', 'dep': '의존성', 'mod': '모듈', 'mods': '모듈들',
+            'ver': '버전', 'vers': '버전들', 'v1': '버전1', 'v2': '버전2', 'v3': '버전3',
+            'info': '정보', 'stat': '상태', 'stats': '통계',
+            'sync': '동기', 'async': '비동기',
+            'pub': '공개', 'priv': '비공개', 'prot': '보호됨',
+            'req': '요청', 'resp': '응답', 'ack': '확인',
+            'tx': '트랜잭션', 'rx': '수신',
+            'io': '입출력', 'stdin': '표준입력', 'stdout': '표준출력', 'stderr': '표준에러'
+        };
+
+        // Common English words/phrases with Korean pronunciation guide
+        const englishToKorean = {
+            // 동사/행위
+            'click': '클릭', 'double-click': '더블클릭', 'drag': '드래그', 'drop': '드롭',
+            'scroll': '스크롤', 'swipe': '스와이프', 'tap': '탭', 'pinch': '핀치',
+            'download': '다운로드', 'upload': '업로드', 'install': '설치', 'uninstall': '삭제',
+            'login': '로그인', 'logout': '로그아웃', 'signup': '회원가입', 'signin': '로그인',
+            'submit': '제출', 'cancel': '취소', 'confirm': '확인', 'reset': '초기화',
+            'save': '저장', 'load': '불러오기', 'delete': '삭제', 'remove': '제거',
+            'create': '생성', 'read': '읽기', 'update': '수정', 'edit': '편집',
+            'copy': '복사', 'paste': '붙여넣기', 'cut': '잘라내기', 'undo': '실행취소', 'redo': '다시실행',
+            'search': '검색', 'find': '찾기', 'filter': '필터', 'sort': '정렬',
+            'import': '가져오기', 'export': '내보내기', 'backup': '백업', 'restore': '복원',
+            'start': '시작', 'stop': '중지', 'pause': '일시정지', 'resume': '재개',
+            'enable': '활성화', 'disable': '비활성화', 'toggle': '토글',
+            'open': '열기', 'close': '닫기', 'show': '표시', 'hide': '숨기기',
+            'expand': '펼치기', 'collapse': '접기', 'minimize': '최소화', 'maximize': '최대화',
+            'zoom in': '확대', 'zoom out': '축소', 'fit': '맞춤',
+            'refresh': '새로고침', 'reload': '다시불러오기', 'retry': '재시도',
+            'connect': '연결', 'disconnect': '연결해제', 'sync': '동기화',
+            'merge': '병합', 'split': '분리', 'join': '결합',
+            'compile': '컴파일', 'build': '빌드', 'deploy': '배포', 'release': '릴리스',
+            'debug': '디버그', 'test': '테스트', 'run': '실행', 'execute': '실행',
+            'commit': '커밋', 'push': '푸시', 'pull': '풀', 'fetch': '패치', 'clone': '클론',
+            'branch': '브랜치', 'checkout': '체크아웃', 'rebase': '리베이스', 'cherry-pick': '체리픽',
+
+            // 명사/개념
+            'file': '파일', 'folder': '폴더', 'directory': '디렉토리', 'path': '경로',
+            'button': '버튼', 'link': '링크', 'icon': '아이콘', 'image': '이미지',
+            'menu': '메뉴', 'tab': '탭', 'panel': '패널', 'window': '창', 'dialog': '대화상자',
+            'modal': '모달', 'popup': '팝업', 'tooltip': '툴팁', 'dropdown': '드롭다운',
+            'checkbox': '체크박스', 'radio': '라디오버튼', 'slider': '슬라이더', 'switch': '스위치',
+            'input': '입력', 'output': '출력', 'form': '양식', 'field': '필드',
+            'table': '테이블', 'row': '행', 'column': '열', 'cell': '셀',
+            'list': '목록', 'grid': '그리드', 'card': '카드', 'item': '항목',
+            'header': '헤더', 'footer': '푸터', 'sidebar': '사이드바', 'navbar': '내비게이션바',
+            'content': '콘텐츠', 'layout': '레이아웃', 'container': '컨테이너', 'wrapper': '래퍼',
+            'component': '컴포넌트', 'element': '요소', 'widget': '위젯', 'plugin': '플러그인',
+            'template': '템플릿', 'theme': '테마', 'style': '스타일', 'design': '디자인',
+            'font': '폰트', 'color': '색상', 'size': '크기', 'width': '너비', 'height': '높이',
+            'margin': '마진', 'padding': '패딩', 'border': '테두리', 'shadow': '그림자',
+            'animation': '애니메이션', 'transition': '트랜지션', 'effect': '효과',
+            'event': '이벤트', 'handler': '핸들러', 'listener': '리스너', 'callback': '콜백',
+            'request': '요청', 'response': '응답', 'status': '상태', 'error': '에러',
+            'success': '성공', 'failure': '실패', 'warning': '경고', 'info': '정보',
+            'message': '메시지', 'notification': '알림', 'alert': '알림', 'toast': '토스트',
+            'log': '로그', 'debug': '디버그', 'trace': '추적', 'stack': '스택',
+            'cache': '캐시', 'buffer': '버퍼', 'queue': '큐', 'pool': '풀',
+            'thread': '스레드', 'process': '프로세스', 'task': '태스크', 'job': '잡',
+            'session': '세션', 'cookie': '쿠키', 'token': '토큰', 'key': '키',
+            'value': '값', 'pair': '쌍', 'map': '맵', 'set': '셋', 'array': '배열',
+            'object': '객체', 'class': '클래스', 'instance': '인스턴스', 'method': '메서드',
+            'function': '함수', 'variable': '변수', 'constant': '상수', 'parameter': '파라미터',
+            'argument': '인자', 'return': '반환', 'type': '타입', 'interface': '인터페이스',
+            'module': '모듈', 'package': '패키지', 'library': '라이브러리', 'framework': '프레임워크',
+            'dependency': '의존성', 'version': '버전', 'release': '릴리스', 'update': '업데이트',
+            'feature': '기능', 'bug': '버그', 'issue': '이슈', 'ticket': '티켓',
+            'milestone': '마일스톤', 'sprint': '스프린트', 'backlog': '백로그',
+            'repository': '저장소', 'branch': '브랜치', 'tag': '태그', 'commit': '커밋',
+            'server': '서버', 'client': '클라이언트', 'host': '호스트', 'port': '포트',
+            'database': '데이터베이스', 'schema': '스키마', 'query': '쿼리', 'index': '인덱스',
+            'network': '네트워크', 'protocol': '프로토콜', 'packet': '패킷', 'payload': '페이로드',
+            'endpoint': '엔드포인트', 'route': '라우트', 'middleware': '미들웨어',
+            'controller': '컨트롤러', 'service': '서비스', 'model': '모델', 'view': '뷰',
+            'frontend': '프론트엔드', 'backend': '백엔드', 'fullstack': '풀스택',
+            'mobile': '모바일', 'desktop': '데스크톱', 'web': '웹', 'app': '앱',
+            'platform': '플랫폼', 'environment': '환경', 'production': '운영', 'development': '개발',
+            'testing': '테스트', 'staging': '스테이징', 'local': '로컬', 'remote': '원격',
+            'cloud': '클라우드', 'on-premise': '온프레미스', 'hybrid': '하이브리드',
+            'cluster': '클러스터', 'node': '노드', 'instance': '인스턴스', 'replica': '레플리카',
+            'load balancer': '로드밸런서', 'proxy': '프록시', 'gateway': '게이트웨이',
+            'microservice': '마이크로서비스', 'monolith': '모놀리스', 'serverless': '서버리스',
+            'container': '컨테이너', 'orchestration': '오케스트레이션', 'automation': '자동화',
+            'pipeline': '파이프라인', 'workflow': '워크플로우', 'process': '프로세스',
+            'monitoring': '모니터링', 'logging': '로깅', 'tracing': '트레이싱', 'alerting': '알림',
+            'metrics': '메트릭', 'dashboard': '대시보드', 'report': '리포트', 'analytics': '분석',
+            'performance': '성능', 'latency': '지연시간', 'throughput': '처리량', 'bandwidth': '대역폭',
+            'scalability': '확장성', 'reliability': '신뢰성', 'availability': '가용성',
+            'security': '보안', 'privacy': '개인정보보호', 'compliance': '규정준수',
+            'encryption': '암호화', 'decryption': '복호화', 'hash': '해시', 'salt': '솔트',
+            'authentication': '인증', 'authorization': '인가', 'permission': '권한', 'role': '역할',
+            'account': '계정', 'profile': '프로필', 'setting': '설정', 'preference': '환경설정',
+
+            // 형용사/부사
+            'default': '기본', 'custom': '사용자정의', 'optional': '선택적', 'required': '필수',
+            'public': '공개', 'private': '비공개', 'protected': '보호됨', 'internal': '내부',
+            'static': '정적', 'dynamic': '동적', 'readonly': '읽기전용', 'mutable': '가변',
+            'sync': '동기', 'async': '비동기', 'parallel': '병렬', 'sequential': '순차',
+            'online': '온라인', 'offline': '오프라인', 'active': '활성', 'inactive': '비활성',
+            'valid': '유효', 'invalid': '무효', 'enabled': '활성화됨', 'disabled': '비활성화됨',
+            'visible': '보임', 'hidden': '숨김', 'collapsed': '접힘', 'expanded': '펼침',
+            'loading': '로딩중', 'pending': '대기중', 'processing': '처리중', 'completed': '완료됨',
+            'successful': '성공', 'failed': '실패', 'cancelled': '취소됨', 'timeout': '시간초과',
+            'deprecated': '더이상사용안함', 'obsolete': '구식', 'legacy': '레거시', 'latest': '최신',
+            'stable': '안정', 'beta': '베타', 'alpha': '알파', 'preview': '프리뷰', 'canary': '카나리',
+            'major': '메이저', 'minor': '마이너', 'patch': '패치', 'hotfix': '핫픽스',
+
+            // 접속사/전치사
+            'and': '그리고', 'or': '또는', 'not': '아님', 'but': '하지만',
+            'if': '만약', 'then': '그러면', 'else': '그렇지않으면', 'when': '때',
+            'while': '동안', 'for': '위해', 'with': '와함께', 'without': '없이',
+            'from': '부터', 'to': '까지', 'in': '안에', 'out': '밖에',
+            'before': '전에', 'after': '후에', 'between': '사이에', 'among': '중에',
+            'above': '위에', 'below': '아래에', 'inside': '내부에', 'outside': '외부에'
+        };
+
+        // Function to convert camelCase/PascalCase to readable format
+        const convertCamelCase = (str) => {
+            if (/[가-힣]/.test(str) || str.length < 3) return str;
+            return str.replace(/([a-z])([A-Z])/g, '$1 $2')
+                      .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2');
+        };
+
+        // Function to convert snake_case to readable format
+        const convertSnakeCase = (str) => {
+            if (/[가-힣]/.test(str)) return str;
+            return str.replace(/_/g, ' ');
+        };
+
+        // Function to convert kebab-case to readable format
+        const convertKebabCase = (str) => {
+            if (/[가-힣]/.test(str)) return str;
+            return str.replace(/-/g, ' ');
+        };
+
+        let result = text
+
+        // === PHASE 1: Handle code blocks ===
+        .replace(/```(\w+)?\n([\s\S]*?)```/g, (match, lang, code) => {
+            const langName = lang ? (langNames[lang.toLowerCase()] || lang) : '';
+            const lineCount = code.trim().split('\n').length;
+            if (langName) {
+                return ` ${langName} 코드 ${lineCount}줄이 있습니다. `;
+            }
+            return ` 코드 ${lineCount}줄이 있습니다. `;
+        })
+
+        // Handle inline code - make it readable
+        .replace(/`([^`]+)`/g, (match, code) => {
+            if (code.length > 50 || /[\n\r]/.test(code)) {
+                return ' 코드 ';
+            }
+            let readable = code;
+            readable = convertSnakeCase(readable);
+            readable = convertKebabCase(readable);
+            readable = convertCamelCase(readable);
+            return ` ${readable} `;
+        })
+
+        // === PHASE 2: Handle structural elements ===
+
+        // Handle tables - convert to natural speech
+        .replace(/^\|(.+)\|$/gm, (match, content) => {
+            if (/^[\s\-:|]+$/.test(content)) return '';
+            const cells = content.split('|').map(c => c.trim()).filter(c => c && !/^[\s\-:|]+$/.test(c));
+            if (cells.length === 0) return '';
+            return cells.join(', ') + '. ';
+        })
+
+        // Headers - add emphasis pause
+        .replace(/^(#{1,6})\s+(.+)$/gm, (match, hashes, title) => {
+            const level = hashes.length;
+            return level <= 2 ? `${title}. ` : `${title}, `;
+        })
+
+        // Numbered lists with Korean ordinals
+        .replace(/^(\s*)(\d+)\.\s+(.+)$/gm, (match, indent, num, content) => {
+            const index = parseInt(num) - 1;
+            const ordinal = koreanOrdinals[index] || `${num}번째`;
+            return `${ordinal}, ${content}. `;
+        })
+
+        // Bullet points
+        .replace(/^(\s*)[-*+]\s+(.+)$/gm, '$2. ')
+
+        // Task lists
+        .replace(/^(\s*)[-*+]\s+\[(x|X)\]\s+(.+)$/gm, '완료됨, $3. ')
+        .replace(/^(\s*)[-*+]\s+\[\s?\]\s+(.+)$/gm, '미완료, $2. ')
+
+        // Blockquotes
+        .replace(/^>\s*(.+)$/gm, '인용, $1. ')
+
+        // === PHASE 3: Handle inline formatting ===
+
+        // Bold - keep content
+        .replace(/\*\*([^*]+)\*\*/g, '$1')
+        .replace(/__([^_]+)__/g, '$1')
+
+        // Italic - keep content
+        .replace(/\*([^*]+)\*/g, '$1')
+        .replace(/_([^_]+)_/g, '$1')
+
+        // Strikethrough - skip
+        .replace(/~~([^~]+)~~/g, '')
+
+        // Links - just keep text
+        .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1')
+
+        // Images
+        .replace(/!\[([^\]]*)\]\([^)]+\)/g, (match, alt) => {
+            return alt && alt.trim() ? ` ${alt.trim()} 이미지. ` : ' 이미지가 있습니다. ';
+        })
+
+        // Horizontal rules
+        .replace(/^[\s]*[-*_]{3,}[\s]*$/gm, '. ')
+
+        // === PHASE 4: Handle special content ===
+
+        // URLs - describe based on domain
+        .replace(/https?:\/\/(www\.)?(github\.com|gitlab\.com)[^\s]*/gi, ' 깃허브 링크 ')
+        .replace(/https?:\/\/(www\.)?(stackoverflow\.com)[^\s]*/gi, ' 스택오버플로우 링크 ')
+        .replace(/https?:\/\/(www\.)?(youtube\.com|youtu\.be)[^\s]*/gi, ' 유튜브 링크 ')
+        .replace(/https?:\/\/(www\.)?(google\.com)[^\s]*/gi, ' 구글 링크 ')
+        .replace(/https?:\/\/(www\.)?(docs\.)[^\s]*/gi, ' 문서 링크 ')
+        .replace(/https?:\/\/[^\s]+/g, ' 링크 ')
+
+        // Email addresses
+        .replace(/[\w.-]+@[\w.-]+\.\w+/g, ' 이메일 주소 ')
+
+        // File extensions
+        .replace(/\.([a-zA-Z0-9]+)(?=\s|$|[,.])/g, (match, ext) => {
+            const extLower = ext.toLowerCase();
+            if (langNames[extLower]) return ` ${langNames[extLower]} 파일`;
+            return ` 점${ext} 파일`;
+        })
+
+        // File paths
+        .replace(/(?:\/[\w.-]+)+\/?/g, (match) => {
+            const parts = match.split('/').filter(p => p);
+            if (parts.length > 2) {
+                return ` ${parts[parts.length - 1]} 경로 `;
+            }
+            return match;
+        })
+
+        // HTML tags
+        .replace(/<br\s*\/?>/gi, '. ')
+        .replace(/<[^>]+>/g, '')
+
+        // Escaped characters
+        .replace(/\\([\\`*_{}[\]()#+\-.!])/g, '$1')
+
+        // Footnotes
+        .replace(/\[\^[^\]]+\]/g, '')
+        .replace(/\[\^[^\]]+\]:\s*.+$/gm, '')
+
+        // Definition lists
+        .replace(/^:\s+(.+)$/gm, '$1. ');
+
+        // === PHASE 5: Natural reading improvements ===
+
+        // Expand abbreviations (case-sensitive, whole words)
+        Object.entries(abbreviations).forEach(([abbr, expanded]) => {
+            const regex = new RegExp(`\\b${abbr.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'g');
+            result = result.replace(regex, expanded);
+        });
+
+        // Note: Technical English terms are kept as-is for natural pronunciation by TTS
+        // The englishToKorean dictionary is no longer applied to preserve technical terms in English
+
+        // === PHASE 6: Numbers and units ===
+        result = result
+            // Percentages
+            .replace(/(\d+(?:\.\d+)?)\s*%/g, '$1퍼센트')
+            // Temperature
+            .replace(/(\d+(?:\.\d+)?)\s*°C/gi, '$1도')
+            .replace(/(\d+(?:\.\d+)?)\s*°F/gi, '화씨 $1도')
+            .replace(/(\d+(?:\.\d+)?)\s*K\b/g, '$1켈빈')
+            // Angles
+            .replace(/(\d+(?:\.\d+)?)\s*°(?![CF])/g, '$1도')
+            .replace(/(\d+(?:\.\d+)?)\s*rad/gi, '$1라디안')
+            // Distance/Length
+            .replace(/(\d+(?:\.\d+)?)\s*km/gi, '$1킬로미터')
+            .replace(/(\d+(?:\.\d+)?)\s*m(?![a-z])/gi, '$1미터')
+            .replace(/(\d+(?:\.\d+)?)\s*cm/gi, '$1센티미터')
+            .replace(/(\d+(?:\.\d+)?)\s*mm/gi, '$1밀리미터')
+            .replace(/(\d+(?:\.\d+)?)\s*inch(es)?/gi, '$1인치')
+            .replace(/(\d+(?:\.\d+)?)\s*ft/gi, '$1피트')
+            .replace(/(\d+(?:\.\d+)?)\s*mi(?:le)?s?/gi, '$1마일')
+            // Weight
+            .replace(/(\d+(?:\.\d+)?)\s*kg/gi, '$1킬로그램')
+            .replace(/(\d+(?:\.\d+)?)\s*g(?![a-z])/gi, '$1그램')
+            .replace(/(\d+(?:\.\d+)?)\s*mg/gi, '$1밀리그램')
+            .replace(/(\d+(?:\.\d+)?)\s*lb/gi, '$1파운드')
+            .replace(/(\d+(?:\.\d+)?)\s*oz/gi, '$1온스')
+            // Volume
+            .replace(/(\d+(?:\.\d+)?)\s*L\b/g, '$1리터')
+            .replace(/(\d+(?:\.\d+)?)\s*ml/gi, '$1밀리리터')
+            .replace(/(\d+(?:\.\d+)?)\s*gal/gi, '$1갤런')
+            // Data size
+            .replace(/(\d+(?:\.\d+)?)\s*PB/gi, '$1페타바이트')
+            .replace(/(\d+(?:\.\d+)?)\s*TB/gi, '$1테라바이트')
+            .replace(/(\d+(?:\.\d+)?)\s*GB/gi, '$1기가바이트')
+            .replace(/(\d+(?:\.\d+)?)\s*MB/gi, '$1메가바이트')
+            .replace(/(\d+(?:\.\d+)?)\s*KB/gi, '$1킬로바이트')
+            .replace(/(\d+(?:\.\d+)?)\s*bytes?/gi, '$1바이트')
+            .replace(/(\d+(?:\.\d+)?)\s*bits?/gi, '$1비트')
+            // Speed
+            .replace(/(\d+(?:\.\d+)?)\s*Gbps/gi, '$1기가비피에스')
+            .replace(/(\d+(?:\.\d+)?)\s*Mbps/gi, '$1메가비피에스')
+            .replace(/(\d+(?:\.\d+)?)\s*Kbps/gi, '$1킬로비피에스')
+            .replace(/(\d+(?:\.\d+)?)\s*bps/gi, '$1비피에스')
+            .replace(/(\d+(?:\.\d+)?)\s*km\/h/gi, '$1킬로미터 퍼 아워')
+            .replace(/(\d+(?:\.\d+)?)\s*m\/s/gi, '$1미터 퍼 세컨드')
+            // Frequency
+            .replace(/(\d+(?:\.\d+)?)\s*THz/gi, '$1테라헤르츠')
+            .replace(/(\d+(?:\.\d+)?)\s*GHz/gi, '$1기가헤르츠')
+            .replace(/(\d+(?:\.\d+)?)\s*MHz/gi, '$1메가헤르츠')
+            .replace(/(\d+(?:\.\d+)?)\s*KHz/gi, '$1킬로헤르츠')
+            .replace(/(\d+(?:\.\d+)?)\s*Hz/gi, '$1헤르츠')
+            // Time
+            .replace(/(\d+)\s*h(?:our)?s?(?![a-z])/gi, '$1시간')
+            .replace(/(\d+)\s*min(?:ute)?s?(?![a-z])/gi, '$1분')
+            .replace(/(\d+)\s*sec(?:ond)?s?(?![a-z])/gi, '$1초')
+            .replace(/(\d+(?:\.\d+)?)\s*ms(?![a-z])/gi, '$1밀리초')
+            .replace(/(\d+(?:\.\d+)?)\s*μs/gi, '$1마이크로초')
+            .replace(/(\d+(?:\.\d+)?)\s*ns/gi, '$1나노초')
+            // Money
+            .replace(/\$\s*(\d+(?:,\d{3})*(?:\.\d{2})?)/g, '$1달러')
+            .replace(/₩\s*(\d+(?:,\d{3})*)/g, '$1원')
+            .replace(/€\s*(\d+(?:,\d{3})*(?:\.\d{2})?)/g, '$1유로')
+            .replace(/£\s*(\d+(?:,\d{3})*(?:\.\d{2})?)/g, '$1파운드')
+            .replace(/¥\s*(\d+(?:,\d{3})*)/g, '$1엔')
+            // Time formats
+            .replace(/(\d{1,2}):(\d{2}):(\d{2})\s*(AM|PM)/gi, (m, h, min, s, ap) =>
+                `${ap.toUpperCase() === 'AM' ? '오전' : '오후'} ${h}시 ${min}분 ${s}초`)
+            .replace(/(\d{1,2}):(\d{2})\s*(AM|PM)/gi, (m, h, min, ap) =>
+                `${ap.toUpperCase() === 'AM' ? '오전' : '오후'} ${h}시 ${min}분`)
+            .replace(/(\d{1,2}):(\d{2}):(\d{2})/g, '$1시 $2분 $3초')
+            .replace(/(\d{1,2}):(\d{2})/g, '$1시 $2분')
+            // Date formats
+            .replace(/(\d{4})-(\d{1,2})-(\d{1,2})/g, '$1년 $2월 $3일')
+            .replace(/(\d{1,2})\/(\d{1,2})\/(\d{4})/g, '$3년 $1월 $2일')
+            .replace(/(\d{1,2})\/(\d{1,2})\/(\d{2})/g, '20$3년 $1월 $2일')
+            // Version numbers
+            .replace(/v(\d+)\.(\d+)\.(\d+)(?:-([a-zA-Z]+))?/gi, (m, maj, min, pat, pre) =>
+                pre ? `버전 ${maj}점${min}점${pat} ${pre}` : `버전 ${maj}점${min}점${pat}`)
+            .replace(/v(\d+)\.(\d+)/gi, '버전 $1점$2')
+            // Korean won with commas
+            .replace(/(\d{1,3}(?:,\d{3})+)\s*원/g, (m, num) => `${num.replace(/,/g, '')}원`)
+            // Large numbers with commas (remove commas for TTS)
+            .replace(/(\d{1,3}(?:,\d{3})+)/g, (m) => m.replace(/,/g, ''))
+            // Decimal numbers (but not IP addresses or versions already handled)
+            .replace(/(?<![.\d])(\d+)\.(\d+)(?![.\d])/g, '$1점$2')
+            // Ranges
+            .replace(/(\d+)\s*[-~]\s*(\d+)/g, '$1에서 $2')
+            // Ratios
+            .replace(/(\d+)\s*:\s*(\d+)/g, '$1대$2')
+            // Powers
+            .replace(/(\d+)\s*\^(\d+)/g, '$1의 $2제곱')
+            .replace(/10\^(\d+)/g, '10의 $1승')
+            // Fractions
+            .replace(/(\d+)\s*\/\s*(\d+)(?!\d)/g, '$1분의 $2');
+
+        // === PHASE 7: Handle special symbols ===
+        result = result
+            // HTML entities
+            .replace(/&amp;/g, '그리고')
+            .replace(/&lt;/g, '작다')
+            .replace(/&gt;/g, '크다')
+            .replace(/&nbsp;/g, ' ')
+            .replace(/&quot;/g, '"')
+            .replace(/&#39;/g, "'")
+            // Programming operators
+            .replace(/!=/g, ' 같지않다 ')
+            .replace(/!==/g, ' 일치하지않는다 ')
+            .replace(/===/g, ' 일치한다 ')
+            .replace(/==/g, ' 같다 ')
+            .replace(/>=/g, ' 크거나같다 ')
+            .replace(/<=/g, ' 작거나같다 ')
+            .replace(/&&/g, ' 그리고 ')
+            .replace(/\|\|/g, ' 또는 ')
+            .replace(/\+\+/g, ' 증가 ')
+            .replace(/--/g, ' 감소 ')
+            .replace(/\+=/g, ' 더하기대입 ')
+            .replace(/-=/g, ' 빼기대입 ')
+            .replace(/\*=/g, ' 곱하기대입 ')
+            .replace(/\/=/g, ' 나누기대입 ')
+            // Arrows
+            .replace(/->/g, ' 에서 ')
+            .replace(/<-/g, ' 로부터 ')
+            .replace(/=>/g, ' 화살표 ')
+            .replace(/<</g, ' 왼쪽시프트 ')
+            .replace(/>>/g, ' 오른쪽시프트 ')
+            // Basic operators
+            .replace(/(?<!\d)\+(?!\d)/g, ' 더하기 ')
+            // Hyphen handling: Korean-hyphen-number → "다시" (e.g., 내부-1 → 내부 다시 1)
+            .replace(/([가-힣])-(\d+)/g, '$1 다시 $2')
+            // Number-hyphen-number already handled as range above (e.g., 1-10 → 1에서 10)
+            // Other standalone hyphens
+            .replace(/(?<![가-힣\d])-(?!\d)/g, ' ')
+            .replace(/\*/g, ' 곱하기 ')
+            .replace(/(?<![a-zA-Z])\/(?![a-zA-Z])/g, ' 나누기 ')
+            .replace(/(?<![!=<>])=(?![=<>])/g, ' 는 ')
+            // Brackets and parentheses (remove for speech)
+            .replace(/[\[\]{}()]/g, ' ')
+            // Special characters
+            .replace(/&/g, ' 그리고 ')
+            .replace(/\|/g, ' 또는 ')
+            .replace(/@/g, ' 앳 ')
+            .replace(/#(?!\s)/g, ' 해시 ')
+            .replace(/\^/g, ' ')
+            .replace(/~/g, ' ')
+            .replace(/`/g, ' ')
+            // Currency and units at end
+            .replace(/원(?=\s|$|[,.])/g, '원')
+            .replace(/달러(?=\s|$|[,.])/g, '달러')
+            // Common emoticons
+            .replace(/:D/g, ' ')
+            .replace(/:\)/g, ' ')
+            .replace(/:\(/g, ' ')
+            .replace(/;\)/g, ' ')
+            .replace(/:P/g, ' ')
+            .replace(/<3/g, ' ')
+            // Emojis - just remove them for clean TTS
+            .replace(/[\u{1F300}-\u{1F9FF}]/gu, ' ')
+            .replace(/[\u{2600}-\u{26FF}]/gu, ' ')
+            .replace(/[\u{2700}-\u{27BF}]/gu, ' ');
+
+        // === PHASE 8: Final cleanup ===
+
+        // Clean up punctuation
+        result = result
+            .replace(/\.{2,}/g, '.')
+            .replace(/,{2,}/g, ',')
+            .replace(/!{2,}/g, '!')
+            .replace(/\?{2,}/g, '?')
+            .replace(/\s+\./g, '.')
+            .replace(/\.\s*\./g, '.')
+            .replace(/,\s*\./g, '.')
+            .replace(/!\s*\./g, '!')
+            .replace(/\?\s*\./g, '?')
+            .replace(/\.+,/g, ',')
+            .replace(/,+\s*,+/g, ',');
+
+        // Clean up whitespace
+        result = result
+            .replace(/[ \t]+/g, ' ')
+            .replace(/\n\s*\n\s*\n+/g, '\n\n')
+            .replace(/^\s+|\s+$/gm, '')
+            .trim();
+
+        // Add natural pauses at sentence boundaries
+        result = result
+            .replace(/([가-힣a-zA-Z0-9])\n/g, '$1. ')
+            .replace(/\n+/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+
+        // Final punctuation cleanup
+        result = result
+            .replace(/\s+([.,!?])/g, '$1')
+            .replace(/([.,!?])\s*([.,!?])/g, '$1')
+            .trim();
+
+        // If result is empty or only punctuation, return a fallback message
+        if (!result || result.replace(/[.,!?\s]/g, '').length === 0) {
+            devLog('stripMarkdownForTTS: result empty after processing');
+            return '내용을 읽을 수 없습니다.';
+        }
+
+        return result;
+    } catch (error) {
+        devLog('stripMarkdownForTTS error:', error);
+        return text.replace(/<[^>]+>/g, '').replace(/[#*_`~]/g, '').trim() || '내용을 읽을 수 없습니다.';
+    }
+}
+
+// Invalidate TTS cache (call when settings change)
+function invalidateTTSCache() {
+    ttsCacheAvailable = null;
+}
+
+// Refresh TTS buttons on all existing messages
+async function refreshTTSButtons() {
+    invalidateTTSCache();
+    const available = await checkTTSAvailability();
+
+    // Find all TTS buttons and update their visibility
+    const ttsButtons = document.querySelectorAll('.tts-btn');
+    ttsButtons.forEach(btn => {
+        btn.style.display = available ? 'inline-flex' : 'none';
+    });
+
+    devLog('TTS buttons refreshed, available:', available, 'buttons count:', ttsButtons.length);
+}
+
+// Listen for page visibility changes to refresh TTS buttons
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+        // Refresh TTS buttons when user comes back to the page
+        refreshTTSButtons();
+    }
+});
+
+// ===== Streaming TTS (Real-time Text-to-Speech) =====
+const streamingTTS = {
+    enabled: false,
+    isActive: false,
+    audioQueue: [],
+    currentAudio: null,
+    currentAudioUrl: null,      // Track URL for proper cleanup
+    processedText: '',
+    pendingText: '',
+    isProcessing: false,
+    isPlaying: false,           // Distinguish "playing audio" from "processing queue"
+    abortController: null,
+    sessionId: null,            // Track which session this TTS belongs to
+    consecutiveErrors: 0,       // Track consecutive fetch errors
+    pendingFetches: 0,          // Track in-flight fetch requests
+
+    // Limits
+    MAX_QUEUE_SIZE: 30,         // Max queued audio blobs to prevent memory bloat
+    MAX_CONSECUTIVE_ERRORS: 3,  // Stop after this many consecutive failures
+    FETCH_TIMEOUT_MS: 60000,    // Per-sentence fetch timeout (60s)
+
+    // Sentence-ending patterns for Korean and English
+    sentenceEndPattern: /[.!?。！？]\s*$|[.!?。！？](?=\s)|다\.\s*$|요\.\s*$|니다\.\s*$|세요\.\s*$/,
+
+    // Initialize streaming TTS for a new response
+    start() {
+        if (!this.enabled) return;
+
+        // Stop any previous streaming TTS
+        this.stop();
+
+        this.isActive = true;
+        this.audioQueue = [];
+        this.processedText = '';
+        this.pendingText = '';
+        this.isProcessing = false;
+        this.isPlaying = false;
+        this.consecutiveErrors = 0;
+        this.pendingFetches = 0;
+        this.abortController = new AbortController();
+        this.sessionId = currentSessionId;
+
+        devLog('🔊 Streaming TTS started');
+        showNotification('실시간 음성 읽기가 시작됩니다', 'info');
+    },
+
+    // Add text chunk from streaming response
+    addChunk(text) {
+        if (!this.enabled || !this.isActive) return;
+
+        // Guard: stop if session changed
+        if (this.sessionId !== currentSessionId) {
+            this.stop();
+            return;
+        }
+
+        this.pendingText += text;
+        this.processPendingText();
+    },
+
+    // Process pending text and extract complete sentences
+    processPendingText() {
+        if (this.isProcessing) return;
+
+        // Look for complete sentences
+        const sentences = this.extractSentences(this.pendingText);
+
+        if (sentences.complete.length > 0) {
+            sentences.complete.forEach(sentence => {
+                const cleanSentence = sentence.trim();
+                if (cleanSentence.length > 0) {
+                    this.queueSentence(cleanSentence);
+                }
+            });
+            this.pendingText = sentences.remaining;
+        }
+    },
+
+    // Extract complete sentences from text
+    extractSentences(text) {
+        const complete = [];
+        let remaining = text;
+
+        // Split by sentence-ending punctuation
+        const sentenceRegex = /([^.!?。！？]*[.!?。！？]+\s*)/g;
+        let match;
+        let lastIndex = 0;
+
+        while ((match = sentenceRegex.exec(text)) !== null) {
+            const sentence = match[1];
+            // Only consider it complete if it has meaningful content
+            if (sentence.replace(/[.!?。！？\s]/g, '').length > 3) {
+                complete.push(sentence);
+                lastIndex = sentenceRegex.lastIndex;
+            }
+        }
+
+        remaining = text.substring(lastIndex);
+
+        // Also check for Korean sentence endings without standard punctuation
+        if (remaining.length > 50) {
+            // If remaining text is long, try to find a natural break
+            const koreanBreak = remaining.match(/^(.{20,}?)(다|요|니다|세요)\s+/);
+            if (koreanBreak) {
+                complete.push(koreanBreak[1] + koreanBreak[2]);
+                remaining = remaining.substring(koreanBreak[0].length);
+            }
+        }
+
+        return { complete, remaining };
+    },
+
+    // Queue a sentence for TTS
+    async queueSentence(sentence) {
+        if (!this.isActive) return;
+
+        // Guard: queue size limit to prevent memory bloat
+        if (this.audioQueue.length >= this.MAX_QUEUE_SIZE) {
+            devLog('🔊 Streaming TTS queue full, skipping sentence');
+            return;
+        }
+
+        // Guard: stop after too many consecutive errors
+        if (this.consecutiveErrors >= this.MAX_CONSECUTIVE_ERRORS) {
+            devLog('🔊 Streaming TTS stopped: too many consecutive errors');
+            if (this.consecutiveErrors === this.MAX_CONSECUTIVE_ERRORS) {
+                showNotification('실시간 음성 생성이 반복적으로 실패하여 중단되었습니다.', 'warning');
+                this.consecutiveErrors++; // Prevent repeated notifications
+            }
+            return;
+        }
+
+        this.processedText += sentence + ' ';
+
+        try {
+            // Clean the sentence for TTS
+            const cleanText = stripMarkdownForTTS(sentence);
+            if (!cleanText || cleanText.length < 2) return;
+
+            devLog('🔊 Queueing TTS sentence:', cleanText.substring(0, 50) + '...');
+
+            // Fetch audio
+            this.pendingFetches++;
+            const audioBlob = await this.fetchTTSAudio(cleanText);
+            this.pendingFetches = Math.max(0, this.pendingFetches - 1);
+
+            if (audioBlob && this.isActive) {
+                this.consecutiveErrors = 0; // Reset on success
+                this.audioQueue.push(audioBlob);
+                this.playNext();
+            }
+        } catch (error) {
+            this.pendingFetches = Math.max(0, this.pendingFetches - 1);
+            devLog('Streaming TTS error:', error);
+        }
+    },
+
+    // Fetch TTS audio for text
+    async fetchTTSAudio(text) {
+        if (!this.isActive) return null;
+
+        try {
+            // Per-sentence timeout via AbortController race
+            const fetchController = new AbortController();
+            const timeoutId = setTimeout(() => fetchController.abort(), this.FETCH_TIMEOUT_MS);
+
+            // Abort if either the global controller or per-fetch controller fires
+            const onGlobalAbort = () => fetchController.abort();
+            this.abortController?.signal.addEventListener('abort', onGlobalAbort, { once: true });
+
+            let response;
+            try {
+                const headers = { 'Content-Type': 'application/json' };
+                const token = localStorage.getItem('access_token');
+                if (token) {
+                    headers['Authorization'] = `Bearer ${token}`;
+                }
+                response = await fetch('/api/tts/synthesize', {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({ text, use_cache: true }),
+                    signal: fetchController.signal
+                });
+            } finally {
+                clearTimeout(timeoutId);
+                this.abortController?.signal.removeEventListener('abort', onGlobalAbort);
+            }
+
+            if (!response.ok) {
+                this.consecutiveErrors++;
+                throw new Error(`TTS request failed: ${response.status}`);
+            }
+
+            // Guard: check if still active after async operation
+            if (!this.isActive) return null;
+
+            return await response.blob();
+        } catch (error) {
+            if (error.name === 'AbortError') {
+                devLog('Streaming TTS request aborted');
+            } else {
+                this.consecutiveErrors++;
+                devLog('Streaming TTS fetch error:', error);
+            }
+            return null;
+        }
+    },
+
+    // Play next audio in queue
+    playNext() {
+        if (!this.isActive || this.isPlaying || this.audioQueue.length === 0) {
+            return;
+        }
+
+        this.isPlaying = true;
+        const audioBlob = this.audioQueue.shift();
+        const audioUrl = URL.createObjectURL(audioBlob);
+        this.currentAudioUrl = audioUrl;
+
+        this.currentAudio = new Audio(audioUrl);
+
+        this.currentAudio.onended = () => {
+            this._cleanupCurrentAudio();
+            this.playNext();
+        };
+
+        this.currentAudio.onerror = (e) => {
+            devLog('Streaming TTS playback error:', e);
+            this._cleanupCurrentAudio();
+            this.playNext();
+        };
+
+        this.currentAudio.play().catch(error => {
+            devLog('Streaming TTS play() rejected:', error);
+            this._cleanupCurrentAudio();
+            this.playNext();
+        });
+    },
+
+    // Clean up current audio element and revoke blob URL
+    _cleanupCurrentAudio() {
+        if (this.currentAudioUrl) {
+            URL.revokeObjectURL(this.currentAudioUrl);
+            this.currentAudioUrl = null;
+        }
+        this.currentAudio = null;
+        this.isPlaying = false;
+    },
+
+    // Called when streaming response is complete
+    finish() {
+        if (!this.enabled || !this.isActive) return;
+
+        // Process any remaining text
+        if (this.pendingText.trim().length > 0) {
+            const cleanText = stripMarkdownForTTS(this.pendingText.trim());
+            if (cleanText && cleanText.length > 2) {
+                this.queueSentence(this.pendingText.trim());
+            }
+        }
+
+        devLog('🔊 Streaming TTS finishing, remaining queue:', this.audioQueue.length, 'pending fetches:', this.pendingFetches);
+    },
+
+    // Stop streaming TTS and clean up all resources
+    stop() {
+        const wasActive = this.isActive;
+        this.isActive = false;
+
+        // Abort all in-flight fetch requests
+        if (this.abortController) {
+            this.abortController.abort();
+            this.abortController = null;
+        }
+
+        // Stop and clean up current audio
+        if (this.currentAudio) {
+            try {
+                this.currentAudio.pause();
+                this.currentAudio.src = '';
+            } catch (e) { /* ignore */ }
+        }
+        this._cleanupCurrentAudio();
+
+        // Clean up queued blobs (no URLs to revoke, they're still Blob objects)
+        this.audioQueue = [];
+        this.pendingText = '';
+        this.isProcessing = false;
+        this.isPlaying = false;
+        this.consecutiveErrors = 0;
+        this.pendingFetches = 0;
+        this.sessionId = null;
+
+        if (wasActive) {
+            devLog('🔊 Streaming TTS stopped and cleaned up');
+        }
+    },
+
+    // Toggle streaming TTS on/off
+    toggle() {
+        this.enabled = !this.enabled;
+        localStorage.setItem('streamingTTSEnabled', this.enabled);
+
+        if (this.enabled) {
+            showNotification('실시간 음성 읽기 활성화됨', 'success');
+        } else {
+            this.stop();
+            showNotification('실시간 음성 읽기 비활성화됨', 'info');
+        }
+
+        return this.enabled;
+    },
+
+    // Load setting from localStorage
+    loadSetting() {
+        this.enabled = localStorage.getItem('streamingTTSEnabled') === 'true';
+        return this.enabled;
+    }
+};
+
+// Initialize streaming TTS setting
+streamingTTS.loadSetting();
+
+// Clean up all TTS on page hide (mobile: tab switch, app background)
+window.addEventListener('pagehide', () => {
+    stopAllTTS();
+});
+
+// ===== Voice Input (Speech-to-Text) =====
+let speechRecognition = null;
+let isListening = false;
+
+// Initialize speech recognition
+function initSpeechRecognition() {
+    // Check browser support
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+        devLog('Speech recognition not supported');
+        if (voiceBtn) {
+            voiceBtn.style.display = 'none';
+        }
+        return false;
+    }
+
+    speechRecognition = new SpeechRecognition();
+    speechRecognition.continuous = false;
+    speechRecognition.interimResults = true;
+    speechRecognition.lang = 'ko-KR'; // Korean
+    speechRecognition.maxAlternatives = 1;
+
+    // Event handlers
+    speechRecognition.onstart = () => {
+        isListening = true;
+        if (voiceBtn) {
+            voiceBtn.classList.add('listening');
+            voiceBtn.title = '음성 인식 중... (클릭하여 중지)';
+        }
+        devLog('Voice recognition started');
+    };
+
+    speechRecognition.onend = () => {
+        isListening = false;
+        if (voiceBtn) {
+            voiceBtn.classList.remove('listening');
+            voiceBtn.title = '음성으로 입력 (클릭하여 시작)';
+        }
+        devLog('Voice recognition ended');
+    };
+
+    speechRecognition.onresult = (event) => {
+        let interimTranscript = '';
+        let finalTranscript = '';
+
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+            const transcript = event.results[i][0].transcript;
+            if (event.results[i].isFinal) {
+                finalTranscript += transcript;
+            } else {
+                interimTranscript += transcript;
+            }
+        }
+
+        // Update input field
+        if (userInput) {
+            if (finalTranscript) {
+                // Append final result to existing text
+                const currentText = userInput.value;
+                const newText = currentText ? currentText + ' ' + finalTranscript : finalTranscript;
+                userInput.value = newText.trim();
+
+                // Trigger input event for send button state update
+                userInput.dispatchEvent(new Event('input', { bubbles: true }));
+
+                // Auto-resize textarea
+                userInput.style.height = 'auto';
+                userInput.style.height = Math.min(userInput.scrollHeight, 200) + 'px';
+
+                devLog('Voice input final:', finalTranscript);
+            }
+        }
+    };
+
+    speechRecognition.onerror = (event) => {
+        devLog('Voice recognition error:', event.error);
+        isListening = false;
+        if (voiceBtn) {
+            voiceBtn.classList.remove('listening');
+            voiceBtn.title = '음성으로 입력 (클릭하여 시작)';
+        }
+
+        // Detect browser
+        const isChrome = /Chrome/.test(navigator.userAgent) && !/Edge|Edg/.test(navigator.userAgent);
+        const isHTTP = window.location.protocol === 'http:';
+
+        // Show user-friendly error messages
+        let errorMessage = '';
+        switch (event.error) {
+            case 'no-speech':
+                errorMessage = '음성이 감지되지 않았습니다. 다시 시도해주세요.';
+                break;
+            case 'audio-capture':
+                errorMessage = '마이크를 찾을 수 없습니다. 마이크를 연결해주세요.';
+                break;
+            case 'not-allowed':
+                if (isChrome && isHTTP) {
+                    // Chrome on HTTP localhost needs special flag - use dynamic origin
+                    errorMessage = 'Chrome에서 HTTP 연결 시 음성 인식이 제한됩니다. Safari를 사용하거나, Chrome 주소창에 chrome://flags/#unsafely-treat-insecure-origin-as-secure 를 입력하고 ' + window.location.origin + ' 을 추가한 후 Chrome을 재시작해주세요.';
+                } else {
+                    errorMessage = '마이크 사용 권한이 필요합니다. 브라우저 설정에서 허용해주세요.';
+                }
+                break;
+            case 'network':
+                if (isChrome && isHTTP) {
+                    errorMessage = 'Chrome에서 HTTP 연결 시 음성 인식 네트워크 오류가 발생할 수 있습니다. Safari를 사용하거나 HTTPS 연결을 사용해주세요.';
+                } else {
+                    errorMessage = '네트워크 오류가 발생했습니다. 인터넷 연결을 확인해주세요.';
+                }
+                break;
+            case 'aborted':
+                // User cancelled, no need to show error
+                return;
+            default:
+                errorMessage = '음성 인식 중 오류가 발생했습니다.';
+        }
+
+        if (errorMessage) {
+            showNotification(errorMessage, 'warning');
+        }
+    };
+
+    devLog('Speech recognition initialized');
+    return true;
+}
+
+// Toggle voice recognition
+async function toggleVoiceRecognition() {
+    if (!speechRecognition) {
+        if (!initSpeechRecognition()) {
+            showNotification('이 브라우저는 음성 인식을 지원하지 않습니다.', 'error');
+            return;
+        }
+    }
+
+    if (isListening) {
+        speechRecognition.stop();
+        devLog('Voice recognition stopped by user');
+    } else {
+        // Detect Chrome on HTTP - show proactive warning
+        const isChrome = /Chrome/.test(navigator.userAgent) && !/Edge|Edg/.test(navigator.userAgent);
+        const isHTTP = window.location.protocol === 'http:';
+
+        try {
+            // First, explicitly request microphone permission using getUserMedia
+            // This ensures Chrome properly grants microphone access before SpeechRecognition
+            if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    // Stop the stream immediately - we just needed to trigger permission
+                    stream.getTracks().forEach(track => track.stop());
+                    devLog('Microphone permission granted via getUserMedia');
+                } catch (mediaError) {
+                    devLog('getUserMedia error:', mediaError);
+                    if (mediaError.name === 'NotAllowedError' || mediaError.name === 'PermissionDeniedError') {
+                        if (isChrome && isHTTP) {
+                            showNotification('Chrome에서 HTTP 연결 시 음성 인식이 제한됩니다. Safari를 사용하거나, Chrome 주소창에 chrome://flags/#unsafely-treat-insecure-origin-as-secure 를 입력하고 ' + window.location.origin + ' 을 추가한 후 Chrome을 재시작해주세요.', 'warning');
+                        } else {
+                            showNotification('마이크 사용 권한이 필요합니다. 브라우저 설정에서 허용해주세요.', 'warning');
+                        }
+                        return;
+                    } else if (mediaError.name === 'NotFoundError') {
+                        showNotification('마이크를 찾을 수 없습니다. 마이크를 연결해주세요.', 'warning');
+                        return;
+                    }
+                    // For other errors, try to proceed with speech recognition anyway
+                }
+            }
+
+            speechRecognition.start();
+            devLog('Voice recognition started by user');
+        } catch (error) {
+            devLog('Voice recognition start error:', error);
+            // If already started, stop and restart
+            if (error.message && error.message.includes('already started')) {
+                speechRecognition.stop();
+                setTimeout(() => {
+                    try {
+                        speechRecognition.start();
+                    } catch (e) {
+                        devLog('Voice recognition restart error:', e);
+                    }
+                }, 100);
+            } else {
+                if (isChrome && isHTTP) {
+                    showNotification('Chrome에서 HTTP 연결 시 음성 인식이 제한됩니다. Safari를 사용하거나 Chrome 플래그 설정을 확인해주세요.', 'warning');
+                } else {
+                    showNotification('음성 인식을 시작할 수 없습니다. 다시 시도해주세요.', 'warning');
+                }
+            }
+        }
+    }
+}
+
+// Initialize voice button event listener
+function initVoiceButton() {
+    if (voiceBtn) {
+        voiceBtn.addEventListener('click', toggleVoiceRecognition);
+
+        // Check if speech recognition is supported
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRecognition) {
+            voiceBtn.style.display = 'none';
+            devLog('Voice button hidden - speech recognition not supported');
+        } else {
+            devLog('Voice button initialized');
+        }
+    }
 }
 
 // Copy text to clipboard
@@ -4474,6 +6359,22 @@ function applySettings() {
     if (systemPrompt) {
         systemPrompt.value = currentSettings.system_prompt;
     }
+
+    // Apply streaming TTS setting
+    const streamingTTSToggle = document.getElementById('streamingTTSToggle');
+    if (streamingTTSToggle) {
+        streamingTTSToggle.checked = streamingTTS.loadSetting();
+        streamingTTSToggle.addEventListener('change', (e) => {
+            streamingTTS.enabled = e.target.checked;
+            localStorage.setItem('streamingTTSEnabled', e.target.checked);
+            if (e.target.checked) {
+                showNotification('실시간 음성 읽기가 활성화되었습니다', 'success');
+            } else {
+                streamingTTS.stop();
+                showNotification('실시간 음성 읽기가 비활성화되었습니다', 'info');
+            }
+        });
+    }
 }
 
 // Display current LLM, Embedding, and Reranker models
@@ -4539,6 +6440,9 @@ async function openSettingsPanel() {
     } catch (error) {
         logger.error('Failed to fetch reranker model info:', error);
     }
+
+    // Fetch TTS status
+    await loadTTSStatus();
 
     // Load latest system prompt from server (admin-configured)
     await loadSystemPromptFromServer();
@@ -4636,32 +6540,45 @@ if (temperatureSlider && temperatureValue) {
     });
 }
 
-// Model-specific max token limits
+// Model-specific max token limits (output tokens)
+// Note: These are OUTPUT token limits, not context window sizes
+// Order matters: more specific patterns should come first
 const MODEL_MAX_TOKENS = {
+    // GLM models (ZhipuAI) - high output capacity
+    'glm-4-flash': 16384,
+    'glm-4.7-flash': 16384,
+    'glm-4-plus': 16384,
+    'glm-4': 16384,
     // Qwen models
-    'qwen': 32768,
-    'qwen2': 32768,
-    'qwen2.5': 32768,
     'qwen3': 32768,
-    // Llama models
-    'llama': 8192,
-    'llama2': 4096,
-    'llama3': 8192,
-    'llama3.1': 131072,
+    'qwen2.5': 32768,
+    'qwen2': 32768,
+    'qwen': 32768,
+    // Llama models - specific versions first
     'llama3.2': 131072,
+    'llama3.1': 131072,
+    'llama3': 8192,
+    'llama2': 4096,
+    'llama': 8192,
     // Gemma models
-    'gemma': 8192,
     'gemma2': 8192,
+    'gemma': 8192,
     // Mistral models
-    'mistral': 32768,
     'mixtral': 32768,
+    'mistral': 32768,
     // Claude models
+    'claude-3': 16384,
     'claude': 8192,
     // GPT models
+    'gpt-4o': 16384,
+    'gpt-4-turbo': 16384,
     'gpt-4': 8192,
     'gpt-3.5': 4096,
     // Gemini models
+    'gemini-pro': 8192,
     'gemini': 8192,
+    // DeepSeek models
+    'deepseek': 16384,
     // Default
     'default': 8192
 };
@@ -5163,6 +7080,9 @@ window.allowNavigation = false;
 
 // Warn before leaving with unsaved draft
 window.addEventListener('beforeunload', (e) => {
+    // Clean up all TTS resources before page unload
+    stopAllTTS();
+
     // Skip warning if navigation is explicitly allowed
     if (window.allowNavigation) {
         return;

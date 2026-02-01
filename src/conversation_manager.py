@@ -14,6 +14,9 @@ from loguru import logger
 class ConversationManager:
     """Manage conversation sessions and message history"""
 
+    # 대화 세션 기본 TTL: 30일 (초)
+    SESSION_TTL = 30 * 24 * 60 * 60
+
     def __init__(self, redis_client: Redis):
         """
         Initialize conversation manager
@@ -46,6 +49,9 @@ class ConversationManager:
 
         # Store session metadata
         self.client.hset(f'conversation:{session_id}', mapping=session_data)
+
+        # TTL 설정 (30일)
+        self.client.expire(f'conversation:{session_id}', self.SESSION_TTL)
 
         # Add to sessions list (sorted set by updated_at timestamp)
         self.client.zadd('conversations:list', {session_id: datetime.now().timestamp()})
@@ -100,6 +106,10 @@ class ConversationManager:
 
         # Update sorted set timestamp
         pipe.zadd('conversations:list', {session_id: now.timestamp()})
+
+        # TTL 갱신 (활동 시 연장)
+        pipe.expire(f'conversation:{session_id}', self.SESSION_TTL)
+        pipe.expire(f'conversation:{session_id}:messages', self.SESSION_TTL)
 
         pipe.execute()
 
@@ -415,3 +425,25 @@ class ConversationManager:
         except Exception as e:
             logger.error(f"Failed to update last message metadata: {e}")
             return False
+
+    # --- Async wrappers (이벤트 루프 블로킹 방지) ---
+
+    async def async_add_message(self, session_id: str, role: str, content: str, metadata: Dict = None) -> bool:
+        """add_message의 비동기 래퍼"""
+        import asyncio
+        return await asyncio.to_thread(self.add_message, session_id, role, content, metadata)
+
+    async def async_get_messages(self, session_id: str, limit: int = None, offset: int = 0) -> List[Dict]:
+        """get_messages의 비동기 래퍼"""
+        import asyncio
+        return await asyncio.to_thread(self.get_messages, session_id, limit, offset)
+
+    async def async_create_session(self, title: str = None) -> str:
+        """create_session의 비동기 래퍼"""
+        import asyncio
+        return await asyncio.to_thread(self.create_session, title)
+
+    async def async_list_sessions(self, limit: int = 50, offset: int = 0) -> List[Dict]:
+        """list_sessions의 비동기 래퍼"""
+        import asyncio
+        return await asyncio.to_thread(self.list_sessions, limit, offset)

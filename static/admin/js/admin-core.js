@@ -129,7 +129,19 @@ AdminCore.switchTab = function(tabName) {
         'audit': 'loadAudit',
         'webhooks': 'loadWebhooks',
         'models': 'loadModels',
-        'settings': 'loadSettings',
+        'settings': () => {
+            // Initialize sub-tab group (show security by default)
+            if (typeof switchSettingsGroup === 'function') switchSettingsGroup('security');
+            if (typeof loadSettings === 'function') loadSettings();
+            if (typeof adminRefreshCacheStats === 'function') adminRefreshCacheStats();
+            if (typeof loadPrompts === 'function') loadPrompts();
+            if (typeof loadRateLimitConfig === 'function') loadRateLimitConfig();
+            if (typeof loadCaptchaConfig === 'function') loadCaptchaConfig();
+            if (typeof loadTotpConfig === 'function') loadTotpConfig();
+            if (typeof loadBruteForceConfig === 'function') loadBruteForceConfig();
+            if (typeof loadHybridRagConfig === 'function') loadHybridRagConfig();
+            if (typeof loadRagQualityConfig === 'function') loadRagQualityConfig();
+        },
         'reindex': 'checkReindexStatus',
         'performance-metrics': 'loadPerformancemetrics'
     };

@@ -9,7 +9,7 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <meta name="version" content="2026.01.13-export7">
-    <title>문서 RAG 챗봇 v2026.01.13</title>
+    <title>ATLEA v2026.01.13</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <!-- Early theme initialization to prevent flash -->
     <script>
@@ -821,7 +821,7 @@
     <div class="container">
         <!-- Header -->
         <header class="header">
-            <h1>📚 문서 RAG 챗봇</h1>
+            <h1>📚 ATLEA</h1>
             <div class="status-bar">
                 <button id="historyToggleBtn" class="history-toggle-btn" title="대화 히스토리">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
@@ -1168,6 +1168,14 @@
                 rows="1"
                 title="문서에 대한 질문을 입력하세요"
             ></textarea>
+            <button id="voiceBtn" class="voice-btn" title="음성으로 입력 (클릭하여 시작)">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M19 10v2a7 7 0 0 1-14 0v-2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <line x1="12" y1="19" x2="12" y2="23" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <line x1="8" y1="23" x2="16" y2="23" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+            </button>
             <button id="sendBtn" class="send-btn" disabled title="질문 전송 (Enter)">
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
                     <path d="M22 2L11 13M22 2L15 22L11 13M22 2L2 8L11 13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -1354,6 +1362,42 @@
                         로딩 중...
                     </div>
                     <p class="setting-hint">검색 결과 재정렬에 사용되는 모델 (재랭킹 활성화 시)</p>
+                </div>
+            </div>
+
+            <!-- TTS Settings -->
+            <div class="settings-section">
+                <h3>🔊 TTS (음성 합성)</h3>
+
+                <div class="setting-item">
+                    <label>
+                        <span class="setting-label">TTS 상태</span>
+                    </label>
+                    <div id="ttsStatusDisplay" style="padding: 12px; background: #f9fafb; border-radius: 8px; font-size: 14px; color: #374151; border: 1px solid #e5e7eb; display: flex; align-items: center; gap: 8px;">
+                        <span id="ttsStatusIcon">⏳</span>
+                        <span id="ttsStatusText">확인 중...</span>
+                    </div>
+                </div>
+
+                <div class="setting-item">
+                    <label>
+                        <span class="setting-label">TTS 모델</span>
+                    </label>
+                    <div id="ttsModelDisplay" style="padding: 12px; background: #f9fafb; border-radius: 8px; font-family: 'Consolas', 'Monaco', monospace; font-size: 14px; color: #374151; border: 1px solid #e5e7eb;">
+                        로딩 중...
+                    </div>
+                    <p class="setting-hint">현재 적용된 TTS 모델 (TTS 설정 변경은 관리자 페이지에서 가능)</p>
+                </div>
+
+                <div class="setting-item">
+                    <label class="toggle-label">
+                        <span class="setting-label">🔊 실시간 음성 읽기</span>
+                        <div class="toggle-switch">
+                            <input type="checkbox" id="streamingTTSToggle">
+                            <span class="toggle-slider"></span>
+                        </div>
+                    </label>
+                    <p class="setting-hint">활성화하면 AI 응답이 생성되는 동안 실시간으로 음성으로 읽어줍니다</p>
                 </div>
             </div>
 
@@ -1699,6 +1743,37 @@
                     </div>
                 </section>
 
+                <!-- TTS (Text-to-Speech) -->
+                <section class="help-section">
+                    <h3>🔊 TTS (음성 합성)</h3>
+                    <p>AI 답변을 음성으로 읽어주는 기능입니다. 관리자가 활성화한 경우에만 사용할 수 있습니다.</p>
+
+                    <h4 style="margin-top: 16px; color: var(--primary-600);">🎧 답변 음성 읽기</h4>
+                    <ul>
+                        <li><strong>음성 버튼:</strong> AI 답변 하단의 🔊 버튼을 클릭하면 해당 답변을 음성으로 읽어줍니다</li>
+                        <li><strong>재생 중 정지:</strong> 재생 중인 버튼을 다시 클릭하면 음성이 정지됩니다</li>
+                        <li><strong>자동 감지:</strong> TTS가 비활성화 상태이면 음성 버튼이 표시되지 않습니다</li>
+                    </ul>
+
+                    <h4 style="margin-top: 16px; color: var(--primary-600);">🔄 실시간 음성 읽기 (스트리밍 TTS)</h4>
+                    <ul>
+                        <li><strong>실시간 모드:</strong> 설정에서 "실시간 음성 읽기"를 활성화하면, AI 답변이 생성되는 동안 실시간으로 음성이 재생됩니다</li>
+                        <li><strong>설정 위치:</strong> 설정 패널 → TTS (음성 합성) → 실시간 음성 읽기 토글</li>
+                        <li><strong>TTS 상태:</strong> 설정 패널에서 현재 TTS 활성화 여부와 사용 중인 모델을 확인할 수 있습니다</li>
+                    </ul>
+
+                    <h4 style="margin-top: 16px; color: var(--primary-600);">🤖 지원 모델</h4>
+                    <ul>
+                        <li><strong>Edge TTS (Fast):</strong> Microsoft 클라우드 기반, 빠른 응답 속도</li>
+                        <li><strong>Qwen3 TTS 0.6B:</strong> 로컬 실행, 빠른 속도, 음성 복제 지원</li>
+                        <li><strong>Qwen3 TTS 1.7B:</strong> 로컬 실행, 고품질 음성 (속도 느림)</li>
+                    </ul>
+
+                    <div style="margin-top: 12px; padding: 10px; background: #e3f2fd; border-left: 4px solid #2196F3; border-radius: 4px;">
+                        <p style="margin: 0; color: #1565c0; font-size: 14px;"><strong>💡 팁:</strong> TTS 모델과 언어 설정은 관리자 페이지에서만 변경 가능합니다. 음성 품질이나 속도에 문제가 있으면 관리자에게 문의하세요.</p>
+                    </div>
+                </section>
+
                 <!-- Keyboard Shortcuts -->
                 <section class="help-section">
                     <h3>⌨️ 키보드 단축키</h3>
@@ -1870,6 +1945,20 @@
                             <strong>A:</strong> 대부분의 설정은 즉시 적용됩니다. 페이지를 새로고침해도 설정이 유지됩니다. 만약 적용이 안 된다면 브라우저 캐시를 삭제하거나 시크릿 모드에서 테스트해보세요.
                         </p>
                     </div>
+
+                    <div style="margin-bottom: 12px;">
+                        <p style="font-weight: 600; color: var(--primary-600); margin-bottom: 4px;">Q9. 음성 버튼(🔊)이 보이지 않아요</p>
+                        <p style="margin: 0; padding-left: 16px; color: #666;">
+                            <strong>A:</strong> TTS(음성 합성) 기능은 관리자가 활성화한 경우에만 사용 가능합니다. 음성 버튼이 보이지 않으면 관리자에게 TTS 기능 활성화를 요청하세요. 이미 활성화된 경우 페이지를 새로고침(F5)하면 반영됩니다.
+                        </p>
+                    </div>
+
+                    <div style="margin-bottom: 12px;">
+                        <p style="font-weight: 600; color: var(--primary-600); margin-bottom: 4px;">Q10. 음성이 재생되다가 중간에 끊겨요</p>
+                        <p style="margin: 0; padding-left: 16px; color: #666;">
+                            <strong>A:</strong> 긴 답변의 경우 음성 합성에 시간이 더 걸릴 수 있습니다. 네트워크 상태를 확인하고, 문제가 지속되면 관리자에게 TTS 모델 변경(Edge TTS 권장)을 요청하세요.
+                        </p>
+                    </div>
                 </section>
 
                 <!-- Troubleshooting -->
@@ -1918,6 +2007,29 @@
                             <li>브라우저를 최신 버전으로 업데이트</li>
                             <li>한글 입력기 설정 확인 (Windows: 한/영 전환)</li>
                             <li>다른 입력 필드(메모장 등)에서 작성 후 복사/붙여넣기</li>
+                        </ul>
+                    </div>
+
+                    <h4 style="margin-top: 16px; color: var(--primary-600);">🔊 음성 관련 문제</h4>
+
+                    <div style="background: #fff3e0; padding: 12px; border-radius: 8px; border-left: 4px solid #ff9800; margin-bottom: 12px;">
+                        <p style="margin: 0 0 8px 0; font-weight: 600; color: #e65100;">문제: 음성 버튼이 보이지 않음</p>
+                        <p style="margin: 0; color: #666;"><strong>해결:</strong></p>
+                        <ul style="margin: 4px 0 0 0; padding-left: 20px; color: #666;">
+                            <li>TTS는 관리자가 활성화해야 사용 가능합니다</li>
+                            <li>관리자에게 TTS 활성화를 요청하세요</li>
+                            <li>활성화 후 페이지를 새로고침하세요</li>
+                        </ul>
+                    </div>
+
+                    <div style="background: #fff3e0; padding: 12px; border-radius: 8px; border-left: 4px solid #ff9800; margin-bottom: 12px;">
+                        <p style="margin: 0 0 8px 0; font-weight: 600; color: #e65100;">문제: 음성이 재생되지 않거나 끊김</p>
+                        <p style="margin: 0; color: #666;"><strong>해결:</strong></p>
+                        <ul style="margin: 4px 0 0 0; padding-left: 20px; color: #666;">
+                            <li>인터넷 연결 상태 확인 (Edge TTS는 네트워크 필요)</li>
+                            <li>브라우저 오디오 권한이 허용되어 있는지 확인</li>
+                            <li>스트리밍 TTS 끊김 시: 설정에서 스트리밍 TTS를 끄고 답변 완료 후 음성 버튼 사용</li>
+                            <li>다른 브라우저로 시도 (Chrome, Edge 권장)</li>
                         </ul>
                     </div>
 
@@ -2356,6 +2468,8 @@
         // 프로필 페이지로 이동
         function goToProfile(event) {
             if (event) event.stopPropagation();
+            // Stop TTS before navigating to prevent error toast
+            if (typeof stopAllTTS === 'function') stopAllTTS();
             // Allow navigation without beforeunload warning
             window.allowNavigation = true;
             window.location.href = '/static/profile.html';
@@ -2364,6 +2478,8 @@
         // 관리자 전체 페이지로 이동 (모달이 아님)
         function goToAdminPage(event) {
             if (event) event.stopPropagation();
+            // Stop TTS before navigating to prevent error toast
+            if (typeof stopAllTTS === 'function') stopAllTTS();
             // Allow navigation without beforeunload warning
             window.allowNavigation = true;
             window.location.href = '/static/admin.html?v=' + Date.now();  // 캐시 방지
@@ -2373,6 +2489,8 @@
         async function handleLogout(event) {
             if (event) event.stopPropagation();
             if (confirm('로그아웃하시겠습니까?')) {
+                // Stop TTS before navigating to prevent error toast
+                if (typeof stopAllTTS === 'function') stopAllTTS();
                 // Allow navigation without beforeunload warning
                 window.allowNavigation = true;
                 await Auth.logout();
@@ -2505,7 +2623,7 @@
     <script src="/static/performance-metrics.js?v=1"></script>
 
     <!-- Main Script -->
-    <script src="/static/script.js?v=66"></script>
+    <script src="/static/script.js?v=68"></script>
 
     <!-- Cache Buster Verification -->
     <script>

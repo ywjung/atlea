@@ -11,7 +11,11 @@
 set -e
 
 PID_FILE=".server.pid"
-LOG_FILE="server.log"
+LOG_DIR="logs"
+LOG_FILE="${LOG_DIR}/server.log"
+
+# Ensure log directory exists
+mkdir -p "$LOG_DIR"
 
 # Function to check if server is running
 is_running() {

@@ -21,6 +21,12 @@ htmlcov/
 .tox/
 *.cover
 
+# Build & Distribution
+dist/
+build/
+*.egg-info/
+.eggs/
+
 # ============================================================
 # Java / Maven
 # ============================================================
@@ -36,13 +42,13 @@ document-service/owasp-data/
 # ============================================================
 # Environment & Secrets
 # ============================================================
-# Environment files
 .env
 .env.local
 .env.*.local
 .env.development
 .env.production
 .env.test
+.admin_initial_password
 
 # Credentials & Secrets
 **/credentials.json
@@ -57,7 +63,6 @@ document-service/owasp-data/
 # ============================================================
 # Security & SBOM
 # ============================================================
-# SBOM and vulnerability scan results (contains sensitive security info)
 sbom/
 sbom-reports/
 dependency-check-report.*
@@ -66,15 +71,12 @@ dependency-check-report.*
 *-vulnerabilities-*.json
 *-vulnerabilities-*.html
 *-vulnerabilities-*.txt
-
-# OWASP Dependency Check
 owasp-suppressions.xml.backup
 dependency-check-data/
 
 # ============================================================
 # Data & Uploads
 # ============================================================
-# Document data
 data/.document_metadata.json
 data/*.pdf
 data/*.hwp
@@ -87,8 +89,6 @@ data/*.ppt
 data/*.pptx
 data/*.txt
 data/versions/
-
-# Uploaded files
 uploads/
 upload/
 
@@ -108,28 +108,20 @@ embeddings/
 # Logs & Runtime
 # ============================================================
 *.log
-logs/
 *.log.*
+logs/
 log/
-
-# Server runtime
 .server.pid
 *.pid
 
 # ============================================================
 # Backups & Temporary Files
 # ============================================================
-# Backups
 *.backup
 *.bak
 *.old
 backups/
 backup/
-*.swp
-*.swo
-*~
-
-# Temporary files
 tmp/
 temp/
 *.tmp
@@ -184,23 +176,19 @@ screenshots/
 !static/*.png
 
 # ============================================================
-# Memory & Cache
+# Serena MCP
 # ============================================================
 .serena/
+
+# ============================================================
+# Cache
+# ============================================================
 .cache/
 cache/
 *.cache
 
 # ============================================================
-# Build & Distribution
-# ============================================================
-dist/
-build/
-*.egg-info/
-.eggs/
-
-# ============================================================
-# Node.js (if any frontend dependencies)
+# Node.js
 # ============================================================
 node_modules/
 npm-debug.log*
@@ -221,5 +209,4 @@ yarn.lock
 # Documentation Temp Files
 # ============================================================
 *.md.backup
-README.md.backup
 docs/build/

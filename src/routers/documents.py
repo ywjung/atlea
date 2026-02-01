@@ -741,6 +741,7 @@ async def get_reindex_progress(
 @router.get("/documents")
 async def list_documents(
     filter_scope: str = None,
+    unassigned: bool = Query(False, description="그룹 미할당 문서만 반환"),
     page: int = Query(1, ge=1, description="페이지 번호 (1부터 시작)"),
     page_size: int = Query(50, ge=1, le=200, description="페이지당 문서 수 (최대 200)"),
     current_user: dict = Depends(get_current_active_user)
@@ -752,6 +753,7 @@ async def list_documents(
     Args:
         filter_scope: "user" - always filter by organization (for search filters)
                      None - admin sees all, users see organization only (for admin page)
+        unassigned: True이면 그룹에 할당되지 않은 문서만 반환
         page: 페이지 번호 (기본값: 1)
         page_size: 페이지당 문서 수 (기본값: 50, 최대: 200)
     """
@@ -828,13 +830,19 @@ async def list_documents(
         for pdf_file in all_files:
             # Filter by organization: check if document's group belongs to user's org
             doc_group_id = doc_group_map.get(pdf_file.name)
-            if doc_group_id:
-                # Skip documents not in user's organization groups
-                if doc_group_id not in org_group_ids:
+
+            if unassigned:
+                # 미할당 문서만 반환: 그룹이 있는 문서는 건너뛰기
+                if doc_group_id:
                     continue
-            # If document has no group, skip it (documents without groups are not accessible)
             else:
-                continue
+                if doc_group_id:
+                    # Skip documents not in user's organization groups
+                    if doc_group_id not in org_group_ids:
+                        continue
+                # If document has no group, skip it (documents without groups are not accessible)
+                else:
+                    continue
 
             # Get file stats
             stat = pdf_file.stat()

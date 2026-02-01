@@ -163,8 +163,8 @@ class QueryRequest(BaseModel):
     @validator('max_tokens')
     def validate_max_tokens(cls, v):
         """Validate max_tokens parameter"""
-        if v < 1 or v > 8192:
-            raise ValueError("max_tokens는 1-8192 사이의 값이어야 합니다.")
+        if v < 1 or v > 32768:
+            raise ValueError("max_tokens는 1-32768 사이의 값이어야 합니다.")
         return v
 
     @validator('document_ids')
@@ -298,14 +298,22 @@ async def query(
                 content=request.question
             )
 
-        # Create query embedding
-        query_embedding = embedding_model.encode(request.question)[0]
+        # Create query embedding (비동기 + 캐시)
+        cached_embedding = cache_manager.get_embedding_cache(request.question)
+        if cached_embedding:
+            query_embedding = cached_embedding
+        else:
+            query_embedding = await asyncio.to_thread(
+                lambda: embedding_model.encode(request.question)[0]
+            )
+            cache_manager.set_embedding_cache(request.question, query_embedding)
 
         # Organization-based access control: validate and filter group_ids
         user_org_id = current_user.get("org_id")
 
         # All users (including system admins) can only search their organization's groups
-        org_groups = group_manager.get_all_groups(org_id=user_org_id)
+        # 동기 Redis 호출을 비동기 래핑 (이벤트 루프 블로킹 방지)
+        org_groups = await asyncio.to_thread(group_manager.get_all_groups, org_id=user_org_id)
         org_group_ids = {g['id'] for g in org_groups}
 
         # Validate and filter requested group_ids
@@ -335,12 +343,11 @@ async def query(
             )
 
         # Expand group_ids to include all descendants (hierarchical search)
+        # 동기 Redis 호출을 비동기 래핑
         expanded_group_ids = []
         for group_id in validated_group_ids:
-            # Get all descendant group IDs (children, grandchildren, etc.)
-            descendant_ids = group_manager.get_descendant_group_ids(group_id)
+            descendant_ids = await asyncio.to_thread(group_manager.get_descendant_group_ids, group_id)
             expanded_group_ids.extend(descendant_ids)
-        # Remove duplicates
         expanded_group_ids = list(set(expanded_group_ids))
         logger.info(f"🏢 Org filter: {user_org_id} | 🌲 Expanded group_ids: {validated_group_ids} → {expanded_group_ids}")
 
@@ -374,7 +381,8 @@ async def query(
                 search_mode=search_mode,  # Use user-selected search mode
                 system_prompt=request.system_prompt,  # 🆕 시스템 프롬프트 전달
                 top_k=request.top_k,  # 🆕 검색 문서 개수 전달
-                document_ids=request.document_ids  # 🆕 문서 필터 전달
+                document_ids=request.document_ids,  # 🆕 문서 필터 전달
+                query_embedding=query_embedding  # 임베딩 재사용
             )
 
             # 🔄 Convert Hybrid RAG format to basic RAG format
@@ -470,6 +478,15 @@ async def query(
         else:
             logger.debug("✅ 응답 검증 통과")
 
+        # 🔧 깨진 한국어 문서명 인용 수정
+        garbled_fixed, garbled_fixes = response_validator.fix_garbled_citations(
+            result["answer"],
+            result["context"]
+        )
+        if garbled_fixes:
+            result["answer"] = garbled_fixed
+            logger.success(f"✅ 깨진 인용 수정: {garbled_fixes}")
+
         # 📊 신뢰도 점수 계산
         confidence_result = confidence_scorer.calculate_confidence(
             answer=result["answer"],
@@ -559,27 +576,6 @@ async def query_stream(
             # Query result cache HIT - return immediately
             logger.info(f"🎯 Query result cache HIT (exact match): '{request.question[:50]}...'")
 
-            # Generate follow-up questions for cached response (LLM 기반)
-            cached_follow_up = _generate_llm_follow_up_questions(
-                request.question, query_result_cached["response"], llm_instance=rag.llm
-            )
-            if len(cached_follow_up) < 3:
-                cached_follow_up = _generate_context_aware_fallback(
-                    request.question, cached_follow_up, query_result_cached["response"]
-                )
-
-            # Save to conversation history with follow-up questions
-            if request.session_id and conversation_manager:
-                metadata = query_result_cached.get('metadata', {}).copy()
-                metadata['follow_up_questions'] = cached_follow_up
-                metadata['cached'] = True
-                conversation_manager.add_message(
-                    session_id=request.session_id,
-                    role="assistant",
-                    content=query_result_cached["response"],
-                    metadata=metadata
-                )
-
             async def generate_exact_cached_stream():
                 # Send metadata
                 yield f"data: {json.dumps({'type': 'metadata', 'data': query_result_cached['metadata']})}\n\n"
@@ -592,10 +588,38 @@ async def query_stream(
                     yield f"data: {json.dumps({'type': 'chunk', 'data': chunk})}\n\n"
                     await asyncio.sleep(0.01)
 
-                # Send follow-up questions
-                yield f"data: {json.dumps({'type': 'follow_up_questions', 'data': cached_follow_up})}\n\n"
-
+                # Send done FIRST (즉시 완료 표시)
                 yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+                # 후속 질문을 done 후 비동기 생성
+                try:
+                    cached_follow_up = await asyncio.to_thread(
+                        _generate_llm_follow_up_questions,
+                        request.question, query_result_cached["response"], rag.llm
+                    )
+                    if len(cached_follow_up) < 3:
+                        cached_follow_up = _generate_context_aware_fallback(
+                            request.question, cached_follow_up, query_result_cached["response"]
+                        )
+                except Exception:
+                    cached_follow_up = _generate_context_aware_fallback(
+                        request.question, [], query_result_cached["response"]
+                    )
+
+                if cached_follow_up:
+                    yield f"data: {json.dumps({'type': 'follow_up_questions', 'data': cached_follow_up})}\n\n"
+
+                # Save to conversation history with follow-up questions
+                if request.session_id and conversation_manager:
+                    metadata = query_result_cached.get('metadata', {}).copy()
+                    metadata['follow_up_questions'] = cached_follow_up
+                    metadata['cached'] = True
+                    conversation_manager.add_message(
+                        session_id=request.session_id,
+                        role="assistant",
+                        content=query_result_cached["response"],
+                        metadata=metadata
+                    )
 
             return StreamingResponse(
                 generate_exact_cached_stream(),
@@ -619,15 +643,6 @@ async def query_stream(
             # Cache HIT - return cached response as stream
             logger.info(f"✅ Cache HIT (similarity: {cached_response['similarity']:.4f})")
 
-            # Generate follow-up questions for cached response (LLM 기반)
-            semantic_follow_up = _generate_llm_follow_up_questions(
-                request.question, cached_response["response"], llm_instance=rag.llm
-            )
-            if len(semantic_follow_up) < 3:
-                semantic_follow_up = _generate_context_aware_fallback(
-                    request.question, semantic_follow_up, cached_response["response"]
-                )
-
             context_data = {
                 "sources": cached_response["sources"],
                 "context": cached_response.get("context", []),  # Use cached context for source details
@@ -635,22 +650,6 @@ async def query_stream(
                 "similarity": cached_response["similarity"],
                 "search_summary": cached_response.get("search_summary")  # 하이브리드 검색 정보
             }
-
-            # Save cached response to conversation history
-            if request.session_id and conversation_manager:
-                metadata = {
-                    "sources": cached_response["sources"],
-                    "context": cached_response.get("context", []),  # Save context for source details modal
-                    "cached": True,
-                    "similarity": cached_response["similarity"],
-                    "follow_up_questions": semantic_follow_up  # 후속 질문 저장
-                }
-                conversation_manager.add_message(
-                    session_id=request.session_id,
-                    role="assistant",
-                    content=cached_response["response"],
-                    metadata=metadata
-                )
 
             async def generate_cached_stream():
                 # Send metadata with cache indicator
@@ -666,11 +665,42 @@ async def query_stream(
                     # Small delay to simulate streaming
                     await asyncio.sleep(0.01)
 
-                # Send follow-up questions
-                yield f"data: {json.dumps({'type': 'follow_up_questions', 'data': semantic_follow_up})}\n\n"
-
-                # Send completion message
+                # Send done FIRST (즉시 완료 표시)
                 yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+                # 후속 질문을 done 후 비동기 생성
+                try:
+                    semantic_follow_up = await asyncio.to_thread(
+                        _generate_llm_follow_up_questions,
+                        request.question, cached_response["response"], rag.llm
+                    )
+                    if len(semantic_follow_up) < 3:
+                        semantic_follow_up = _generate_context_aware_fallback(
+                            request.question, semantic_follow_up, cached_response["response"]
+                        )
+                except Exception:
+                    semantic_follow_up = _generate_context_aware_fallback(
+                        request.question, [], cached_response["response"]
+                    )
+
+                if semantic_follow_up:
+                    yield f"data: {json.dumps({'type': 'follow_up_questions', 'data': semantic_follow_up})}\n\n"
+
+                # Save cached response to conversation history
+                if request.session_id and conversation_manager:
+                    metadata = {
+                        "sources": cached_response["sources"],
+                        "context": cached_response.get("context", []),
+                        "cached": True,
+                        "similarity": cached_response["similarity"],
+                        "follow_up_questions": semantic_follow_up
+                    }
+                    conversation_manager.add_message(
+                        session_id=request.session_id,
+                        role="assistant",
+                        content=cached_response["response"],
+                        metadata=metadata
+                    )
 
             return StreamingResponse(
                 generate_cached_stream(),
@@ -688,7 +718,8 @@ async def query_stream(
         user_org_id = current_user.get("org_id")
 
         # All users (including system admins) can only search their organization's groups
-        org_groups = group_manager.get_all_groups(org_id=user_org_id)
+        # 동기 Redis 호출을 비동기 래핑 (이벤트 루프 블로킹 방지)
+        org_groups = await asyncio.to_thread(group_manager.get_all_groups, org_id=user_org_id)
         org_group_ids = {g['id'] for g in org_groups}
 
         # Validate and filter requested group_ids
@@ -718,12 +749,11 @@ async def query_stream(
             )
 
         # Expand group_ids to include all descendants (hierarchical search)
+        # 동기 Redis 호출을 비동기 래핑
         expanded_group_ids = []
         for group_id in validated_group_ids:
-            # Get all descendant group IDs (children, grandchildren, etc.)
-            descendant_ids = group_manager.get_descendant_group_ids(group_id)
+            descendant_ids = await asyncio.to_thread(group_manager.get_descendant_group_ids, group_id)
             expanded_group_ids.extend(descendant_ids)
-        # Remove duplicates
         expanded_group_ids = list(set(expanded_group_ids))
         logger.info(f"🏢 Org filter: {user_org_id} | 🌲 Expanded group_ids: {validated_group_ids} → {expanded_group_ids}")
 
@@ -753,6 +783,16 @@ async def query_stream(
             search_mode = request.search_mode or "smart"
             logger.info(f"🎯 Search mode: {search_mode}")
 
+            # Pre-compute embedding for reuse in hybrid RAG
+            cached_emb = cache_manager.get_embedding_cache(request.question)
+            if cached_emb:
+                hybrid_query_embedding = cached_emb
+            else:
+                hybrid_query_embedding = await asyncio.to_thread(
+                    lambda: embedding_model.encode(request.question)[0]
+                )
+                cache_manager.set_embedding_cache(request.question, hybrid_query_embedding)
+
             result = await hybrid_rag.answer(
                 query=request.question,
                 group_ids=expanded_group_ids,
@@ -760,11 +800,10 @@ async def query_stream(
                 search_mode=search_mode,  # Use user-selected search mode
                 system_prompt=request.system_prompt,
                 top_k=request.top_k,
-                document_ids=request.document_ids  # 🆕 문서 필터 전달
+                document_ids=request.document_ids,  # 🆕 문서 필터 전달
+                query_embedding=hybrid_query_embedding,  # 임베딩 재사용
+                stream=True  # 스트리밍 모드
             )
-
-            # Record first token time (when Hybrid RAG query completes)
-            first_token_time = time.time()
 
             # Convert Hybrid RAG response to streaming format
             # Extract answer and convert sources to match expected format
@@ -820,12 +859,14 @@ async def query_stream(
             query_rewrite_enabled = result.get("query_rewrite_enabled", False)
             reranking_enabled = result.get("reranking_enabled", False)
 
+            # generator가 있으면 (stream=True) answer로 사용하여 실제 스트리밍 활성화
+            hybrid_generator = result.get("generator")
+
             result = {
-                "answer": answer_text,
+                "answer": hybrid_generator if hybrid_generator else answer_text,
                 "context": context_docs,
                 "sources": unique_source_names,  # String array for frontend
                 "search_summary": result.get("search_summary", {}),
-                "generator": None,  # No streaming generator for Hybrid RAG
                 # RAG 품질 개선 정보 보존
                 "rewritten_query": rewritten_query,
                 "query_rewrite_enabled": query_rewrite_enabled,
@@ -873,9 +914,6 @@ async def query_stream(
                 group_ids=expanded_group_ids  # Use validated and expanded group_ids
             )
 
-            # Record first token time (when RAG query completes and answer is ready)
-            first_token_time = time.time()
-
         # Prepare context and sources for the first message
         context_data = {
             "sources": result["sources"],
@@ -898,13 +936,23 @@ async def query_stream(
         # Collect response for caching and conversation history
         full_response = []
 
+        def _estimate_tokens(text: str) -> int:
+            """한국어/영어 혼합 텍스트의 LLM 토큰 수 근사치 계산"""
+            if not text:
+                return 0
+            korean = sum(1 for c in text if '\uAC00' <= c <= '\uD7A3' or '\u3131' <= c <= '\u318E')
+            non_space = len(text) - text.count(' ') - text.count('\n') - korean
+            # 한국어: ~2자당 1토큰, 영어/기타: ~4자당 1토큰
+            return max(1, int(korean / 2 + non_space / 4))
+
         async def generate_stream():
-            nonlocal query_start_time, first_token_time
+            nonlocal query_start_time
 
             # Use query start time as the actual start time
             start_time = query_start_time
-            # first_token_time is already set when rag.query() completed
             token_count = 0
+            actual_first_token_time = None  # 실제 첫 토큰 도착 시점
+            generation_start_time = None    # LLM 생성 시작 시점
 
             # First, send sources and context
             yield f"data: {json.dumps({'type': 'metadata', 'data': context_data})}\n\n"
@@ -916,12 +964,14 @@ async def query_stream(
                 # Hybrid RAG: answer is a complete string, split into chunks for streaming
                 answer_text = result["answer"]
                 chunk_size = 8  # Characters per chunk
+                generation_start_time = time.time()
 
                 for i in range(0, len(answer_text), chunk_size):
                     chunk = answer_text[i:i + chunk_size]
                     if chunk:
-                        # Count tokens (approximate)
-                        token_count += len(chunk.split())
+                        if actual_first_token_time is None:
+                            actual_first_token_time = time.time()
+                        token_count += _estimate_tokens(chunk)
                         full_response.append(chunk)
                         yield f"data: {json.dumps({'type': 'chunk', 'data': chunk})}\n\n"
 
@@ -929,16 +979,25 @@ async def query_stream(
                         await asyncio.sleep(0.01)
             else:
                 # answer is a generator, stream naturally
+                generation_start_time = time.time()
                 for chunk in result["answer"]:
                     if chunk:
-                        # Count tokens (approximate: split by whitespace + punctuation)
-                        token_count += len(chunk.split())
+                        if actual_first_token_time is None:
+                            actual_first_token_time = time.time()
+                        token_count += _estimate_tokens(chunk)
 
                         full_response.append(chunk)
                         yield f"data: {json.dumps({'type': 'chunk', 'data': chunk})}\n\n"
 
             # Save to cache after completion
             complete_response = ''.join(full_response)
+
+            # ⚠️ 빈 응답 체크 - LLM이 응답을 생성하지 못한 경우
+            if not complete_response or len(complete_response.strip()) == 0:
+                logger.warning("⚠️ Empty response from LLM - sending fallback message")
+                fallback_message = "죄송합니다. 응답을 생성하지 못했습니다. 다시 시도해 주세요."
+                yield f"data: {json.dumps({'type': 'chunk', 'data': fallback_message})}\n\n"
+                complete_response = fallback_message
 
             # 🔍 응답 품질 검증 및 자동 수정 (스트리밍)
             context_filenames = [doc.get("filename", "") for doc in result["context"]]
@@ -958,6 +1017,17 @@ async def query_stream(
                     logger.success(f"✅ 스트리밍 응답 자동 수정 완료: {fixes}")
                     complete_response = fixed_response
 
+            # 🔧 깨진 한국어 문서명 인용 수정 (스트리밍)
+            garbled_fixed, garbled_fixes = response_validator.fix_garbled_citations(
+                complete_response,
+                result["context"]
+            )
+            if garbled_fixes:
+                logger.success(f"✅ 스트리밍 깨진 인용 수정: {garbled_fixes}")
+                complete_response = garbled_fixed
+                # 수정된 전체 응답을 프론트엔드에 전송하여 깨진 텍스트 교체
+                yield f"data: {json.dumps({'type': 'replace', 'data': complete_response})}\n\n"
+
             # 📊 신뢰도 점수 계산 (스트리밍)
             confidence_result = confidence_scorer.calculate_confidence(
                 answer=complete_response,
@@ -966,17 +1036,26 @@ async def query_stream(
             )
             logger.info(f"📊 스트리밍 신뢰도 점수: {confidence_result['percentage']}% ({confidence_result['level']})")
 
-            # 🔄 후속 질문은 별도 API (/api/follow-up-questions)에서 생성
-            # 스트리밍 응답 속도 향상을 위해 여기서는 생성하지 않음
+            # 후속 질문은 done 이벤트 후에 비동기 생성 (사용자 대기 시간 제거)
+            follow_up_qs = []
 
             # Calculate statistics
             end_time = time.time()
             total_time = end_time - start_time
-            time_to_first_token = (first_token_time - start_time) if first_token_time else 0
-            tokens_per_second = token_count / total_time if total_time > 0 else 0
+            # TTFT: 요청 시작 → 실제 첫 번째 토큰 도착까지
+            time_to_first_token = (actual_first_token_time - start_time) if actual_first_token_time else 0
+            # TPS: LLM 생성 시간 기준 (검색 시간 제외)
+            generation_time = (end_time - generation_start_time) if generation_start_time else total_time
+            tokens_per_second = token_count / generation_time if generation_time > 0 else 0
 
             # Define background task for cache saves
             def save_to_caches():
+                # 빈 응답/오류 메시지는 캐시하지 않음
+                FALLBACK_MSG = "죄송합니다. 응답을 생성하지 못했습니다."
+                if not complete_response or FALLBACK_MSG in complete_response:
+                    logger.info("🚫 [BG] Skipping cache save for empty/fallback response")
+                    return
+
                 # Determine content type based on source documents
                 content_type = 'default'
                 if result.get("sources"):
@@ -1026,8 +1105,8 @@ async def query_stream(
                             "tokens_per_second": round(tokens_per_second, 2),
                             "total_tokens": token_count,
                             "time_to_first_token": round(time_to_first_token, 2)
-                        }
-                        # follow_up_questions는 별도 API에서 저장됨
+                        },
+                        "follow_up_questions": follow_up_qs
                     }
                     logger.info(f"💾 [CONV] Saving to history")
                     conversation_manager.add_message(
@@ -1053,10 +1132,33 @@ async def query_stream(
             # Send confidence score
             yield f"data: {json.dumps({'type': 'confidence', 'data': confidence_result})}\n\n"
 
-            # follow_up_questions는 별도 API (/api/follow-up-questions)에서 처리
-
-            # Send completion message
+            # Send completion message FIRST (사용자 즉시 완료 확인)
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
+            logger.info("✅ [STREAM] done 이벤트 전송 완료, 후속 질문 생성 시작...")
+
+            # 🔄 후속 질문을 done 이후 비동기 생성 (사용자 대기 없음)
+            try:
+                rag_system = await get_rag_system()
+                logger.info(f"🔄 [FOLLOW-UP] asyncio.to_thread 호출 시작...")
+                follow_up_qs = await asyncio.to_thread(
+                    _generate_llm_follow_up_questions,
+                    request.question, complete_response, rag_system.llm
+                )
+                logger.info(f"🔄 [FOLLOW-UP] LLM 생성 완료: {len(follow_up_qs)}개")
+                if len(follow_up_qs) < 3:
+                    follow_up_qs = _generate_context_aware_fallback(
+                        request.question, follow_up_qs, complete_response
+                    )
+            except Exception as e:
+                logger.warning(f"⚠️ [FOLLOW-UP] 생성 실패: {type(e).__name__}: {e}")
+                follow_up_qs = _generate_context_aware_fallback(
+                    request.question, [], complete_response
+                )
+
+            logger.info(f"💬 [FOLLOW-UP] 최종 {len(follow_up_qs)}개 전송 예정")
+            if follow_up_qs:
+                yield f"data: {json.dumps({'type': 'follow_up_questions', 'data': follow_up_qs})}\n\n"
+                logger.info("💬 [FOLLOW-UP] SSE 이벤트 전송 완료")
 
         return StreamingResponse(
             generate_stream(),
@@ -1121,11 +1223,15 @@ def _generate_llm_follow_up_questions(question: str, answer: str, llm_instance=N
         from ..llm_ollama import OllamaLLM
 
         if isinstance(active_llm, OllamaLLM):
-            messages = [{"role": "user", "content": prompt}]
+            messages = [
+                {"role": "system", "content": "당신은 후속 질문 생성기입니다. 답변 내용을 분석하여 사용자가 궁금해할 한국어 질문 3개를 '-' 기호로 시작하여 작성하세요."},
+                {"role": "user", "content": prompt}
+            ]
             response = active_llm._generate_response(
                 messages=messages,
-                max_tokens=250,
-                temperature=0.5  # Slightly higher for variety
+                max_tokens=500,  # thinking 오버헤드 포함
+                temperature=0.5,
+                think=True  # thinking 허용 (think:false 시 빈 응답 방지)
             )
         else:
             # Use MLX generate

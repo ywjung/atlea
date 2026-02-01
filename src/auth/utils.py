@@ -3,16 +3,12 @@
 Password hashing, JWT token generation and verification utilities.
 """
 
-from passlib.context import CryptContext
 from jose import JWTError, jwt
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict
 from fastapi import Request, HTTPException
 from redis import Redis
 import os
-
-# 비밀번호 해싱 컨텍스트
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # JWT 설정 (환경 변수에서 읽기)
 SECRET_KEY = os.getenv("JWT_SECRET_KEY")
@@ -26,9 +22,9 @@ if not SECRET_KEY:
 # SECRET_KEY 보안 검증
 if len(SECRET_KEY) < 32:
     raise ValueError(
-        "JWT_SECRET_KEY must be at least 32 characters long for security. "
-        "Current length: {len(SECRET_KEY)}. "
-        "Generate a strong key using: python -c 'import secrets; print(secrets.token_urlsafe(32))'"
+        f"JWT_SECRET_KEY must be at least 32 characters long for security. "
+        f"Current length: {len(SECRET_KEY)}. "
+        f"Generate a strong key using: python -c 'import secrets; print(secrets.token_urlsafe(32))'"
     )
 
 ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")

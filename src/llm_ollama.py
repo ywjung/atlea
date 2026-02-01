@@ -46,6 +46,9 @@ class OllamaLLM:
         self.max_tokens = max_tokens
         self.temperature = temperature
 
+        # Auto-detect think:false support (probe on first call)
+        self._think_false_supported = None  # None = not yet probed
+
         # Enhanced system prompt (same as original LLM)
         self.system_prompt = """당신은 문서 기반 질의응답 전문 AI 어시스턴트입니다.
 
@@ -124,6 +127,9 @@ class OllamaLLM:
             logger.error("Please ensure Ollama is running: 'ollama serve'")
             raise
 
+        # Pre-probe think:false support at startup (saves ~1s on first query)
+        self._probe_think_false()
+
     def _verify_connection(self):
         """Verify Ollama API is accessible"""
         try:
@@ -193,6 +199,22 @@ class OllamaLLM:
                     "content": msg["content"]
                 })
 
+        # 🔴 문서명 참조 리스트 생성 — LLM이 정확한 이름을 복사하도록 유도
+        doc_name_list = ""
+        if context:
+            doc_names = []
+            for doc in context:
+                fname = doc.get('filename', '')
+                if fname:
+                    name = fname.rsplit('.', 1)[0] if '.' in fname else fname
+                    if name not in doc_names and name != 'Unknown':
+                        doc_names.append(name)
+            if doc_names:
+                doc_name_list = "\n=== 🔴 출처 표기용 정확한 문서명 (반드시 이 목록에서 복사) ===\n"
+                for name in doc_names:
+                    doc_name_list += f"- [내부:{name}]\n"
+                doc_name_list += "※ 위 문서명을 인용할 때 한 글자도 변경하지 말고 그대로 복사하세요.\n"
+
         # Add current query with context
         messages.append({
             "role": "user",
@@ -201,7 +223,7 @@ class OllamaLLM:
 === 📚 참고 문서 ({len(context)}개) ===
 
 {context_text}
-
+{doc_name_list}
 === ❓ 사용자 질문 ===
 {query}
 
@@ -211,6 +233,111 @@ class OllamaLLM:
         })
 
         return messages
+
+    def _extract_answer_from_thinking(self, thinking: str) -> str:
+        """
+        Extract usable answer content from model's thinking output.
+        Uses multi-strategy approach: answer markers → latter portion → line filtering → full text.
+        """
+        if not thinking or len(thinking.strip()) < 50:
+            return ""
+
+        # Strategy 1: Look for explicit answer markers (last occurrence)
+        answer_markers = [
+            '답변:', '답:', '결론:', '요약:', '정리하면:',
+            '따라서,', '결론적으로,', '종합하면,',
+            'Answer:', 'Response:', 'Summary:', 'In summary,',
+            '사용자에게 답변', '최종 답변',
+        ]
+        for marker in answer_markers:
+            idx = thinking.rfind(marker)
+            if idx != -1:
+                answer = thinking[idx + len(marker):].strip()
+                if len(answer) > 100:
+                    answer = re.sub(r'\n\s*\n\s*\n', '\n\n', answer)
+                    return answer
+
+        # Strategy 2: Take the latter portion (answer is usually at the end)
+        paragraphs = [p.strip() for p in thinking.strip().split('\n\n') if p.strip()]
+        if len(paragraphs) >= 3:
+            start = max(1, len(paragraphs) // 3)
+            result = '\n\n'.join(paragraphs[start:]).strip()
+            if len(result) > 100:
+                result = re.sub(r'\n\s*\n\s*\n', '\n\n', result)
+                return result
+
+        # Strategy 3: Line-by-line filtering of meta-reasoning
+        lines = thinking.strip().split('\n')
+        useful_lines = []
+        skip_patterns = [
+            "okay,", "okay ", "let's", "let me ", "i need to", "i should",
+            "the user", "the question", "looking at", "now i",
+            "hmm", "wait,", "actually,", "so basically",
+            "let me think", "i'll ", "好的", "让我", "我需要",
+            "用户问", "我来", "首先",
+        ]
+        for line in lines:
+            line_lower = line.strip().lower()
+            if not line.strip():
+                useful_lines.append('')
+                continue
+            if any(line_lower.startswith(p) for p in skip_patterns):
+                continue
+            useful_lines.append(line)
+
+        result = '\n'.join(useful_lines).strip()
+        result = re.sub(r'\n\s*\n\s*\n', '\n\n', result)
+        if len(result) > 100:
+            return result
+
+        # Strategy 4: Return everything (better than empty response)
+        return re.sub(r'\n\s*\n\s*\n', '\n\n', thinking.strip())
+
+    def _format_thinking_as_korean(self, thinking: str, original_query: str = "") -> str:
+        """
+        Use a local model to convert English thinking into a proper Korean answer.
+        Fallback for models that only produce thinking (e.g., qwen3-next:80b-cloud).
+        """
+        # Use a local model that reliably produces content
+        fallback_models = [
+            "alibayram/Qwen3-30B-A3B-Instruct-2507:latest",
+            "glm-4.7-flash:latest",
+        ]
+        # Don't use the same model if it's the one that failed
+        fallback_models = [m for m in fallback_models if m != self.model_name]
+
+        # Trim thinking to essential content
+        trimmed = thinking.strip()
+        if len(trimmed) > 3000:
+            trimmed = trimmed[:3000]
+
+        format_messages = [
+            {"role": "system", "content": "당신은 한국어 답변 작성 전문가입니다. 주어진 분석 내용을 바탕으로 사용자에게 보여줄 깔끔한 한국어 답변을 작성하세요. 분석 과정은 생략하고 최종 답변만 작성하세요."},
+            {"role": "user", "content": f"다음 분석 내용을 바탕으로 한국어 답변을 작성해주세요.\n\n원래 질문: {original_query}\n\n분석 내용:\n{trimmed}"}
+        ]
+
+        for model in fallback_models:
+            try:
+                payload = {
+                    "model": model,
+                    "messages": format_messages,
+                    "options": {"num_predict": 1000, "temperature": 0.3, "num_ctx": 4096},
+                    "think": False,
+                    "stream": False
+                }
+                resp = httpx.post(f"{self.base_url}/api/chat", json=payload, timeout=60.0)
+                if resp.status_code == 200:
+                    result = resp.json()
+                    content = result.get("message", {}).get("content", "")
+                    if content and len(content.strip()) > 30:
+                        logger.info(f"✅ Formatted thinking as Korean via {model} ({len(content)} chars)")
+                        return content.strip()
+            except Exception as e:
+                logger.warning(f"⚠️ Fallback model {model} failed: {e}")
+                continue
+
+        # If all fallback models fail, return raw extraction
+        return self._extract_answer_from_thinking(thinking)
 
     def _clean_response(self, text: str) -> str:
         """
@@ -272,18 +399,61 @@ class OllamaLLM:
             logger.error(f"Failed to generate response: {e}")
             raise
 
-    def _generate_response(self, messages: List[Dict], max_tokens: int, temperature: float) -> str:
-        """Generate non-streaming response"""
+    def _probe_think_false(self):
+        """Probe whether the model supports think:false parameter"""
+        if self._think_false_supported is not None:
+            return
         try:
+            probe_payload = {
+                "model": self.model_name,
+                "messages": [{"role": "user", "content": "hi"}],
+                "options": {"num_predict": 1, "num_ctx": 512},
+                "think": False,
+                "stream": False
+            }
+            resp = httpx.post(f"{self.base_url}/api/chat", json=probe_payload, timeout=15.0)
+            if resp.status_code == 400:
+                self._think_false_supported = False
+                logger.warning(f"⚠️ Model {self.model_name} does not support think:false — will use thinking extraction")
+            else:
+                self._think_false_supported = True
+                logger.info(f"✅ Model {self.model_name} supports think:false")
+        except Exception as e:
+            self._think_false_supported = False
+            logger.warning(f"⚠️ think:false probe failed: {e}")
+
+    def _generate_response(self, messages: List[Dict], max_tokens: int, temperature: float, think: bool = None) -> str:
+        """Generate non-streaming response
+
+        Args:
+            think: None=auto(think:false if supported), True=force thinking, False=force no thinking
+        """
+        try:
+            # Auto-detect think:false support on first call
+            self._probe_think_false()
+
             payload = {
                 "model": self.model_name,
                 "messages": messages,
                 "options": {
                     "num_predict": max_tokens,
-                    "temperature": temperature
+                    "temperature": temperature,
+                    "num_ctx": 12288,
+                    "num_batch": 512,
+                    "num_gpu": 99,
                 },
                 "stream": False
             }
+
+            # think 파라미터 제어: None=자동, True=thinking 허용, False=thinking 금지
+            if think is True:
+                pass  # think 파라미터 생략 → 모델 기본 동작 (thinking 허용)
+            elif think is False:
+                if self._think_false_supported:
+                    payload["think"] = False
+            else:  # None (기본값) — 자동
+                if self._think_false_supported:
+                    payload["think"] = False
 
             response = httpx.post(
                 f"{self.base_url}/api/chat",
@@ -295,7 +465,37 @@ class OllamaLLM:
             result = response.json()
             content = result.get("message", {}).get("content", "")
 
+            # Handle empty content with thinking — format as Korean via fallback model
+            if not content or len(content.strip()) == 0:
+                thinking = result.get("message", {}).get("thinking", "")
+                if thinking:
+                    logger.warning(f"⚠️ Ollama returned empty content but has thinking ({len(thinking)} chars)")
+                    # Extract original query from messages for context
+                    original_query = ""
+                    for m in reversed(messages):
+                        if m.get("role") == "user":
+                            original_query = m.get("content", "")[:200]
+                            break
+                    # Format thinking as proper Korean answer using fallback model
+                    formatted = self._format_thinking_as_korean(thinking, original_query)
+                    if formatted:
+                        logger.info(f"✅ Formatted answer from thinking ({len(formatted)} chars)")
+                        content = formatted
+                    else:
+                        logger.warning("⚠️ Could not format thinking as answer")
+                else:
+                    logger.warning("⚠️ Ollama returned empty content and no thinking")
+
             cleaned_response = self._clean_response(content)
+
+            # _clean_response() 후에도 빈 응답이면 thinking 필드에서 복구 시도
+            if not cleaned_response or len(cleaned_response.strip()) == 0:
+                thinking = result.get("message", {}).get("thinking", "")
+                if thinking:
+                    logger.warning(f"⚠️ Content empty after cleaning, using thinking field ({len(thinking)} chars)")
+                    # thinking 내용에서 <think> 태그 제거 후 반환
+                    cleaned_response = self._clean_response(thinking)
+
             logger.success("Response generated successfully (Ollama)")
             return cleaned_response
 
@@ -306,18 +506,30 @@ class OllamaLLM:
     def _stream_response(self, messages: List[Dict], max_tokens: int, temperature: float) -> Generator[str, None, None]:
         """Stream response from Ollama"""
         try:
+            # Auto-detect think:false support on first call
+            self._probe_think_false()
+
             payload = {
                 "model": self.model_name,
                 "messages": messages,
                 "options": {
                     "num_predict": max_tokens,
-                    "temperature": temperature
+                    "temperature": temperature,
+                    "num_ctx": 12288,
+                    "num_batch": 512,
+                    "num_gpu": 99,
                 },
                 "stream": True
             }
 
+            # Add think:false if supported (prevents thinking-only output)
+            if self._think_false_supported:
+                payload["think"] = False
+
             buffer = ""
             inside_think = False
+            content_yielded = False
+            thinking_chars = 0
             tag_prefixes = ['<', '<t', '<th', '<thi', '<thin', '<think', '</', '</t', '</th', '</thi', '</thin', '</think']
 
             headers = {"Content-Type": "application/json"}
@@ -342,7 +554,11 @@ class OllamaLLM:
                             if data.get("done"):
                                 break
 
-                            token = data.get("message", {}).get("content", "")
+                            msg = data.get("message", {})
+                            token = msg.get("content", "")
+                            # Ollama may return thinking in separate field (not in <think> tags)
+                            if msg.get("thinking"):
+                                thinking_chars += len(msg["thinking"])
                             if not token:
                                 continue
 
@@ -364,11 +580,13 @@ class OllamaLLM:
                                 think_end_pos = buffer.find('</think>')
                                 buffer = buffer[think_end_pos + 8:]
                                 if buffer:
+                                    content_yielded = True
                                     yield buffer
                                     buffer = ""
                                 continue
 
                             if inside_think:
+                                thinking_chars += len(token)
                                 continue
 
                             # Stream aggressively
@@ -379,12 +597,14 @@ class OllamaLLM:
                                     break
 
                             if not should_hold and len(buffer) > 0:
+                                content_yielded = True
                                 yield buffer
                                 buffer = ""
                             elif should_hold and len(buffer) > 8:
                                 to_yield = buffer[:-8]
                                 buffer = buffer[-8:]
                                 if to_yield:
+                                    content_yielded = True
                                     yield to_yield
 
                         except json.JSONDecodeError:
@@ -392,9 +612,64 @@ class OllamaLLM:
 
                     # Yield remaining buffer
                     if buffer and not inside_think:
+                        content_yielded = True
                         yield buffer
 
-            logger.success("Streaming response completed (Ollama)")
+            logger.success(f"Streaming response completed (Ollama) - content_yielded={content_yielded}, thinking_chars={thinking_chars}")
+
+            # Retry if no content was yielded (model may have produced only thinking)
+            if not content_yielded:
+                logger.warning(f"⚠️ Stream yielded no content (thinking_chars={thinking_chars}), retrying non-streaming...")
+
+                retry_payload = {
+                    "model": self.model_name,
+                    "messages": messages,
+                    "options": {
+                        "num_predict": max_tokens,
+                        "temperature": temperature,
+                        "num_ctx": 12288,
+                        "num_batch": 512,
+                        "num_gpu": 99,
+                    },
+                    "stream": False
+                }
+                try:
+                    with httpx.Client(timeout=120.0) as retry_client:
+                        retry_resp = retry_client.post(
+                            f"{self.base_url}/api/chat",
+                            json=retry_payload,
+                            headers=headers,
+                            timeout=120.0
+                        )
+                        retry_resp.raise_for_status()
+                        retry_result = retry_resp.json()
+                        retry_msg = retry_result.get("message", {})
+                        retry_content = retry_msg.get("content", "")
+                        retry_thinking = retry_msg.get("thinking", "")
+
+                        logger.debug(f"🔍 Retry result: content={len(retry_content)} chars, thinking={len(retry_thinking)} chars")
+
+                        cleaned = self._clean_response(retry_content)
+                        if cleaned:
+                            logger.info(f"✅ Retry succeeded with content ({len(cleaned)} chars)")
+                            yield cleaned
+                        elif retry_thinking:
+                            # Format English thinking as Korean answer via fallback model
+                            original_query = ""
+                            for m in reversed(messages):
+                                if m.get("role") == "user":
+                                    original_query = m.get("content", "")[:200]
+                                    break
+                            formatted = self._format_thinking_as_korean(retry_thinking, original_query)
+                            if formatted:
+                                logger.info(f"✅ Formatted thinking as Korean answer ({len(formatted)} chars)")
+                                yield formatted
+                            else:
+                                logger.warning("⚠️ Could not format thinking as Korean answer")
+                        else:
+                            logger.warning("⚠️ Retry produced neither content nor thinking")
+                except Exception as retry_err:
+                    logger.error(f"❌ Retry failed: {retry_err}")
 
         except httpx.HTTPStatusError as e:
             logger.error(f"❌ Ollama HTTP error: {e}")

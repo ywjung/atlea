@@ -20,7 +20,7 @@
 
 ## 개요
 
-이 문서는 RAG 챗봇 시스템의 **SBOM(Software Bill of Materials)** 생성 및 **보안 취약점 관리** 프로세스를 설명합니다.
+이 문서는 ATLEA 시스템의 **SBOM(Software Bill of Materials)** 생성 및 **보안 취약점 관리** 프로세스를 설명합니다.
 
 ### 목적
 
@@ -415,7 +415,7 @@ jobs:
 # Slack 알림 예제 (scan_vulnerabilities.sh에 추가)
 if [ $PYTHON_VULNS_FOUND -gt 0 ] || [ $JAVA_VULNS_FOUND -gt 0 ]; then
     curl -X POST -H 'Content-type: application/json' \
-    --data '{"text":"⚠️ Security vulnerabilities detected in RAG Chatbot!"}' \
+    --data '{"text":"⚠️ Security vulnerabilities detected in ATLEA!"}' \
     YOUR_SLACK_WEBHOOK_URL
 fi
 ```
@@ -631,4 +631,4 @@ chatbot_redis/
 
 **최종 업데이트**: 2026-01-02
 **버전**: 1.0.0
-**관리자**: RAG Chatbot Security Team
+**관리자**: ATLEA Security Team

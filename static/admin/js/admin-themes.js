@@ -39,25 +39,27 @@ AdminThemes.init = function() {
 // Theme Operations
 // =============================================================================
 AdminThemes.setTheme = function(theme, save = true) {
-    if (!this.themes.includes(theme)) {
-        console.warn(`[AdminThemes] Invalid theme: ${theme}`);
-        return;
+    // Validate theme value (same as frontend)
+    if (theme !== 'light' && theme !== 'dark') {
+        theme = 'light';
     }
 
-    console.log('[AdminThemes] setTheme called:', theme);
     this.currentTheme = theme;
 
-    // Save preference first
+    // Set theme attribute on root element (same as frontend - documentElement only)
+    document.documentElement.setAttribute('data-theme', theme);
+
+    // Force reflow to ensure CSS variables are applied immediately (same as frontend)
+    void document.documentElement.offsetHeight;
+
+    // Save to localStorage
     if (save) {
-        localStorage.setItem(this.STORAGE_KEY, theme);
+        try {
+            localStorage.setItem(this.STORAGE_KEY, theme);
+        } catch (error) {
+            console.error('[AdminThemes] Failed to save theme:', error);
+        }
     }
-
-    const html = document.documentElement;
-    const body = document.body;
-
-    // Update data-attribute on both html and body
-    html.setAttribute('data-theme', theme);
-    body.setAttribute('data-theme', theme);
 
     // Update meta theme-color for mobile browsers
     const metaThemeColor = document.querySelector('meta[name="theme-color"]');
@@ -68,18 +70,10 @@ AdminThemes.setTheme = function(theme, save = true) {
     // Update toggle button icons
     this.updateToggleButtons();
 
-    // FORCE REPAINT: Nuclear option - hide and show body
-    // This guarantees a repaint by forcing layout recalculation
-    body.style.display = 'none';
-    // Force synchronous reflow
-    void body.offsetHeight;
-    body.style.display = '';
-
     // Emit theme change event
     if (typeof AdminCore !== 'undefined') {
         AdminCore.emit('themeChange', { theme });
     }
-    console.log('[AdminThemes] Theme change complete:', theme);
 };
 
 AdminThemes.toggle = function() {

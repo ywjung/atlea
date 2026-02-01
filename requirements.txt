@@ -60,6 +60,9 @@ pyotp>=2.9.0  # TOTP (Google Authenticator) support
 qrcode>=7.4.0  # QR code generation for 2FA setup
 ecdsa>=0.19.0  # Explicit version for python-jose dependency - CVE-2024-23342 mitigation
 
+# Audio Processing (for TTS mixed-language support)
+pydub>=0.25.0
+
 # Testing (Development)
 pytest-asyncio==0.23.0
 httpx==0.27.0

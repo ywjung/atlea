@@ -3,6 +3,7 @@ Response Validator - AI 응답 품질 자동 검증
 """
 
 import re
+import unicodedata
 from typing import List, Tuple, Dict, Optional
 from loguru import logger
 
@@ -160,6 +161,117 @@ class ResponseValidator:
 
         if fixes_applied:
             logger.success(f"✅ 자동 수정 완료 - {len(fixes_applied)}개 항목 수정")
+
+        return fixed_response, fixes_applied
+
+    @staticmethod
+    def _char_similarity(s1: str, s2: str) -> float:
+        """두 문자열 간의 문자 수준 유사도 계산 (0.0 ~ 1.0)"""
+        if not s1 or not s2:
+            return 0.0
+        if s1 == s2:
+            return 1.0
+
+        # 한글 자모 분해 후 비교 (NFD 정규화)
+        s1_nfd = unicodedata.normalize('NFD', s1)
+        s2_nfd = unicodedata.normalize('NFD', s2)
+
+        # 공통 문자 비율 (순서 무시)
+        set1 = set(s1_nfd)
+        set2 = set(s2_nfd)
+        common = set1 & set2
+        union = set1 | set2
+        jaccard = len(common) / len(union) if union else 0.0
+
+        # 순차 매칭 (LCS 기반 간이 계산)
+        matches = 0
+        j = 0
+        for c in s1:
+            while j < len(s2):
+                if s2[j] == c:
+                    matches += 1
+                    j += 1
+                    break
+                j += 1
+
+        seq_ratio = (2.0 * matches) / (len(s1) + len(s2)) if (len(s1) + len(s2)) > 0 else 0.0
+
+        # 가중 평균: 순차 매칭 60%, Jaccard 40%
+        return 0.6 * seq_ratio + 0.4 * jaccard
+
+    def fix_garbled_citations(self, response: str, context: List[Dict]) -> Tuple[str, List[str]]:
+        """
+        깨진 한국어 문서명 인용을 실제 문서명으로 수정
+
+        LLM이 토큰 단위로 생성할 때 한국어 문서명이 깨질 수 있음.
+        예: [내부:임직원행ᄃ Glover 앙령] → [내부:임직원행동강령]
+
+        Args:
+            response: AI 응답 텍스트
+            context: 컨텍스트 문서 리스트 (filename 포함)
+
+        Returns:
+            (fixed_response, fixes_applied): 수정된 응답과 적용된 수정 사항 리스트
+        """
+        if not context:
+            return response, []
+
+        # 실제 문서명 목록 수집 (확장자 제거)
+        actual_doc_names = []
+        for doc in context:
+            filename = doc.get('filename', '')
+            if not filename:
+                continue
+            # 확장자 제거
+            name = filename.rsplit('.', 1)[0] if '.' in filename else filename
+            if name and name != 'Unknown':
+                actual_doc_names.append(name)
+            # 확장자 포함 버전도 추가 (일부 인용은 확장자 포함)
+            if filename and filename != name:
+                actual_doc_names.append(filename)
+
+        if not actual_doc_names:
+            return response, []
+
+        fixes_applied = []
+        fixed_response = response
+
+        # [내부:...] 패턴 찾기
+        citation_pattern = re.compile(r'\[내부:([^\]]+)\]')
+        matches = list(citation_pattern.finditer(fixed_response))
+
+        for match in reversed(matches):  # 뒤에서부터 치환 (인덱스 보존)
+            cited_name = match.group(1).strip()
+
+            # 이미 정확한 문서명이면 스킵
+            if cited_name in actual_doc_names:
+                continue
+
+            # 유사도 기반 매칭
+            best_match = None
+            best_score = 0.0
+
+            for actual_name in actual_doc_names:
+                score = self._char_similarity(cited_name, actual_name)
+                if score > best_score:
+                    best_score = score
+                    best_match = actual_name
+
+            # 유사도 40% 이상이면 치환 (한글 깨짐은 대체로 50%+ 유사도)
+            if best_match and best_score >= 0.4:
+                old_citation = match.group(0)
+                new_citation = f"[내부:{best_match}]"
+
+                if old_citation != new_citation:
+                    start, end = match.span()
+                    fixed_response = fixed_response[:start] + new_citation + fixed_response[end:]
+
+                    fix_msg = f'깨진 인용 수정: "{cited_name}" → "{best_match}" (유사도: {best_score:.0%})'
+                    fixes_applied.append(fix_msg)
+                    logger.info(f"🔧 {fix_msg}")
+
+        if fixes_applied:
+            logger.success(f"✅ 깨진 인용 수정 완료 - {len(fixes_applied)}개 항목")
 
         return fixed_response, fixes_applied
 

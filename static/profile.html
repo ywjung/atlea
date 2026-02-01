@@ -3,9 +3,22 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>프로필 관리 - AI 챗봇</title>
+    <title>프로필 관리 - ATLEA</title>
     <link rel="stylesheet" href="/static/auth.css">
     <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+
+    <!-- Early theme initialization to prevent flash -->
+    <script>
+        (function() {
+            try {
+                const savedTheme = localStorage.getItem('theme') || 'light';
+                const theme = (savedTheme === 'dark' || savedTheme === 'light') ? savedTheme : 'light';
+                document.documentElement.setAttribute('data-theme', theme);
+            } catch (error) {
+                document.documentElement.setAttribute('data-theme', 'light');
+            }
+        })();
+    </script>
 
     <!-- Logger System -->
     <script src="/static/env-config.js?v=1"></script>
@@ -48,7 +61,7 @@
                             maxlength="50"
                             placeholder="새 사용자명"
                         >
-                        <small style="color: #666;">영문, 숫자, 한글, 언더스코어(_)만 사용 가능</small>
+                        <small style="color: var(--text-muted, #666);">영문, 숫자, 한글, 언더스코어(_)만 사용 가능</small>
                     </div>
 
                     <button type="submit" class="btn btn-primary" id="updateProfileBtn">
@@ -249,8 +262,8 @@
 
                     // 경고 메시지 표시
                     sessionsDiv.innerHTML = `
-                        <div style="background: #fff3cd; border: 1px solid #ffc107; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
-                            <p style="margin: 0; color: #856404;">
+                        <div class="session-warning-box">
+                            <p style="margin: 0;">
                                 ⚠️ 활성 세션이 없습니다. 보안을 위해 자동으로 로그아웃됩니다.
                             </p>
                         </div>
@@ -305,8 +318,8 @@
 
                     // 경고 메시지 표시
                     document.getElementById('sessionsList').innerHTML = `
-                        <div style="background: #fff3cd; border: 1px solid #ffc107; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
-                            <p style="margin: 0; color: #856404;">
+                        <div class="session-warning-box">
+                            <p style="margin: 0;">
                                 ⚠️ 인증이 만료되었습니다. 보안을 위해 자동으로 로그아웃됩니다.
                             </p>
                         </div>

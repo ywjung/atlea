@@ -1,4 +1,4 @@
-# PDF RAG 챗봇 시스템 아키텍처
+# ATLEA 시스템 아키텍처
 
 ## 📋 목차
 1. [시스템 개요](#시스템-개요)
@@ -1220,7 +1220,7 @@ export OPENAI_API_KEY="..."  # 선택사항
 ```bash
 # systemd 서비스
 [Unit]
-Description=PDF RAG Chatbot
+Description=ATLEA Service
 After=network.target redis.service
 
 [Service]

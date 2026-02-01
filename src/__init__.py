@@ -1,5 +1,5 @@
 """
-PDF RAG Chatbot with Redis Vector DB and Qwen LLM
+ATLEA (Advanced Trusted Learning & Enterprise Assistant)
 """
 
 __version__ = "1.0.0"

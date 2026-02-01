@@ -1,6 +1,6 @@
-# 🚀 RAG 챗봇 빠른 시작 가이드
+# 🚀 ATLEA 빠른 시작 가이드
 
-5분 안에 RAG 챗봇을 실행해보세요!
+5분 안에 ATLEA를 실행해보세요!
 
 ---
 
@@ -47,7 +47,7 @@ cd /path/to/chatbot_redis
 http://localhost:8000
 ```
 
-🎉 **설치 완료!** 챗봇이 실행되었습니다!
+🎉 **설치 완료!** ATLEA가 실행되었습니다!
 
 ---
 
@@ -216,7 +216,7 @@ ls -la model/
 
 | 서비스 | 주소 |
 |--------|------|
-| 💬 챗봇 웹 UI | http://localhost:8000 |
+| 💬 ATLEA 웹 UI | http://localhost:8000 |
 | 📚 API 문서 (Swagger) | http://localhost:8000/docs |
 | 📖 API 문서 (ReDoc) | http://localhost:8000/redoc |
 | ❤️ 헬스체크 | http://localhost:8000/health |
@@ -341,7 +341,7 @@ tar -xzf backup_20260102.tar.gz
 
 ---
 
-**🎉 이제 RAG 챗봇을 사용할 준비가 완료되었습니다!**
+**🎉 이제 ATLEA를 사용할 준비가 완료되었습니다!**
 
 질문이 있으시면 support@your-company.com으로 문의해주세요.
 

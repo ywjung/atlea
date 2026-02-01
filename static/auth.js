@@ -731,8 +731,7 @@ const Auth = {
             logger.error('Auto-logout API failed:', error);
         } finally {
             this.clearAuth();
-            alert('비활성 상태로 인해 자동 로그아웃되었습니다.');
-            this.redirectToLogin();
+            window.location.href = '/static/login.html?message=session_timeout';
         }
     },
 

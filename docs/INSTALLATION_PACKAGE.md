@@ -1,8 +1,8 @@
-# 📦 RAG 챗봇 시스템 설치 패키지
+# 📦 ATLEA 시스템 설치 패키지
 
 ## 패키지 내용물
 
-이 패키지에는 RAG (Retrieval-Augmented Generation) 챗봇 시스템의 모든 구성 요소가 포함되어 있습니다.
+이 패키지에는 ATLEA 시스템의 모든 구성 요소가 포함되어 있습니다.
 
 ### 📁 디렉토리 구조
 
@@ -16,7 +16,7 @@ chatbot_redis/
 │
 ├── 🐳 docker-compose.full.yml       # 완전 통합 Docker 설정
 ├── 🐳 docker-compose.yml            # 기본 Docker 설정
-├── 🐳 Dockerfile                    # 챗봇 애플리케이션 이미지
+├── 🐳 Dockerfile                    # ATLEA 애플리케이션 이미지
 │
 ├── ⚙️  .env.example                 # 환경 설정 템플릿
 ├── ⚙️  requirements.txt             # Python 패키지 의존성
@@ -343,7 +343,7 @@ LLM_MODEL=mlx-community/Qwen2.5-3B-Instruct-4bit
 - **패키지 버전**: 1.0.0
 - **출시일**: 2026-01-02
 - **포함 소프트웨어**:
-  - RAG 챗봇 애플리케이션 v1.0.0
+  - ATLEA 애플리케이션 v1.0.0
   - Java 문서 서비스 v1.0.0
   - Redis Stack 7.x
   - Qwen3 30B 4-bit
@@ -351,7 +351,7 @@ LLM_MODEL=mlx-community/Qwen2.5-3B-Instruct-4bit
 
 ---
 
-**🎉 RAG 챗봇 시스템을 선택해 주셔서 감사합니다!**
+**🎉 ATLEA를 선택해 주셔서 감사합니다!**
 
 설치 및 사용 중 궁금한 점이 있으시면 언제든지 문의해 주세요.
 

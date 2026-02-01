@@ -7,17 +7,9 @@ from typing import Optional
 from datetime import datetime, timedelta, timezone
 from jose import jwt, JWTError
 from redis import Redis
-import os
 
-# JWT 설정
-SECRET_KEY = os.getenv("JWT_SECRET_KEY")
-if not SECRET_KEY:
-    raise ValueError(
-        "JWT_SECRET_KEY environment variable is required. "
-        "Please set a strong secret key in your .env file."
-    )
+from .utils import SECRET_KEY, ALGORITHM
 
-ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 RESET_TOKEN_EXPIRE_MINUTES = 30  # 30분
 
 

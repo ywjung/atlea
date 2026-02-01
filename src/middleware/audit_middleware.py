@@ -59,6 +59,13 @@ class AuditMiddleware(BaseHTTPMiddleware):
         # IPValidator를 사용하여 안전하게 IP 추출
         return IPValidator.get_client_ip(request, trust_proxy=True)
 
+    def _get_redis_client(self, request: Request):
+        """Redis 클라이언트 가져오기"""
+        cache_mgr = getattr(request.app.state, 'cache_manager', None)
+        if cache_mgr and hasattr(cache_mgr, 'redis'):
+            return cache_mgr.redis
+        return None
+
     def _get_user_info(self, request: Request) -> tuple[Optional[str], Optional[str]]:
         """요청에서 사용자 정보 추출"""
         try:
@@ -67,13 +74,15 @@ class AuditMiddleware(BaseHTTPMiddleware):
                 user = request.state.user
                 return user.get("user_id"), user.get("username")
 
+            redis_client = self._get_redis_client(request)
+
             # JWT 토큰에서 직접 추출
             auth_header = request.headers.get("Authorization")
             if auth_header and auth_header.startswith("Bearer "):
                 token = auth_header.split(" ")[1]
                 try:
                     from ..auth.utils import verify_token
-                    user_data = verify_token(token)
+                    user_data = verify_token(token, expected_type="access", redis_client=redis_client)
                     if user_data:
                         return user_data.get("user_id"), user_data.get("sub")  # sub = username
                 except Exception:
@@ -84,7 +93,7 @@ class AuditMiddleware(BaseHTTPMiddleware):
             if token:
                 try:
                     from ..auth.utils import verify_token
-                    user_data = verify_token(token)
+                    user_data = verify_token(token, expected_type="access", redis_client=redis_client)
                     if user_data:
                         return user_data.get("user_id"), user_data.get("sub")  # sub = username
                 except Exception:
@@ -160,13 +169,24 @@ class AuditMiddleware(BaseHTTPMiddleware):
         ip_address = self._get_client_ip(request)
         user_agent = request.headers.get("User-Agent")
 
-        # 요청 처리 및 응답 본문 캡처
+        # 작업 유형을 먼저 확인하여 불필요한 응답 본문 캡처 방지
+        action_key = (request.method, request.url.path)
+        action = self.action_mapping.get(action_key)
+
+        # 패턴 매칭 (경로 파라미터 포함)
+        if not action:
+            for (method, path_pattern), mapped_action in self.action_mapping.items():
+                if request.method == method and path_pattern in request.url.path:
+                    action = mapped_action
+                    break
+
+        # 요청 처리
         response = await call_next(request)
 
-        # 응답 본문 캡처 (JSON 응답만)
+        # 응답 본문 캡처 (감사 대상 액션이고 JSON 응답인 경우만)
         response_body = None
-        body_bytes = b""
-        if response.headers.get('content-type', '').startswith('application/json'):
+        if action and response.headers.get('content-type', '').startswith('application/json'):
+            body_bytes = b""
             try:
                 # 응답 본문 읽기
                 async for chunk in response.body_iterator:
@@ -189,17 +209,6 @@ class AuditMiddleware(BaseHTTPMiddleware):
 
         # 응답 시간
         duration = time.time() - start_time
-
-        # 작업 유형 확인
-        action_key = (request.method, request.url.path)
-        action = self.action_mapping.get(action_key)
-
-        # 패턴 매칭 (경로 파라미터 포함)
-        if not action:
-            for (method, path_pattern), mapped_action in self.action_mapping.items():
-                if request.method == method and path_pattern in request.url.path:
-                    action = mapped_action
-                    break
 
         # 감사 로그 기록
         if action:

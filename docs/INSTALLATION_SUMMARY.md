@@ -9,7 +9,9 @@
 - **포함 서비스**:
   - Redis Vector Database
   - Java 문서 처리 서비스
-  - Python RAG 챗봇 애플리케이션
+  - Python ATLEA 애플리케이션
+  - SearXNG 메타 검색 엔진 (선택, `docker-compose.searxng.yml`)
+  - Crawl4AI 웹 콘텐츠 추출 (선택, `docker-compose.searxng.yml`)
 - **특징**:
   - 모든 구성 요소를 하나의 명령으로 시작
   - 자동 헬스체크 및 재시작 정책
@@ -197,17 +199,20 @@ chmod +x install.sh
 chatbot_redis/
 ├── install.sh                       # ✅ 생성됨
 ├── docker-compose.full.yml          # ✅ 생성됨
+├── docker-compose.searxng.yml       # ✅ SearXNG + Crawl4AI (선택)
 ├── INSTALLATION_PACKAGE.md          # ✅ 생성됨
 ├── INSTALLATION_MANUAL.md           # ✅ 생성됨
 ├── QUICK_START.md                   # ✅ 생성됨
+├── DEPLOYMENT_GUIDE.md              # ✅ 멀티플랫폼 배포 가이드
 ├── README.md                        # ✅ 기존 파일
 ├── .env.example                     # ✅ 기존 파일
 ├── requirements.txt                 # ✅ 기존 파일
 ├── Dockerfile                       # ✅ 기존 파일
 ├── docker-compose.yml               # ✅ 기존 파일
-├── src/                             # ✅ 기존 디렉토리
-├── static/                          # ✅ 기존 디렉토리
-├── document-service/                # ✅ 기존 디렉토리
+├── src/                             # ✅ Python 소스 (18개 라우터)
+├── static/                          # ✅ 웹 UI
+├── document-service/                # ✅ Java 문서 서비스
+├── searxng/                         # ✅ SearXNG 설정
 ├── data/                            # ✅ 빈 디렉토리
 ├── model/                           # ⚠️  모델은 설치 시 다운로드
 └── logs/                            # ✅ 빈 디렉토리
@@ -249,6 +254,18 @@ A: 현재 버전은 한국어에 최적화되어 있지만, 영어 및 다른 �
 
 **Q: 클라우드에 배포할 수 있나요?**
 A: 네, AWS, Azure, GCP 등 모든 클라우드 플랫폼에 배포 가능합니다. DEPLOYMENT_GUIDE.md를 참고하세요.
+
+**Q: 2FA(이중 인증)를 사용할 수 있나요?**
+A: 네, TOTP 기반 2FA를 지원합니다. Google Authenticator 등 호환 앱으로 설정할 수 있으며, 관리자가 전체 사용자에게 강제 적용할 수 있습니다.
+
+**Q: 웹 검색 기능은 어떻게 동작하나요?**
+A: Hybrid RAG 기능으로 업로드된 문서 검색과 실시간 웹 검색을 통합합니다. SearXNG(자체 호스팅) 또는 Tavily API를 검색 프로바이더로 선택할 수 있습니다. 관리자 페이지에서 설정합니다.
+
+**Q: 음성 합성(TTS) 기능이 있나요?**
+A: 네, Edge TTS(Microsoft 클라우드, 10개 언어 지원)와 Qwen3 모델(로컬 실행, 음성 복제 가능) 두 가지 엔진을 지원합니다. 관리자 페이지에서 설정할 수 있습니다.
+
+**Q: 감사 로그는 얼마나 보관되나요?**
+A: 기본 90일 보관되며, 17가지 액션 유형(인증, 문서, 그룹, 설정, 관리, 시스템)을 추적합니다. 관리자 페이지에서 조회할 수 있습니다.
 
 ### 2. 기술 지원 체계
 
@@ -414,12 +431,13 @@ A: 네, AWS, Azure, GCP 등 모든 클라우드 플랫폼에 배포 가능합니
 
 ---
 
-**🎉 RAG 챗봇 판매용 설치 패키지가 완성되었습니다!**
+**🎉 ATLEA 설치 패키지가 완성되었습니다!**
 
 이제 고객에게 전문적이고 사용하기 쉬운 제품을 제공할 수 있습니다.
 
 ---
 
 **생성 일시**: 2026-01-02
-**패키지 버전**: 1.0.0
+**최종 업데이트**: 2026-01-30
+**패키지 버전**: 2.5.0
 **작성자**: Claude Code AI Assistant

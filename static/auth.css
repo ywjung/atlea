@@ -471,7 +471,236 @@ body {
     }
 }
 
-/* Dark Mode Support */
-@media (prefers-color-scheme: dark) {
-    /* Optional: Add dark mode styles if needed */
+/* Session Warning Box */
+.session-warning-box {
+    background: #fff3cd;
+    border: 1px solid #ffc107;
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 16px;
+    color: #856404;
+}
+
+/* ============================================
+   Dark Mode Support (synced with chat page theme)
+   Uses localStorage key 'theme' from chat page
+   ============================================ */
+
+:root[data-theme="dark"] {
+    --primary-color: #4ade80;
+    --primary-hover: #22c55e;
+    --danger-color: #f87171;
+    --danger-hover: #ef4444;
+    --warning-color: #fbbf24;
+    --info-color: #60a5fa;
+    --text-color: #e0e0e0;
+    --border-color: #3a3a4a;
+    --bg-light: #2a2a3a;
+    --shadow: 0 2px 4px rgba(0,0,0,0.3);
+    --shadow-hover: 0 4px 8px rgba(0,0,0,0.4);
+    --text-muted: #a0a0a0;
+}
+
+/* Body Background */
+[data-theme="dark"] body {
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+    color: #e0e0e0;
+}
+
+/* Containers */
+[data-theme="dark"] .auth-container,
+[data-theme="dark"] .profile-container {
+    background: #1e1e2e;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.4);
+}
+
+/* Headers */
+[data-theme="dark"] .auth-header h1 {
+    color: #a78bfa;
+}
+
+[data-theme="dark"] .auth-header p {
+    color: #a0a0a0;
+}
+
+/* Cards */
+[data-theme="dark"] .card {
+    background: #2a2a3a;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+}
+
+[data-theme="dark"] .card:hover {
+    box-shadow: 0 4px 8px rgba(0,0,0,0.4);
+}
+
+[data-theme="dark"] .card-header {
+    color: #e0e0e0;
+    border-bottom-color: #3a3a4a;
+}
+
+[data-theme="dark"] .card-body {
+    color: #a0a0a0;
+}
+
+/* Form Inputs */
+[data-theme="dark"] .form-input {
+    background-color: #1e1e2e;
+    color: #e0e0e0;
+    border-color: #3a3a4a;
+}
+
+[data-theme="dark"] .form-input:focus {
+    border-color: #a78bfa;
+    box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.2);
+}
+
+[data-theme="dark"] .form-input:disabled {
+    background-color: #2a2a3a;
+    color: #6a6a7a;
+}
+
+[data-theme="dark"] .form-input::placeholder {
+    color: #6a6a7a;
+}
+
+[data-theme="dark"] .form-group label {
+    color: #e0e0e0;
+}
+
+/* Password Requirements */
+[data-theme="dark"] .password-requirements {
+    background-color: #1e1e2e;
+    color: #a0a0a0;
+}
+
+[data-theme="dark"] .password-requirements strong {
+    color: #e0e0e0;
+}
+
+[data-theme="dark"] .password-requirements li.valid {
+    color: #4ade80;
+}
+
+[data-theme="dark"] .password-requirements li.invalid {
+    color: #f87171;
+}
+
+/* User Info Display */
+[data-theme="dark"] .user-info {
+    background-color: #1e1e2e;
+}
+
+[data-theme="dark"] .user-info-label {
+    color: #e0e0e0;
+}
+
+[data-theme="dark"] .user-info-value {
+    color: #a0a0a0;
+}
+
+/* Session Items */
+[data-theme="dark"] .session-item {
+    border-color: #3a3a4a;
+}
+
+[data-theme="dark"] .session-item:hover {
+    border-color: #a78bfa;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+}
+
+[data-theme="dark"] .session-item.current {
+    border-color: #4ade80;
+    background-color: rgba(34, 197, 94, 0.1);
+}
+
+[data-theme="dark"] .session-info-row {
+    color: #a0a0a0;
+}
+
+[data-theme="dark"] .session-info-row strong {
+    color: #e0e0e0;
+}
+
+[data-theme="dark"] .session-badge {
+    background-color: #4ade80;
+    color: #1e1e2e;
+}
+
+/* Messages */
+[data-theme="dark"] .error-message {
+    background-color: rgba(239, 68, 68, 0.15);
+    color: #fca5a5;
+    border-left-color: #f87171;
+}
+
+[data-theme="dark"] .success-message {
+    background-color: rgba(34, 197, 94, 0.15);
+    color: #86efac;
+    border-left-color: #4ade80;
+}
+
+[data-theme="dark"] .info-message {
+    background-color: rgba(59, 130, 246, 0.15);
+    color: #93c5fd;
+    border-left-color: #60a5fa;
+}
+
+[data-theme="dark"] .warning-message {
+    background-color: rgba(245, 158, 11, 0.15);
+    color: #fcd34d;
+    border-left-color: #fbbf24;
+}
+
+/* Session Warning Box */
+[data-theme="dark"] .session-warning-box {
+    background: rgba(245, 158, 11, 0.15);
+    border-color: #fbbf24;
+    color: #fcd34d;
+}
+
+/* Buttons */
+[data-theme="dark"] .btn-secondary {
+    background-color: #4a4a5a;
+}
+
+[data-theme="dark"] .btn-secondary:hover:not(:disabled) {
+    background-color: #5a5a6a;
+}
+
+/* Loading State */
+[data-theme="dark"] .loading {
+    color: #a0a0a0;
+}
+
+/* Back Link */
+[data-theme="dark"] .back-link {
+    color: #a78bfa;
+}
+
+[data-theme="dark"] .back-link:hover {
+    color: #c4b5fd;
+}
+
+/* Links */
+[data-theme="dark"] .auth-links a {
+    color: #a78bfa;
+}
+
+[data-theme="dark"] .auth-links a:hover {
+    color: #c4b5fd;
+}
+
+/* Divider */
+[data-theme="dark"] .divider span {
+    background-color: #1e1e2e;
+    color: #a0a0a0;
+}
+
+[data-theme="dark"] .divider::before {
+    background-color: #3a3a4a;
+}
+
+/* Small / Helper Text */
+[data-theme="dark"] small {
+    color: #a0a0a0 !important;
 }

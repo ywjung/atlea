@@ -1,89 +1,198 @@
-# Python
+# =============================================================
+# .dockerignore — Docker 빌드 컨텍스트 최적화
+# =============================================================
+
+# =============================================================
+# Git & CI/CD
+# =============================================================
+.git/
+.github/
+.gitignore
+.gitattributes
+
+# =============================================================
+# Python — 빌드 불필요
+# =============================================================
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
 *.egg-info/
+*.egg
 dist/
 build/
-*.egg
-venv/
-env/
-ENV/
 
-# Virtual environments
+# 가상환경
 venv/
 env/
 .venv/
-.env/
+ENV/
 
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-.DS_Store
-
-# Git
-.git/
-.gitignore
-.gitattributes
-
-# Documentation
-*.md
-README.md
-IMPROVEMENTS.md
-ERROR_HANDLER_INTEGRATION_GUIDE.md
-STREAMING_VISUALIZER_INTEGRATION_GUIDE.md
-SESSION_INTEGRATION_GUIDE.md
-AUTOCOMPLETE_INTEGRATION_GUIDE.md
-IMPROVEMENT_ANALYSIS.md
-
-# Development files
-.env
-.env.local
-.env.development
-*.log
-server.log
-
-# Test files
-tests/
-test_*.py
-*_test.py
+# 테스트
 .pytest_cache/
 .coverage
 htmlcov/
+.tox/
+pytest.ini
+tests/
+test_*.py
+test_*.html
+test_*.sh
+*_test.py
 
-# Docker
+# =============================================================
+# Java / Maven — document-service 별도 빌드
+# =============================================================
+document-service/target/
+document-service/logs/
+document-service/owasp-data/
+
+# =============================================================
+# 환경변수 & 시크릿
+# =============================================================
+.env
+.env.local
+.env.development
+.env.production
+.env.*.local
+.admin_initial_password
+**/credentials.json
+**/secrets.json
+**/*.key
+**/*.pem
+**/*.p12
+**/*.pfx
+
+# =============================================================
+# 데이터 & 모델 (볼륨 마운트 대상)
+# =============================================================
+data/
+model/
+uploads/
+embeddings/
+*.bin
+*.pt
+*.pth
+*.onnx
+*.h5
+
+# =============================================================
+# 로그 & 런타임
+# =============================================================
+logs/
+*.log
+*.log.*
+.server.pid
+*.pid
+
+# =============================================================
+# Docker 메타 파일 (자기 자신 제외)
+# =============================================================
 Dockerfile*
 docker-compose*.yml
+docker-build.sh
+docker-deploy.sh
 .dockerignore
 
-# Data and models (should be mounted or downloaded separately)
-data/*
-model/*
-!data/.gitkeep
-!model/.gitkeep
+# =============================================================
+# 문서 (이미지에 불필요)
+# =============================================================
+docs/
+README.md
+README.md.backup
 
-# Temporary files
+# =============================================================
+# 개발·디버그 스크립트
+# =============================================================
+scripts/
+check_*.py
+debug_*.py
+debug_*.sh
+reindex_all.py
+reindex.log
+reindex_output.log
+full_reindex*.py
+fix_*.py
+verify_*.sh
+
+# 셸 스크립트 (런타임 불필요)
+setup.sh
+setup-linux-gpu.sh
+install.sh
+run.sh
+stop.sh
+download_models.py
+
+# =============================================================
+# 보안·SBOM
+# =============================================================
+sbom/
+sbom-reports/
+dependency-check-report.*
+*-sbom-*.json
+*-sbom-*.xml
+*-vulnerabilities-*
+owasp-suppressions.xml.backup
+dependency-check-data/
+
+# =============================================================
+# 백업 & 임시 파일
+# =============================================================
+backups/
+backup/
 tmp/
 temp/
 *.tmp
 *.bak
+*.backup
+*.old
 *.swp
-
-# CI/CD
-.github/
-.gitlab-ci.yml
-.travis.yml
-
-# Other
-setup.sh
-run.sh
-download_models.py
-test_query.json
+*.swo
+*~
 tmp.md
-claudedocs/
+cache/
+.cache/
+
+# =============================================================
+# IDE & OS
+# =============================================================
+.vscode/
+.idea/
+*.iml
+.project
+.classpath
+.settings/
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+desktop.ini
+
+# =============================================================
+# MCP & 브라우저 테스트
+# =============================================================
 .playwright-mcp/
+.serena/
+.infinity_cache/
+screenshots/
+
+# =============================================================
+# Node.js (해당 시)
+# =============================================================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+package-lock.json
+yarn.lock
+
+# =============================================================
+# 기타 불필요 파일
+# =============================================================
+*.db
+*.sqlite
+*.sqlite3
+test_query.json
+server_new.log
+server_output.log
+web_server.log

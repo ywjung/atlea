@@ -908,6 +908,19 @@ class GroupManager:
             group_ids_bytes = self.client.smembers('groups:all')
             group_id_list = [gid.decode('utf-8') for gid in group_ids_bytes]
 
+            # Fallback: rebuild index if groups:all is empty but group keys exist
+            if not group_id_list:
+                import re
+                uuid_pattern = re.compile(r'^group:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$')
+                for key in self.client.scan_iter(match='group:*', count=100):
+                    key_str = key.decode('utf-8') if isinstance(key, bytes) else key
+                    m = uuid_pattern.match(key_str)
+                    if m and self.client.type(key) == b'hash':
+                        group_id_list.append(m.group(1))
+                if group_id_list:
+                    self.client.sadd('groups:all', *group_id_list)
+                    logger.warning(f"Rebuilt groups:all index with {len(group_id_list)} groups")
+
         if not group_id_list:
             return []
 

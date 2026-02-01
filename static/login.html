@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>로그인 - AI 챗봇</title>
+    <title>로그인 - ATLEA</title>
     <link rel="stylesheet" href="/static/auth.css">
     <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 
@@ -15,7 +15,7 @@
     <div class="auth-container">
         <div class="auth-header">
             <div class="auth-logo">🤖</div>
-            <h1>AI 챗봇 로그인</h1>
+            <h1>ATLEA 로그인</h1>
             <p>계정에 로그인하여 챗봇을 사용하세요</p>
         </div>
 
@@ -134,9 +134,10 @@
         // 2FA 관련 전역 변수
         let totpRequired = false;
 
-        // 이미 로그인된 경우 메인 페이지로 리다이렉트
+        // 로그인 페이지 접근 시 기존 세션 자동 삭제 (로그아웃 처리)
         if (Auth.isAuthenticated()) {
-            window.location.href = '/';
+            Auth.apiCall('/api/auth/logout', { method: 'POST' }).catch(() => {});
+            Auth.clearAuth();
         }
 
         // URL 파라미터에서 메시지 확인
@@ -147,6 +148,7 @@
             const messageMap = {
                 'all_sessions_revoked': '모든 세션이 종료되었습니다. 다시 로그인해주세요.',
                 'session_expired': '세션이 만료되었습니다. 다시 로그인해주세요.',
+                'session_timeout': '비활성 상태로 인해 자동 로그아웃되었습니다. 다시 로그인해주세요.',
                 'logout': '로그아웃되었습니다.'
             };
 

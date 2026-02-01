@@ -11,7 +11,11 @@ import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 import org.springframework.stereotype.Service;
 
-import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.UUID;
 
 @Slf4j
 @Service
@@ -21,6 +25,7 @@ public class HtmlToHwpxConversionService {
      * Convert HTML content to HWPX format
      */
     public byte[] convertHtmlToHwpx(String htmlContent) {
+        Path tempFile = null;
         try {
             log.info("Starting HTML to HWPX conversion using hwpxlib");
 
@@ -34,16 +39,32 @@ public class HtmlToHwpxConversionService {
             // 3. Process paragraphs and headings
             processElements(doc.body(), section);
 
-            // 4. Write to byte array
-            ByteArrayOutputStream bos = new ByteArrayOutputStream();
-            HWPXWriter.toStream(hwpxFile, bos);
+            // 4. Write to temporary file first (hwpxlib requires file-based output for proper ZIP structure)
+            tempFile = Files.createTempFile("hwpx_" + UUID.randomUUID(), ".hwpx");
+            String tempFilePath = tempFile.toAbsolutePath().toString();
 
-            log.info("Successfully converted HTML to HWPX ({} bytes)", bos.size());
-            return bos.toByteArray();
+            log.debug("Writing HWPX to temp file: {}", tempFilePath);
+            HWPXWriter.toFilepath(hwpxFile, tempFilePath);
+
+            // 5. Read the file back as bytes
+            byte[] hwpxBytes = Files.readAllBytes(tempFile);
+
+            log.info("Successfully converted HTML to HWPX ({} bytes)", hwpxBytes.length);
+            return hwpxBytes;
 
         } catch (Exception e) {
             log.error("Failed to convert HTML to HWPX: {}", e.getMessage(), e);
             throw new RuntimeException("HTML to HWPX conversion failed: " + e.getMessage(), e);
+        } finally {
+            // Clean up temp file
+            if (tempFile != null) {
+                try {
+                    Files.deleteIfExists(tempFile);
+                    log.debug("Cleaned up temp file");
+                } catch (IOException e) {
+                    log.warn("Failed to delete temp file: {}", e.getMessage());
+                }
+            }
         }
     }
 

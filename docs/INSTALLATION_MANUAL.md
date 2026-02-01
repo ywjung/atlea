@@ -1,4 +1,4 @@
-# 📘 RAG 챗봇 시스템 설치 매뉴얼
+# 📘 ATLEA 시스템 설치 매뉴얼
 
 ## 목차
 
@@ -19,17 +19,22 @@
 
 ## 시스템 개요
 
-### RAG 챗봇이란?
+### ATLEA란?
 
-RAG (Retrieval-Augmented Generation) 챗봇은 업로드된 문서에서 정보를 검색하고, AI를 활용하여 자연어로 질문에 답변하는 지능형 시스템입니다.
+ATLEA는 업로드된 문서에서 정보를 검색하고, AI를 활용하여 자연어로 질문에 답변하는 지능형 시스템입니다.
 
 ### 주요 기능
 
-- **📄 다중 문서 형식 지원**: PDF, HWP, HWPX, DOC, DOCX, XLS, XLSX, PPT, PPTX, TXT (총 11가지)
-- **🤖 고성능 AI 모델**: Qwen3 30B LLM + KURE-v1 한국어 특화 임베딩
-- **🔍 의미 기반 검색**: 벡터 DB를 활용한 빠르고 정확한 문서 검색
+- **📄 다중 문서 형식 지원**: PDF, HWP, HWPX, DOC, DOCX, XLS, XLSX, PPT, PPTX, TXT, HTML (총 11가지)
+- **🤖 고성능 AI 모델**: Qwen3 30B LLM + KURE-v1 한국어 특화 임베딩 (MLX/CUDA/Ollama 멀티 백엔드)
+- **🔍 Hybrid RAG 검색**: 벡터 DB 문서 검색 + 실시간 웹 검색 (SearXNG/Crawl4AI/Tavily)
 - **💬 실시간 대화**: 스트리밍 방식의 자연스러운 답변 생성
-- **📊 문서 그룹 관리**: 계층적 문서 분류 및 관리
+- **🔊 TTS 음성 합성**: Edge TTS(클라우드) / Qwen3 모델(로컬) 기반 텍스트 음성 변환
+- **📊 문서 그룹 관리**: 계층적 문서 분류 및 관리, 문서 버전 관리
+- **🏢 조직 관리**: 멀티테넌트 조직 단위 문서 격리 및 접근제어
+- **🔐 2FA/TOTP 다중 인증**: Google Authenticator 호환 TOTP 기반 이중 인증
+- **🛡️ CAPTCHA**: 자체 호스팅 이미지 기반 봇 방지 (로그인/회원가입)
+- **📋 감사 로그**: 17가지 액션 유형 추적, 90일 보관
 - **🎨 직관적 웹 UI**: 반응형 디자인, 다크 모드 지원
 
 ### 시스템 구성 요소
@@ -42,16 +47,19 @@ RAG (Retrieval-Augmented Generation) 챗봇은 업로드된 문서에서 정보�
                ▼
 ┌─────────────────────────────────────┐
 │   FastAPI 서버 (Python)             │
-│   • RAG 파이프라인                  │
-│   • AI 모델 관리                    │
-│   • API 엔드포인트                  │
-└──────────┬──────────┬───────────────┘
-           │          │
-           ▼          ▼
-   ┌──────────┐  ┌──────────────┐
-   │  Redis   │  │ Java 문서     │
-   │ Vector DB│  │ 처리 서비스   │
-   └──────────┘  └──────────────┘
+│   • Hybrid RAG 파이프라인           │
+│   • AI 모델 관리 (MLX/Ollama)       │
+│   • API 엔드포인트 (168개)          │
+│   • 인증/2FA/감사 로그              │
+└──┬──────┬──────┬──────┬─────────────┘
+   │      │      │      │
+   ▼      ▼      ▼      ▼
+┌──────┐┌──────┐┌──────┐┌──────────────┐
+│Redis ││Java  ││Searx ││  Ollama      │
+│Vector││문서  ││NG +  ││  LLM 서버    │
+│  DB  ││서비스││Crawl ││  (선택사항)   │
+│      ││      ││4AI   ││              │
+└──────┘└──────┘└──────┘└──────────────┘
 ```
 
 ---
@@ -91,11 +99,14 @@ RAG (Retrieval-Augmented Generation) 챗봇은 업로드된 문서에서 정보�
 
 | 포트 | 서비스 | 용도 |
 |------|--------|------|
-| 8000 | 챗봇 애플리케이션 | 웹 UI 및 API |
+| 8000 | ATLEA 애플리케이션 | 웹 UI 및 API |
 | 6379 | Redis | Vector DB |
 | 8001 | RedisInsight | Redis 관리 UI (선택) |
 | 8081 | 문서 처리 서비스 | 문서 텍스트 추출 |
 | 8082 | 관리 포트 | 메트릭 및 헬스체크 |
+| 8888 | SearXNG | 메타 검색 엔진 (선택) |
+| 11235 | Crawl4AI | 웹 콘텐츠 추출 (선택) |
+| 11434 | Ollama | LLM 서버 (선택) |
 
 ---
 
@@ -213,7 +224,7 @@ chmod +x install.sh
 http://localhost:8000
 ```
 
-정상적으로 챗봇 웹 UI가 표시되면 설치 성공입니다! 🎉
+정상적으로 ATLEA 웹 UI가 표시되면 설치 성공입니다! 🎉
 
 ---
 
@@ -362,6 +373,33 @@ docker-compose -f docker-compose.full.yml restart chatbot-app
    - 아이콘: 이모지 선택
 4. 저장
 
+### 2FA (이중 인증) 설정
+
+시스템 보안 강화를 위해 2FA 설정을 권장합니다.
+
+1. **개인 2FA 설정**:
+   - 프로필 페이지에서 "2FA 설정" 클릭
+   - QR 코드를 Google Authenticator 등으로 스캔
+   - 6자리 인증 코드 입력하여 활성화
+
+2. **전체 사용자 2FA 강제 적용** (관리자):
+   - 관리자 페이지 → "보안 설정"
+   - "2FA 강제 적용" 활성화
+   - 활성화 시 모든 사용자가 다음 로그인 시 2FA 설정 필요
+
+### 조직 생성 (선택사항)
+
+멀티테넌트 환경에서 문서를 조직 단위로 격리할 수 있습니다.
+
+1. 관리자 페이지 → "조직 관리" 클릭
+2. "조직 추가" 클릭
+3. 조직 정보 입력:
+   - 조직 이름
+   - 설명
+4. 조직 멤버 추가:
+   - 멤버 이메일로 검색하여 추가
+   - 역할 지정: 조직 관리자(org_admin) 또는 멤버(member)
+
 ### 시스템 설정 확인
 
 1. 우측 상단 사용자 메뉴 → "설정" 클릭
@@ -370,6 +408,8 @@ docker-compose -f docker-compose.full.yml restart chatbot-app
    - **생성 설정**: Temperature (기본 0.7), Max Tokens (기본 2048)
    - **UI 설정**: 테마, 폰트 크기
    - **보안 설정**: 비밀번호 변경, 2FA 설정
+   - **웹 검색 설정**: 검색 프로바이더 선택 (SearXNG/Tavily)
+   - **TTS 설정**: 음성 합성 엔진 선택 (Edge TTS/Qwen3)
 
 ---
 
@@ -768,6 +808,28 @@ sudo ufw allow 443/tcp
 sudo ufw enable
 ```
 
+### 2FA 강제 적용
+
+프로덕션 환경에서는 모든 사용자에게 2FA를 강제 적용하는 것을 권장합니다.
+
+```bash
+# 관리자 페이지에서 설정하거나, Redis에서 직접 설정
+docker exec rag_chatbot_redis redis-cli SET config:totp_enabled true
+```
+
+### CAPTCHA 설정
+
+봇 방지를 위해 로그인/회원가입에 CAPTCHA를 활성화합니다.
+
+```bash
+# 관리자 페이지에서 설정하거나, Redis에서 직접 설정
+# 로그인 CAPTCHA 활성화
+docker exec rag_chatbot_redis redis-cli SET config:captcha_login_enabled true
+
+# 회원가입 CAPTCHA 활성화
+docker exec rag_chatbot_redis redis-cli SET config:captcha_register_enabled true
+```
+
 ### 데이터베이스 보안
 
 ```bash
@@ -851,6 +913,11 @@ EMBEDDING_MODEL=nlpai-lab/KURE-v1
 LLM_MODEL=mlx-community/Qwen3-30B-A3B-4bit
 MODEL_DIR=/app/model
 
+# Ollama (선택사항 - Ollama 백엔드 사용 시)
+OLLAMA_BASE_URL=http://localhost:11434  # Ollama 서버 주소
+OLLAMA_LLM_MODEL=alibayram/Qwen3-30B-A3B-Instruct-2507:latest
+OLLAMA_EMBEDDING_MODEL=                # Ollama 임베딩 모델 (선택)
+
 # 애플리케이션
 DATA_DIR=/app/data
 CHUNK_SIZE=512
@@ -868,11 +935,22 @@ JWT_ALGORITHM=HS256
 JWT_ACCESS_TOKEN_EXPIRE_MINUTES=60
 JWT_REFRESH_TOKEN_EXPIRE_DAYS=7
 
+# 웹 검색 (Hybrid RAG)
+SEARXNG_URL=http://localhost:8888      # SearXNG 자체 호스팅 URL
+CRAWL4AI_API_TOKEN=                    # Crawl4AI API 토큰 (선택)
+TAVILY_API_KEY=                        # Tavily API 키 (선택)
+
 # 성능
 RATE_LIMIT_ENABLED=true
 RATE_LIMIT_PER_MINUTE=60
 RATE_LIMIT_BURST=10
+
+# CORS
+CORS_ORIGINS=http://localhost:8000     # 프로덕션에서는 실제 도메인으로 변경
 ```
+
+> **참고**: 2FA, CAPTCHA, TTS, 감사 로그, Brute Force 방어 등의 보안/기능 설정은 관리자 웹 UI 또는 Redis 설정 키로 관리됩니다.
+> 주요 Redis 설정 키: `config:totp_enabled`, `config:captcha_login_enabled`, `config:captcha_register_enabled`, `config:tts`, `config:bf_*`
 
 ### C. 유용한 명령어 모음
 
@@ -910,6 +988,6 @@ docker volume prune
 
 ---
 
-**마지막 업데이트**: 2026-01-02
-**문서 버전**: 1.0.0
-**제품 버전**: 1.0.0
+**마지막 업데이트**: 2026-01-30
+**문서 버전**: 2.5.0
+**제품 버전**: 2.5.0

@@ -1,30 +1,44 @@
-<!-- CACHE BUSTER: 2025-12-28-REALTIME-ALERTS-WEBSOCKET -->
+<!-- CACHE BUSTER: 2026-01-26-THEME-FIX-v6 -->
 <!DOCTYPE html>
 <html lang="ko">
 <head>
+    <script>
+    // Apply saved theme immediately to prevent flash
+    (function() {
+        var saved = localStorage.getItem('admin-theme');
+        if (saved === 'dark') {
+            document.documentElement.setAttribute('data-theme', 'dark');
+        }
+    })();
+    </script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="environment" content="production">
-    <title>관리자 대시보드 - AI 챗봇</title>
+    <title>관리자 대시보드 - ATLEA</title>
     <link rel="stylesheet" href="/static/auth.css">
     <link rel="icon" href="/favicon.svg" type="image/svg+xml">
     <!-- Admin Dashboard Redesign CSS -->
-    <link rel="stylesheet" href="/static/admin/css/admin-core.css">
-    <link rel="stylesheet" href="/static/admin/css/admin-components.css">
-    <link rel="stylesheet" href="/static/admin/css/admin-tables.css">
-    <link rel="stylesheet" href="/static/admin/css/admin-charts.css">
-    <link rel="stylesheet" href="/static/admin/css/admin-themes.css">
-    <link rel="stylesheet" href="/static/admin/css/admin-responsive.css">
+    <link rel="stylesheet" href="/static/admin/css/admin-core.css?v=20260126">
+    <link rel="stylesheet" href="/static/admin/css/admin-components.css?v=20260126">
+    <link rel="stylesheet" href="/static/admin/css/admin-tables.css?v=20260126">
+    <link rel="stylesheet" href="/static/admin/css/admin-charts.css?v=20260126">
+    <link rel="stylesheet" href="/static/admin/css/admin-themes.css?v=20260131">
+    <link rel="stylesheet" href="/static/admin/css/admin-responsive.css?v=20260126">
     <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <style>
+        /* Light theme (default) */
         body {
-            background: var(--bg-body, linear-gradient(135deg, #667eea 0%, #764ba2 100%));
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             transition: background 0.3s ease;
         }
+        .admin-container {
+            background: white;
+        }
+
+        /* Dark theme is fully managed in admin-themes.css */
 
         .admin-container {
-            background: var(--bg-card, white);
             border-radius: 10px;
             box-shadow: var(--shadow-card, 0 10px 40px rgba(0,0,0,0.2));
             max-width: 1400px;
@@ -267,6 +281,48 @@
 
         .tab-content.active {
             display: block;
+        }
+
+        /* Settings Sub-tabs */
+        .settings-subtabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 24px;
+            border-bottom: 2px solid var(--border-color, #e5e7eb);
+            padding-bottom: 0;
+        }
+        .settings-subtab {
+            padding: 10px 20px;
+            border: none;
+            background: none;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-secondary, #6b7280);
+            border-bottom: 3px solid transparent;
+            margin-bottom: -2px;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+        .settings-subtab:hover {
+            color: var(--text-primary, #374151);
+            background: var(--bg-muted, #f9fafb);
+            border-radius: 6px 6px 0 0;
+        }
+        .settings-subtab.active {
+            color: var(--brand-primary, #667eea);
+            border-bottom-color: var(--brand-primary, #667eea);
+        }
+        .settings-card[data-settings-group] {
+            display: none;
+        }
+        .settings-card[data-settings-group].settings-visible {
+            display: block;
+        }
+
+        /* Search mode radio labels */
+        .search-mode-label:hover {
+            background: var(--bg-muted, #f9fafb) !important;
         }
 
         /* Stats Grid */
@@ -1082,6 +1138,18 @@
             }
         }
 
+        .spinner-inline {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 2px solid rgba(59, 130, 246, 0.3);
+            border-top-color: #3b82f6;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            vertical-align: middle;
+            margin-right: 4px;
+        }
+
         /* Toggle Switch */
         .switch {
             position: relative;
@@ -1425,36 +1493,950 @@
                     <span class="icon-moon" style="display: none;">🌙</span>
                 </button>
                 <script>
-                document.getElementById('themeToggleBtn').addEventListener('click', function(e) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    if (typeof AdminThemes !== 'undefined') {
-                        AdminThemes.toggle();
+                // Apply dark theme styles directly via JavaScript
+                function applyThemeStyles(isDark) {
+                    var container = document.querySelector('.admin-container');
+                    var header = document.querySelector('.admin-header');
+                    var headerP = header ? header.querySelector('p') : null;
+                    var themeBtn = document.getElementById('themeToggleBtn');
+                    var userInfo = document.querySelector('.user-info');
+
+                    if (isDark) {
+                        // Dark theme
+                        document.body.style.background = '#0f172a';
+                        if (container) container.style.background = '#1e293b';
+                        if (header) header.style.background = '#1e293b';
+                        if (headerP) headerP.style.color = '#94a3b8';
+                        if (themeBtn) {
+                            themeBtn.style.background = '#334155';
+                            themeBtn.style.borderColor = '#475569';
+                        }
+                        if (userInfo) {
+                            userInfo.querySelectorAll('p, strong, small').forEach(function(el) {
+                                el.style.color = '#f1f5f9';
+                            });
+                        }
+                        document.querySelectorAll('.btn-secondary').forEach(function(btn) {
+                            btn.style.background = '#475569';
+                            btn.style.color = '#f1f5f9';
+                            btn.style.border = '2px solid #64748b';
+                        });
+
+                        // Tab contents
+                        document.querySelectorAll('.tab-content').forEach(function(el) {
+                            el.style.background = '#1e293b';
+                            el.style.color = '#f1f5f9';
+                        });
+
+                        // Tabs - styled via CSS only (admin-themes.css)
+                        // Clear any existing inline styles on tabs
+                        document.querySelectorAll('.tabs').forEach(function(el) {
+                            el.style.background = '';
+                            el.style.borderColor = '';
+                        });
+                        document.querySelectorAll('.tab, .tab-dropdown-toggle').forEach(function(el) {
+                            el.style.background = '';
+                            el.style.color = '';
+                            el.style.borderColor = '';
+                        });
+
+                        // Section headers (h2, h3)
+                        document.querySelectorAll('.tab-content h2, .tab-content h3').forEach(function(el) {
+                            el.style.color = '#f1f5f9';
+                        });
+
+                        // All paragraphs and labels in tab content
+                        document.querySelectorAll('.tab-content p, .tab-content label').forEach(function(el) {
+                            if (!el.closest('#passwordResetMethodWarning') && !el.closest('#smtpStatusSection') && !el.closest('#passwordResetMethodSuccess')) {
+                                el.style.color = '#cbd5e1';
+                            }
+                        });
+
+                        // Password reset method section (blue card -> dark card)
+                        var pwResetSection = document.getElementById('passwordResetMethodSection');
+                        if (pwResetSection) {
+                            pwResetSection.style.background = '#334155';
+                            pwResetSection.style.borderColor = '#475569';
+                            pwResetSection.querySelectorAll('h3, p').forEach(function(el) {
+                                el.style.color = '#f1f5f9';
+                            });
+                        }
+                        // Radio button labels
+                        document.querySelectorAll('input[name="passwordResetMethod"]').forEach(function(input) {
+                            var label = input.closest('label');
+                            if (label) {
+                                label.style.background = '#1e293b';
+                                label.style.borderColor = '#475569';
+                                label.querySelectorAll('div').forEach(function(div) {
+                                    div.style.color = '#f1f5f9';
+                                });
+                            }
+                        });
+
+                        // Warning boxes (yellow -> dark amber)
+                        var warning = document.getElementById('passwordResetMethodWarning');
+                        if (warning) {
+                            warning.style.background = '#78350f';
+                            warning.style.borderColor = '#92400e';
+                            warning.style.color = '#fef3c7';
+                        }
+
+                        // Success/status boxes (green -> dark green)
+                        var smtpStatus = document.getElementById('smtpStatusSection');
+                        if (smtpStatus) {
+                            smtpStatus.style.background = '#14532d';
+                            smtpStatus.style.borderColor = '#166534';
+                            smtpStatus.style.color = '#bbf7d0';
+                        }
+                        var pwSuccess = document.getElementById('passwordResetMethodSuccess');
+                        if (pwSuccess) {
+                            pwSuccess.style.background = '#14532d';
+                            pwSuccess.style.borderColor = '#166534';
+                            pwSuccess.style.color = '#bbf7d0';
+                        }
+
+                        // Admin password reset section (gray card -> dark card)
+                        var adminPwSection = document.getElementById('adminPasswordResetSection');
+                        if (adminPwSection) {
+                            adminPwSection.style.background = '#334155';
+                            adminPwSection.querySelectorAll('h3, p, label').forEach(function(el) {
+                                el.style.color = '#f1f5f9';
+                            });
+                        }
+
+                        // SMTP settings section (light blue card -> dark card)
+                        var smtpSection = document.getElementById('smtpSettingsSection');
+                        if (smtpSection) {
+                            smtpSection.style.background = '#334155';
+                            smtpSection.style.borderColor = '#475569';
+                            smtpSection.querySelectorAll('h3, p, label').forEach(function(el) {
+                                el.style.color = '#f1f5f9';
+                            });
+                        }
+
+                        // All input fields
+                        document.querySelectorAll('input[type="text"], input[type="email"], input[type="password"], input[type="number"], select, textarea').forEach(function(el) {
+                            el.style.background = '#1e293b';
+                            el.style.color = '#f1f5f9';
+                            el.style.borderColor = '#475569';
+                        });
+
+                        // Tables
+                        document.querySelectorAll('table').forEach(function(table) {
+                            table.style.background = '#1e293b';
+                            table.style.color = '#f1f5f9';
+                        });
+                        document.querySelectorAll('th').forEach(function(el) {
+                            el.style.background = '#334155';
+                            el.style.color = '#f1f5f9';
+                            el.style.borderColor = '#475569';
+                        });
+                        document.querySelectorAll('td').forEach(function(el) {
+                            el.style.background = '#1e293b';
+                            el.style.color = '#f1f5f9';
+                            el.style.borderColor = '#475569';
+                        });
+
+                        // Alert banner (system alert)
+                        var alertBanner = document.getElementById('system-alert-banner');
+                        if (alertBanner) {
+                            alertBanner.style.background = '#78350f';
+                            alertBanner.style.borderColor = '#92400e';
+                        }
+
+                        // Cards and stats
+                        document.querySelectorAll('.stat-card, .card').forEach(function(el) {
+                            el.style.background = '#334155';
+                            el.style.borderColor = '#475569';
+                            el.querySelectorAll('h3, h4, p, span, small').forEach(function(child) {
+                                child.style.color = '#f1f5f9';
+                            });
+                        });
+
+                        // Card headers
+                        document.querySelectorAll('.card-header').forEach(function(el) {
+                            el.style.background = '#334155';
+                            el.style.borderColor = '#475569';
+                        });
+
+                        // Card bodies
+                        document.querySelectorAll('.card-body').forEach(function(el) {
+                            el.style.background = '#334155';
+                        });
+
+                        // Gray background sections inside cards (forms, lists)
+                        document.querySelectorAll('[style*="background: #f9fafb"], [style*="background:#f9fafb"]').forEach(function(el) {
+                            el.style.background = '#1e293b';
+                        });
+
+                        // Group details section
+                        var groupDetailsEmpty = document.getElementById('adminGroupDetailsEmpty');
+                        if (groupDetailsEmpty) {
+                            groupDetailsEmpty.style.color = '#94a3b8';
+                        }
+                        var groupDetailsContent = document.getElementById('adminGroupDetailsContent');
+                        if (groupDetailsContent) {
+                            groupDetailsContent.querySelectorAll('label').forEach(function(el) {
+                                el.style.color = '#f1f5f9';
+                            });
+                            groupDetailsContent.querySelectorAll('h4').forEach(function(el) {
+                                el.style.color = '#f1f5f9';
+                            });
+                        }
+                        var groupDocsList = document.getElementById('adminGroupDocsList');
+                        if (groupDocsList) {
+                            groupDocsList.style.background = '#1e293b';
+                            groupDocsList.querySelectorAll('div').forEach(function(el) {
+                                if (el.style.color === 'rgb(102, 102, 102)' || el.style.color === '#666') {
+                                    el.style.color = '#94a3b8';
+                                }
+                            });
+                        }
+
+                        // Organization details section
+                        var orgDetailsPanel = document.getElementById('orgDetailsPanel');
+                        if (orgDetailsPanel) {
+                            orgDetailsPanel.querySelectorAll('label').forEach(function(el) {
+                                el.style.color = '#f1f5f9';
+                            });
+                            orgDetailsPanel.querySelectorAll('h4').forEach(function(el) {
+                                el.style.color = '#f1f5f9';
+                            });
+                            orgDetailsPanel.querySelectorAll('span').forEach(function(el) {
+                                if (el.style.color === 'rgb(55, 65, 81)' || el.style.color === '#374151') {
+                                    el.style.color = '#f1f5f9';
+                                }
+                            });
+                            // Form background
+                            orgDetailsPanel.querySelectorAll('div').forEach(function(el) {
+                                if (el.style.background === 'rgb(249, 250, 251)' || el.style.background === '#f9fafb') {
+                                    el.style.background = '#1e293b';
+                                }
+                            });
+                        }
+
+                        // Organization stats boxes
+                        document.querySelectorAll('[style*="background: #f0f9ff"]').forEach(function(el) {
+                            el.style.background = '#1e3a5f';
+                        });
+                        document.querySelectorAll('[style*="background: #fef3c7"]').forEach(function(el) {
+                            el.style.background = '#78350f';
+                        });
+                        document.querySelectorAll('[style*="background: #f0fdf4"]').forEach(function(el) {
+                            el.style.background = '#14532d';
+                        });
+
+                        // Organization members list
+                        var orgMembersList = document.getElementById('orgMembersList');
+                        if (orgMembersList) {
+                            orgMembersList.style.background = '#1e293b';
+                            orgMembersList.style.borderColor = '#475569';
+                            orgMembersList.querySelectorAll('div').forEach(function(el) {
+                                if (el.style.color === 'rgb(102, 102, 102)' || el.style.color === '#666') {
+                                    el.style.color = '#94a3b8';
+                                }
+                            });
+                        }
+
+                        // Organization admins list
+                        var orgAdminsList = document.getElementById('orgAdminsList');
+                        if (orgAdminsList) {
+                            orgAdminsList.style.background = '#78350f';
+                            orgAdminsList.style.borderColor = '#92400e';
+                            orgAdminsList.querySelectorAll('div').forEach(function(el) {
+                                if (el.style.color === 'rgb(102, 102, 102)' || el.style.color === '#666') {
+                                    el.style.color = '#fef3c7';
+                                }
+                            });
+                        }
+
+                        // Organization groups list
+                        var orgGroupsList = document.getElementById('orgGroupsList');
+                        if (orgGroupsList) {
+                            orgGroupsList.style.background = '#1e293b';
+                            orgGroupsList.style.borderColor = '#475569';
+                            orgGroupsList.querySelectorAll('div').forEach(function(el) {
+                                if (el.style.color === 'rgb(102, 102, 102)' || el.style.color === '#666') {
+                                    el.style.color = '#94a3b8';
+                                }
+                            });
+                        }
+
+                        // Group tree loading/empty messages
+                        var groupTree = document.getElementById('adminGroupTree');
+                        if (groupTree) {
+                            groupTree.querySelectorAll('div').forEach(function(el) {
+                                if (el.style.color === 'rgb(102, 102, 102)' || el.style.color === '#666') {
+                                    el.style.color = '#94a3b8';
+                                }
+                            });
+                        }
+
+                        // Organization list loading/empty messages
+                        var orgListContainer = document.getElementById('orgListContainer');
+                        if (orgListContainer) {
+                            orgListContainer.querySelectorAll('div').forEach(function(el) {
+                                if (el.style.color === 'rgb(102, 102, 102)' || el.style.color === '#666') {
+                                    el.style.color = '#94a3b8';
+                                }
+                            });
+                        }
+
+                        // Pagination
+                        document.querySelectorAll('.pagination button').forEach(function(btn) {
+                            btn.style.background = '#334155';
+                            btn.style.color = '#f1f5f9';
+                            btn.style.borderColor = '#475569';
+                        });
+                        document.querySelectorAll('.page-info').forEach(function(el) {
+                            el.style.color = '#f1f5f9';
+                        });
+
+                        // Performance Metrics Tab
+                        var perfMetricsTab = document.getElementById('performance-metrics-tab');
+                        if (perfMetricsTab) {
+                            // Metric cards (white background -> dark)
+                            perfMetricsTab.querySelectorAll('div[style*="background: white"]').forEach(function(el) {
+                                el.style.background = '#334155';
+                                el.style.boxShadow = '0 1px 3px rgba(0,0,0,0.3)';
+                            });
+                            // Text colors
+                            perfMetricsTab.querySelectorAll('div[style*="color: #666"]').forEach(function(el) {
+                                el.style.color = '#94a3b8';
+                            });
+                            perfMetricsTab.querySelectorAll('div[style*="color: #1f2937"]').forEach(function(el) {
+                                el.style.color = '#f1f5f9';
+                            });
+                            // Headers
+                            perfMetricsTab.querySelectorAll('h2, h3').forEach(function(el) {
+                                el.style.color = '#f1f5f9';
+                            });
+                            perfMetricsTab.querySelectorAll('p').forEach(function(el) {
+                                if (el.style.color === 'rgb(102, 102, 102)' || el.style.color === '#666') {
+                                    el.style.color = '#94a3b8';
+                                }
+                            });
+                            // Source performance boxes
+                            perfMetricsTab.querySelectorAll('div[style*="background: #f9fafb"]').forEach(function(el) {
+                                el.style.background = '#1e293b';
+                            });
+                            perfMetricsTab.querySelectorAll('div[style*="background: #f0f9ff"]').forEach(function(el) {
+                                el.style.background = '#1e3a5f';
+                            });
+                            perfMetricsTab.querySelectorAll('div[style*="background: #fef3c7"]').forEach(function(el) {
+                                el.style.background = '#78350f';
+                            });
+                            // Table header
+                            perfMetricsTab.querySelectorAll('tr[style*="background: #f9fafb"]').forEach(function(el) {
+                                el.style.background = '#334155';
+                            });
+                            perfMetricsTab.querySelectorAll('th').forEach(function(el) {
+                                el.style.color = '#f1f5f9';
+                            });
+                            perfMetricsTab.querySelectorAll('td').forEach(function(el) {
+                                el.style.color = '#cbd5e1';
+                            });
+                        }
+
+                        // Login History Tab
+                        var loginHistoryTab = document.getElementById('login-history-tab');
+                        if (loginHistoryTab) {
+                            // Filter controls background
+                            loginHistoryTab.querySelectorAll('div[style*="background: #f8f9fa"]').forEach(function(el) {
+                                el.style.background = '#334155';
+                            });
+                            // Labels
+                            loginHistoryTab.querySelectorAll('label').forEach(function(el) {
+                                el.style.color = '#f1f5f9';
+                            });
+                            // Select elements
+                            loginHistoryTab.querySelectorAll('select').forEach(function(el) {
+                                el.style.background = '#1e293b';
+                                el.style.color = '#f1f5f9';
+                                el.style.borderColor = '#475569';
+                            });
+                            // Stats section (light blue -> dark blue)
+                            var statsDiv = document.getElementById('loginHistoryStats');
+                            if (statsDiv) {
+                                statsDiv.style.background = '#1e3a5f';
+                                statsDiv.querySelectorAll('span').forEach(function(el) {
+                                    if (!el.style.color || el.style.color === '') {
+                                        el.style.color = '#f1f5f9';
+                                    }
+                                });
+                            }
+                            // Table
+                            var historyTable = document.getElementById('loginHistoryTable');
+                            if (historyTable) {
+                                historyTable.style.background = '#1e293b';
+                                historyTable.querySelectorAll('th').forEach(function(el) {
+                                    el.style.background = '#334155';
+                                    el.style.color = '#f1f5f9';
+                                    el.style.borderColor = '#475569';
+                                });
+                                historyTable.querySelectorAll('td').forEach(function(el) {
+                                    el.style.background = '#1e293b';
+                                    el.style.color = '#cbd5e1';
+                                    el.style.borderColor = '#475569';
+                                });
+                            }
+                            // Pagination
+                            var pagination = document.getElementById('loginHistoryPagination');
+                            if (pagination) {
+                                pagination.querySelectorAll('button').forEach(function(btn) {
+                                    btn.style.background = '#334155';
+                                    btn.style.color = '#f1f5f9';
+                                    btn.style.borderColor = '#475569';
+                                });
+                                pagination.querySelectorAll('span').forEach(function(el) {
+                                    el.style.color = '#f1f5f9';
+                                });
+                            }
+                        }
+
+                        // Modals (all modals including assignGroupModal, addMemberModal, etc.)
+                        document.querySelectorAll('.modal-content').forEach(function(el) {
+                            el.style.background = '#1e293b';
+                            el.style.color = '#f1f5f9';
+                        });
+                        document.querySelectorAll('.modal-header').forEach(function(el) {
+                            el.style.background = '#334155';
+                            el.style.borderColor = '#475569';
+                            el.querySelectorAll('h2, h3').forEach(function(h) {
+                                h.style.color = '#f1f5f9';
+                            });
+                        });
+                        document.querySelectorAll('.modal-body').forEach(function(el) {
+                            el.style.background = '#1e293b';
+                            el.querySelectorAll('p, label, span').forEach(function(child) {
+                                child.style.color = '#cbd5e1';
+                            });
+                            el.querySelectorAll('label').forEach(function(lbl) {
+                                lbl.style.color = '#f1f5f9';
+                            });
+                        });
+                        document.querySelectorAll('.modal-footer').forEach(function(el) {
+                            el.style.background = '#334155';
+                            el.style.borderColor = '#475569';
+                        });
+                        // Modal close button
+                        document.querySelectorAll('.modal-close').forEach(function(el) {
+                            el.style.color = '#94a3b8';
+                        });
+                        // Target org display in assign group modal
+                        var targetOrgDisplay = document.getElementById('targetOrgDisplay');
+                        if (targetOrgDisplay) {
+                            targetOrgDisplay.style.background = '#334155';
+                            targetOrgDisplay.style.color = '#f1f5f9';
+                        }
+                        // Assign group info box
+                        var assignGroupInfo = document.getElementById('assignGroupInfo');
+                        if (assignGroupInfo) {
+                            assignGroupInfo.style.background = '#1e3a5f';
+                            assignGroupInfo.style.borderColor = '#0ea5e9';
+                            assignGroupInfo.querySelectorAll('p').forEach(function(p) {
+                                p.style.color = '#7dd3fc';
+                            });
+                        }
+
+                        // Re-apply Hybrid RAG status badges for dark mode
+                        // (card span override at line 1651 resets their colors)
+                        if (typeof updateHybridRagStatus === 'function') {
+                            var ragToggle = document.getElementById('hybridRagToggle');
+                            if (ragToggle) updateHybridRagStatus(ragToggle.checked);
+                        }
+                        if (typeof updateTavilyStatus === 'function') {
+                            var tavilyEl = document.getElementById('tavilyConfigStatus');
+                            if (tavilyEl) updateTavilyStatus(tavilyEl.textContent.includes('설정 완료'));
+                        }
+                        if (typeof updateContext7Status === 'function') {
+                            var ctx7El = document.getElementById('context7ConfigStatus');
+                            if (ctx7El) updateContext7Status(ctx7El.textContent.includes('설정 완료'));
+                        }
+                        if (typeof updateSearxngStatus === 'function') {
+                            var sxngEl = document.getElementById('searxngConfigStatus');
+                            if (sxngEl) updateSearxngStatus(sxngEl.textContent.includes('설정 완료'));
+                        }
+
                     } else {
-                        // Fallback: toggle data-theme directly with forced repaint
-                        var html = document.documentElement;
-                        var body = document.body;
-                        var current = html.getAttribute('data-theme') || 'light';
-                        var newTheme = current === 'light' ? 'dark' : 'light';
+                        // Light theme - reset all styles
+                        document.body.style.background = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+                        if (container) container.style.background = 'white';
+                        if (header) header.style.background = 'white';
+                        if (headerP) headerP.style.color = '#666';
+                        if (themeBtn) {
+                            themeBtn.style.background = '#fff';
+                            themeBtn.style.borderColor = '#e2e8f0';
+                        }
+                        if (userInfo) {
+                            userInfo.querySelectorAll('p, strong, small').forEach(function(el) {
+                                el.style.color = '#333';
+                            });
+                        }
+                        document.querySelectorAll('.btn-secondary').forEach(function(btn) {
+                            btn.style.background = '#6c757d';
+                            btn.style.color = '#fff';
+                            btn.style.border = '1px solid #6c757d';
+                        });
 
-                        html.setAttribute('data-theme', newTheme);
-                        body.setAttribute('data-theme', newTheme);
-                        localStorage.setItem('admin-theme', newTheme);
+                        // Tab contents
+                        document.querySelectorAll('.tab-content').forEach(function(el) {
+                            el.style.background = '';
+                            el.style.color = '';
+                        });
 
-                        // Force repaint: hide and show body
-                        body.style.display = 'none';
-                        void body.offsetHeight;
-                        body.style.display = '';
+                        // Tabs
+                        document.querySelectorAll('.tabs').forEach(function(el) {
+                            el.style.background = '';
+                            el.style.borderColor = '';
+                        });
+                        document.querySelectorAll('.tab').forEach(function(el) {
+                            el.style.background = '';
+                            el.style.color = '';
+                            el.style.borderColor = '';
+                        });
+                        document.querySelectorAll('.tab-dropdown-toggle').forEach(function(el) {
+                            el.style.background = '';
+                            el.style.color = '';
+                        });
+
+                        // Section headers
+                        document.querySelectorAll('.tab-content h2, .tab-content h3').forEach(function(el) {
+                            el.style.color = '';
+                        });
+
+                        // All paragraphs and labels
+                        document.querySelectorAll('.tab-content p, .tab-content label').forEach(function(el) {
+                            el.style.color = '';
+                        });
+
+                        // Password reset method section
+                        var pwResetSection = document.getElementById('passwordResetMethodSection');
+                        if (pwResetSection) {
+                            pwResetSection.style.background = '#e3f2fd';
+                            pwResetSection.style.borderColor = '#2196f3';
+                            pwResetSection.querySelectorAll('h3, p').forEach(function(el) {
+                                el.style.color = '';
+                            });
+                        }
+                        document.querySelectorAll('input[name="passwordResetMethod"]').forEach(function(input) {
+                            var label = input.closest('label');
+                            if (label) {
+                                label.style.background = 'white';
+                                label.style.borderColor = '#ddd';
+                                label.querySelectorAll('div').forEach(function(div) {
+                                    div.style.color = '';
+                                });
+                            }
+                        });
+
+                        // Warning boxes
+                        var warning = document.getElementById('passwordResetMethodWarning');
+                        if (warning) {
+                            warning.style.background = '#fff3cd';
+                            warning.style.borderColor = '#ffc107';
+                            warning.style.color = '#856404';
+                        }
+
+                        // Success/status boxes
+                        var smtpStatus = document.getElementById('smtpStatusSection');
+                        if (smtpStatus) {
+                            smtpStatus.style.background = '#d4edda';
+                            smtpStatus.style.borderColor = '#c3e6cb';
+                            smtpStatus.style.color = '#155724';
+                        }
+                        var pwSuccess = document.getElementById('passwordResetMethodSuccess');
+                        if (pwSuccess) {
+                            pwSuccess.style.background = '#d4edda';
+                            pwSuccess.style.borderColor = '#c3e6cb';
+                            pwSuccess.style.color = '#155724';
+                        }
+
+                        // Admin password reset section
+                        var adminPwSection = document.getElementById('adminPasswordResetSection');
+                        if (adminPwSection) {
+                            adminPwSection.style.background = '#f8f9fa';
+                            adminPwSection.querySelectorAll('h3, p, label').forEach(function(el) {
+                                el.style.color = '';
+                            });
+                        }
+
+                        // SMTP settings section
+                        var smtpSection = document.getElementById('smtpSettingsSection');
+                        if (smtpSection) {
+                            smtpSection.style.background = '#f0f7ff';
+                            smtpSection.style.borderColor = '#2196f3';
+                            smtpSection.querySelectorAll('h3, p, label').forEach(function(el) {
+                                el.style.color = '';
+                            });
+                        }
+
+                        // All input fields
+                        document.querySelectorAll('input[type="text"], input[type="email"], input[type="password"], input[type="number"], select, textarea').forEach(function(el) {
+                            el.style.background = '';
+                            el.style.color = '';
+                            el.style.borderColor = '';
+                        });
+
+                        // Tables
+                        document.querySelectorAll('table').forEach(function(table) {
+                            table.style.background = '';
+                            table.style.color = '';
+                        });
+                        document.querySelectorAll('th').forEach(function(el) {
+                            el.style.background = '';
+                            el.style.color = '';
+                            el.style.borderColor = '';
+                        });
+                        document.querySelectorAll('td').forEach(function(el) {
+                            el.style.background = '';
+                            el.style.color = '';
+                            el.style.borderColor = '';
+                        });
+
+                        // Alert banner
+                        var alertBanner = document.getElementById('system-alert-banner');
+                        if (alertBanner) {
+                            alertBanner.style.background = 'linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)';
+                            alertBanner.style.borderColor = '#f59e0b';
+                        }
+
+                        // Cards and stats
+                        document.querySelectorAll('.stat-card, .card').forEach(function(el) {
+                            el.style.background = '';
+                            el.style.borderColor = '';
+                            el.querySelectorAll('h3, h4, p, span, small').forEach(function(child) {
+                                child.style.color = '';
+                            });
+                        });
+
+                        // Card headers
+                        document.querySelectorAll('.card-header').forEach(function(el) {
+                            el.style.background = '';
+                            el.style.borderColor = '';
+                        });
+
+                        // Card bodies
+                        document.querySelectorAll('.card-body').forEach(function(el) {
+                            el.style.background = '';
+                        });
+
+                        // Gray background sections inside cards (forms, lists)
+                        document.querySelectorAll('[style*="background: #f9fafb"], [style*="background:#f9fafb"], [style*="background: rgb(249, 250, 251)"]').forEach(function(el) {
+                            el.style.background = '#f9fafb';
+                        });
+
+                        // Group details section
+                        var groupDetailsEmpty = document.getElementById('adminGroupDetailsEmpty');
+                        if (groupDetailsEmpty) {
+                            groupDetailsEmpty.style.color = '#666';
+                        }
+                        var groupDetailsContent = document.getElementById('adminGroupDetailsContent');
+                        if (groupDetailsContent) {
+                            groupDetailsContent.querySelectorAll('label').forEach(function(el) {
+                                el.style.color = '#374151';
+                            });
+                            groupDetailsContent.querySelectorAll('h4').forEach(function(el) {
+                                el.style.color = '';
+                            });
+                        }
+                        var groupDocsList = document.getElementById('adminGroupDocsList');
+                        if (groupDocsList) {
+                            groupDocsList.style.background = '#f9fafb';
+                            groupDocsList.querySelectorAll('div').forEach(function(el) {
+                                el.style.color = '';
+                            });
+                        }
+
+                        // Organization details section
+                        var orgDetailsPanel = document.getElementById('orgDetailsPanel');
+                        if (orgDetailsPanel) {
+                            orgDetailsPanel.querySelectorAll('label').forEach(function(el) {
+                                el.style.color = '#374151';
+                            });
+                            orgDetailsPanel.querySelectorAll('h4').forEach(function(el) {
+                                el.style.color = '';
+                            });
+                            orgDetailsPanel.querySelectorAll('span').forEach(function(el) {
+                                el.style.color = '';
+                            });
+                            // Form background reset
+                            orgDetailsPanel.querySelectorAll('div').forEach(function(el) {
+                                if (el.style.background === 'rgb(30, 41, 59)' || el.style.background === '#1e293b') {
+                                    el.style.background = '#f9fafb';
+                                }
+                            });
+                        }
+
+                        // Organization stats boxes reset
+                        document.querySelectorAll('[style*="background: #1e3a5f"], [style*="background: rgb(30, 58, 95)"]').forEach(function(el) {
+                            el.style.background = '#f0f9ff';
+                        });
+                        document.querySelectorAll('[style*="background: #78350f"], [style*="background: rgb(120, 53, 15)"]').forEach(function(el) {
+                            el.style.background = '#fef3c7';
+                        });
+                        document.querySelectorAll('[style*="background: #14532d"], [style*="background: rgb(20, 83, 45)"]').forEach(function(el) {
+                            el.style.background = '#f0fdf4';
+                        });
+
+                        // Organization members list reset
+                        var orgMembersList = document.getElementById('orgMembersList');
+                        if (orgMembersList) {
+                            orgMembersList.style.background = '';
+                            orgMembersList.style.borderColor = '#e5e7eb';
+                            orgMembersList.querySelectorAll('div').forEach(function(el) {
+                                el.style.color = '';
+                            });
+                        }
+
+                        // Organization admins list reset
+                        var orgAdminsList = document.getElementById('orgAdminsList');
+                        if (orgAdminsList) {
+                            orgAdminsList.style.background = '#fffbeb';
+                            orgAdminsList.style.borderColor = '#e5e7eb';
+                            orgAdminsList.querySelectorAll('div').forEach(function(el) {
+                                el.style.color = '';
+                            });
+                        }
+
+                        // Organization groups list reset
+                        var orgGroupsList = document.getElementById('orgGroupsList');
+                        if (orgGroupsList) {
+                            orgGroupsList.style.background = '';
+                            orgGroupsList.style.borderColor = '#e5e7eb';
+                            orgGroupsList.querySelectorAll('div').forEach(function(el) {
+                                el.style.color = '';
+                            });
+                        }
+
+                        // Group tree loading/empty messages
+                        var groupTree = document.getElementById('adminGroupTree');
+                        if (groupTree) {
+                            groupTree.querySelectorAll('div').forEach(function(el) {
+                                el.style.color = '';
+                            });
+                        }
+
+                        // Organization list loading/empty messages
+                        var orgListContainer = document.getElementById('orgListContainer');
+                        if (orgListContainer) {
+                            orgListContainer.querySelectorAll('div').forEach(function(el) {
+                                el.style.color = '';
+                            });
+                        }
+
+                        // Pagination
+                        document.querySelectorAll('.pagination button').forEach(function(btn) {
+                            btn.style.background = '';
+                            btn.style.color = '';
+                            btn.style.borderColor = '';
+                        });
+                        document.querySelectorAll('.page-info').forEach(function(el) {
+                            el.style.color = '';
+                        });
+
+                        // Performance Metrics Tab reset
+                        var perfMetricsTab = document.getElementById('performance-metrics-tab');
+                        if (perfMetricsTab) {
+                            // Metric cards reset
+                            perfMetricsTab.querySelectorAll('div[style*="background: #334155"], div[style*="background: rgb(51, 65, 85)"]').forEach(function(el) {
+                                el.style.background = 'white';
+                                el.style.boxShadow = '0 1px 3px rgba(0,0,0,0.1)';
+                            });
+                            // Text colors reset
+                            perfMetricsTab.querySelectorAll('div[style*="color: #94a3b8"], div[style*="color: rgb(148, 163, 184)"]').forEach(function(el) {
+                                el.style.color = '#666';
+                            });
+                            perfMetricsTab.querySelectorAll('div[style*="color: #f1f5f9"], div[style*="color: rgb(241, 245, 249)"]').forEach(function(el) {
+                                el.style.color = '#1f2937';
+                            });
+                            // Headers reset
+                            perfMetricsTab.querySelectorAll('h2, h3').forEach(function(el) {
+                                el.style.color = '';
+                            });
+                            perfMetricsTab.querySelectorAll('p').forEach(function(el) {
+                                el.style.color = '';
+                            });
+                            // Source performance boxes reset
+                            perfMetricsTab.querySelectorAll('div[style*="background: #1e293b"], div[style*="background: rgb(30, 41, 59)"]').forEach(function(el) {
+                                el.style.background = '#f9fafb';
+                            });
+                            perfMetricsTab.querySelectorAll('div[style*="background: #1e3a5f"], div[style*="background: rgb(30, 58, 95)"]').forEach(function(el) {
+                                el.style.background = '#f0f9ff';
+                            });
+                            perfMetricsTab.querySelectorAll('div[style*="background: #78350f"], div[style*="background: rgb(120, 53, 15)"]').forEach(function(el) {
+                                el.style.background = '#fef3c7';
+                            });
+                            // Table reset
+                            perfMetricsTab.querySelectorAll('tr').forEach(function(el) {
+                                el.style.background = '';
+                            });
+                            perfMetricsTab.querySelectorAll('th').forEach(function(el) {
+                                el.style.color = '';
+                            });
+                            perfMetricsTab.querySelectorAll('td').forEach(function(el) {
+                                el.style.color = '';
+                            });
+                        }
+
+                        // Login History Tab reset
+                        var loginHistoryTab = document.getElementById('login-history-tab');
+                        if (loginHistoryTab) {
+                            // Filter controls background reset
+                            loginHistoryTab.querySelectorAll('div[style*="background: #334155"], div[style*="background: rgb(51, 65, 85)"]').forEach(function(el) {
+                                el.style.background = '#f8f9fa';
+                            });
+                            // Labels reset
+                            loginHistoryTab.querySelectorAll('label').forEach(function(el) {
+                                el.style.color = '';
+                            });
+                            // Select elements reset
+                            loginHistoryTab.querySelectorAll('select').forEach(function(el) {
+                                el.style.background = 'white';
+                                el.style.color = '';
+                                el.style.borderColor = '#ddd';
+                            });
+                            // Stats section reset
+                            var statsDiv = document.getElementById('loginHistoryStats');
+                            if (statsDiv) {
+                                statsDiv.style.background = '#e3f2fd';
+                                statsDiv.querySelectorAll('span').forEach(function(el) {
+                                    el.style.color = '';
+                                });
+                            }
+                            // Table reset
+                            var historyTable = document.getElementById('loginHistoryTable');
+                            if (historyTable) {
+                                historyTable.style.background = '';
+                                historyTable.querySelectorAll('th').forEach(function(el) {
+                                    el.style.background = '';
+                                    el.style.color = '';
+                                    el.style.borderColor = '';
+                                });
+                                historyTable.querySelectorAll('td').forEach(function(el) {
+                                    el.style.background = '';
+                                    el.style.color = '';
+                                    el.style.borderColor = '';
+                                });
+                            }
+                            // Pagination reset
+                            var pagination = document.getElementById('loginHistoryPagination');
+                            if (pagination) {
+                                pagination.querySelectorAll('button').forEach(function(btn) {
+                                    btn.style.background = '';
+                                    btn.style.color = '';
+                                    btn.style.borderColor = '';
+                                });
+                                pagination.querySelectorAll('span').forEach(function(el) {
+                                    el.style.color = '';
+                                });
+                            }
+                        }
+
+                        // Modals reset
+                        document.querySelectorAll('.modal-content').forEach(function(el) {
+                            el.style.background = '';
+                            el.style.color = '';
+                        });
+                        document.querySelectorAll('.modal-header').forEach(function(el) {
+                            el.style.background = '';
+                            el.style.borderColor = '';
+                            el.querySelectorAll('h2, h3').forEach(function(h) {
+                                h.style.color = '';
+                            });
+                        });
+                        document.querySelectorAll('.modal-body').forEach(function(el) {
+                            el.style.background = '';
+                            el.querySelectorAll('p, label, span').forEach(function(child) {
+                                child.style.color = '';
+                            });
+                        });
+                        document.querySelectorAll('.modal-footer').forEach(function(el) {
+                            el.style.background = '';
+                            el.style.borderColor = '';
+                        });
+                        document.querySelectorAll('.modal-close').forEach(function(el) {
+                            el.style.color = '';
+                        });
+                        // Target org display reset
+                        var targetOrgDisplay = document.getElementById('targetOrgDisplay');
+                        if (targetOrgDisplay) {
+                            targetOrgDisplay.style.background = '#f3f4f6';
+                            targetOrgDisplay.style.color = '';
+                        }
+                        // Assign group info box reset
+                        var assignGroupInfo = document.getElementById('assignGroupInfo');
+                        if (assignGroupInfo) {
+                            assignGroupInfo.style.background = '#dbeafe';
+                            assignGroupInfo.style.borderColor = '#0ea5e9';
+                            assignGroupInfo.querySelectorAll('p').forEach(function(p) {
+                                p.style.color = '#075985';
+                            });
+                        }
+
+                        // Re-apply Hybrid RAG status badges for light mode
+                        if (typeof updateHybridRagStatus === 'function') {
+                            var ragToggle = document.getElementById('hybridRagToggle');
+                            if (ragToggle) updateHybridRagStatus(ragToggle.checked);
+                        }
+                        if (typeof updateTavilyStatus === 'function') {
+                            var tavilyEl = document.getElementById('tavilyConfigStatus');
+                            if (tavilyEl) updateTavilyStatus(tavilyEl.textContent.includes('설정 완료'));
+                        }
+                        if (typeof updateContext7Status === 'function') {
+                            var ctx7El = document.getElementById('context7ConfigStatus');
+                            if (ctx7El) updateContext7Status(ctx7El.textContent.includes('설정 완료'));
+                        }
+                        if (typeof updateSearxngStatus === 'function') {
+                            var sxngEl = document.getElementById('searxngConfigStatus');
+                            if (sxngEl) updateSearxngStatus(sxngEl.textContent.includes('설정 완료'));
+                        }
                     }
-                });
+                }
+
+                // Apply theme on page load
+                (function() {
+                    var saved = localStorage.getItem('admin-theme');
+                    if (saved === 'dark') {
+                        document.documentElement.setAttribute('data-theme', 'dark');
+                        // Delay to ensure DOM is ready
+                        setTimeout(function() { applyThemeStyles(true); }, 0);
+                    }
+                })();
+
+                // Theme toggle click handler
+                document.getElementById('themeToggleBtn').onclick = function() {
+                    var html = document.documentElement;
+                    var current = html.getAttribute('data-theme') || 'light';
+                    var next = current === 'light' ? 'dark' : 'light';
+
+                    console.log('[Theme] Switching from', current, 'to', next);
+
+                    // Set attribute
+                    html.setAttribute('data-theme', next);
+
+                    // Apply styles directly
+                    applyThemeStyles(next === 'dark');
+
+                    // Save
+                    localStorage.setItem('admin-theme', next);
+
+                    // Update button icons
+                    var btn = document.getElementById('themeToggleBtn');
+                    var sun = btn.querySelector('.icon-sun');
+                    var moon = btn.querySelector('.icon-moon');
+                    if (sun && moon) {
+                        sun.style.display = next === 'dark' ? 'none' : 'block';
+                        moon.style.display = next === 'dark' ? 'block' : 'none';
+                    }
+
+                    console.log('[Theme] Now:', html.getAttribute('data-theme'));
+                };
                 </script>
                 <div>
                     <p><strong id="adminName">관리자</strong></p>
                     <p><small id="adminEmail">admin@example.com</small></p>
                 </div>
-                <button class="btn btn-secondary" onclick="goToProfile()">
-                    프로필 관리
-                </button>
                 <button class="btn btn-danger" onclick="goToMain()">
                     메인으로
                 </button>
@@ -1908,7 +2890,7 @@
             </div>
 
             <!-- 비밀번호 재설정 방식 선택 -->
-            <div style="margin-top: 40px; padding: 24px; background: #e3f2fd; border-radius: 8px; border: 2px solid #2196f3;">
+            <div id="passwordResetMethodSection" style="margin-top: 40px; padding: 24px; background: #e3f2fd; border-radius: 8px; border: 2px solid #2196f3;">
                 <h3 style="margin-bottom: 16px;">⚙️ 비밀번호 재설정 방식 설정</h3>
                 <p style="color: #666; margin-bottom: 20px;">사용자가 비밀번호를 잃어버렸을 때 사용할 재설정 방식을 선택하세요.</p>
 
@@ -2127,7 +3109,7 @@
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                 <div>
                     <h2 style="margin: 0;">📊 성능 메트릭</h2>
-                    <p style="color: #666; margin: 5px 0 0 0;">하이브리드 RAG 시스템의 성능을 모니터링합니다</p>
+                    <p style="color: var(--text-muted, #666); margin: 5px 0 0 0;">하이브리드 RAG 시스템의 성능을 모니터링합니다</p>
                 </div>
                 <button onclick="loadPerformancemetrics()"
                         style="padding: 8px 16px; background: #3b82f6; color: white; border: none; border-radius: 6px; cursor: pointer;">
@@ -2138,42 +3120,42 @@
             <!-- 핵심 메트릭 카드 -->
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin-bottom: 24px;">
                 <!-- 전체 검색 수 -->
-                <div style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
-                    <div style="color: #666; font-size: 14px; margin-bottom: 8px;">📈 전체 검색 수</div>
-                    <div style="font-size: 32px; font-weight: bold; color: #1f2937;" id="metric-total-searches">-</div>
+                <div style="background: var(--bg-card, white); padding: 20px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                    <div style="color: var(--text-muted, #666); font-size: 14px; margin-bottom: 8px;">📈 전체 검색 수</div>
+                    <div style="font-size: 32px; font-weight: bold; color: var(--text-primary, #1f2937);" id="metric-total-searches">-</div>
                     <div style="color: #10b981; font-size: 12px; margin-top: 4px;" id="metric-total-trend"></div>
                 </div>
 
                 <!-- 오늘 검색 수 -->
-                <div style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
-                    <div style="color: #666; font-size: 14px; margin-bottom: 8px;">📅 오늘 검색 수</div>
-                    <div style="font-size: 32px; font-weight: bold; color: #1f2937;" id="metric-today-searches">-</div>
-                    <div style="color: #666; font-size: 12px; margin-top: 4px;" id="metric-today-avg"></div>
+                <div style="background: var(--bg-card, white); padding: 20px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                    <div style="color: var(--text-muted, #666); font-size: 14px; margin-bottom: 8px;">📅 오늘 검색 수</div>
+                    <div style="font-size: 32px; font-weight: bold; color: var(--text-primary, #1f2937);" id="metric-today-searches">-</div>
+                    <div style="color: var(--text-muted, #666); font-size: 12px; margin-top: 4px;" id="metric-today-avg"></div>
                 </div>
 
                 <!-- 평균 응답 시간 -->
-                <div style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
-                    <div style="color: #666; font-size: 14px; margin-bottom: 8px;">⏱️ 평균 응답 시간</div>
-                    <div style="font-size: 32px; font-weight: bold; color: #1f2937;" id="metric-avg-time">-</div>
-                    <div style="color: #666; font-size: 12px; margin-top: 4px;">초</div>
+                <div style="background: var(--bg-card, white); padding: 20px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                    <div style="color: var(--text-muted, #666); font-size: 14px; margin-bottom: 8px;">⏱️ 평균 응답 시간</div>
+                    <div style="font-size: 32px; font-weight: bold; color: var(--text-primary, #1f2937);" id="metric-avg-time">-</div>
+                    <div style="color: var(--text-muted, #666); font-size: 12px; margin-top: 4px;">초</div>
                 </div>
 
                 <!-- 캐시 히트율 -->
-                <div style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
-                    <div style="color: #666; font-size: 14px; margin-bottom: 8px;">🎯 캐시 히트율</div>
-                    <div style="font-size: 32px; font-weight: bold; color: #1f2937;" id="metric-cache-hit">-</div>
-                    <div style="color: #666; font-size: 12px; margin-top: 4px;">%</div>
+                <div style="background: var(--bg-card, white); padding: 20px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                    <div style="color: var(--text-muted, #666); font-size: 14px; margin-bottom: 8px;">🎯 캐시 히트율</div>
+                    <div style="font-size: 32px; font-weight: bold; color: var(--text-primary, #1f2937);" id="metric-cache-hit">-</div>
+                    <div style="color: var(--text-muted, #666); font-size: 12px; margin-top: 4px;">%</div>
                 </div>
             </div>
 
             <!-- 소스별 성능 -->
-            <div style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 24px;">
+            <div style="background: var(--bg-card, white); padding: 20px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 24px;">
                 <h3 style="margin: 0 0 16px 0;">🔍 소스별 성능</h3>
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px;">
                     <!-- 로컬 문서 -->
-                    <div style="padding: 16px; background: #f9fafb; border-radius: 6px;">
+                    <div style="padding: 16px; background: var(--bg-muted, #f9fafb); border-radius: 6px;">
                         <div style="font-weight: 600; margin-bottom: 8px;">📚 로컬 문서</div>
-                        <div style="font-size: 14px; color: #666;">
+                        <div style="font-size: 14px; color: var(--text-muted, #666);">
                             <div>사용 횟수: <span id="source-local-count">-</span></div>
                             <div>평균 시간: <span id="source-local-time">-</span>초</div>
                             <div>평균 결과: <span id="source-local-results">-</span>개</div>
@@ -2183,7 +3165,7 @@
                     <!-- 웹 검색 -->
                     <div style="padding: 16px; background: #f0f9ff; border-radius: 6px;">
                         <div style="font-weight: 600; margin-bottom: 8px;">🌐 웹 검색</div>
-                        <div style="font-size: 14px; color: #666;">
+                        <div style="font-size: 14px; color: var(--text-muted, #666);">
                             <div>사용 횟수: <span id="source-web-count">-</span></div>
                             <div>평균 시간: <span id="source-web-time">-</span>초</div>
                             <div>평균 결과: <span id="source-web-results">-</span>개</div>
@@ -2193,7 +3175,7 @@
                     <!-- 공식 문서 -->
                     <div style="padding: 16px; background: #fef3c7; border-radius: 6px;">
                         <div style="font-weight: 600; margin-bottom: 8px;">📖 공식 문서</div>
-                        <div style="font-size: 14px; color: #666;">
+                        <div style="font-size: 14px; color: var(--text-muted, #666);">
                             <div>사용 횟수: <span id="source-docs-count">-</span></div>
                             <div>평균 시간: <span id="source-docs-time">-</span>초</div>
                             <div>평균 결과: <span id="source-docs-results">-</span>개</div>
@@ -2203,12 +3185,12 @@
             </div>
 
             <!-- 최근 검색 기록 -->
-            <div style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+            <div style="background: var(--bg-card, white); padding: 20px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
                 <h3 style="margin: 0 0 16px 0;">📝 최근 검색 기록 (최근 20개)</h3>
                 <div style="overflow-x: auto;">
                     <table style="width: 100%; border-collapse: collapse;">
                         <thead>
-                            <tr style="background: #f9fafb; border-bottom: 2px solid #e5e7eb;">
+                            <tr style="background: var(--bg-muted, #f9fafb); border-bottom: 2px solid var(--border-color, #e5e7eb);">
                                 <th style="padding: 12px; text-align: left; font-weight: 600;">시간</th>
                                 <th style="padding: 12px; text-align: left; font-weight: 600;">검색어</th>
                                 <th style="padding: 12px; text-align: left; font-weight: 600;">모드</th>
@@ -2219,7 +3201,7 @@
                         </thead>
                         <tbody id="recent-searches-tbody">
                             <tr>
-                                <td colspan="6" style="padding: 20px; text-align: center; color: #666;">
+                                <td colspan="6" style="padding: 20px; text-align: center; color: var(--text-muted, #666);">
                                     데이터를 불러오는 중...
                                 </td>
                             </tr>
@@ -2381,7 +3363,7 @@
             </div>
 
             <!-- 필터 컨트롤 -->
-            <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+            <div style="background: var(--bg-muted, #f8f9fa); padding: 15px; border-radius: 8px; margin-bottom: 20px;">
                 <!-- 기간 선택 -->
                 <div style="margin-bottom: 15px;">
                     <label style="font-weight: 500; display: block; margin-bottom: 8px;">📅 조회 기간:</label>
@@ -2390,10 +3372,10 @@
                         <button class="btn btn-secondary" onclick="setTimeRange('7d')" style="padding: 6px 12px; font-size: 0.9em;">최근 7일</button>
                         <button class="btn btn-secondary" onclick="setTimeRange('30d')" style="padding: 6px 12px; font-size: 0.9em;">최근 30일</button>
                         <button class="btn btn-secondary" onclick="setTimeRange('all')" style="padding: 6px 12px; font-size: 0.9em;">전체</button>
-                        <span style="color: #666; margin: 0 10px;">또는</span>
-                        <input type="datetime-local" id="startTimeFilter" onchange="applyFilters()" style="padding: 6px 10px; border: 1px solid #ddd; border-radius: 4px;">
+                        <span style="color: var(--text-muted, #666); margin: 0 10px;">또는</span>
+                        <input type="datetime-local" id="startTimeFilter" onchange="applyFilters()" style="padding: 6px 10px; border: 1px solid var(--border-color, #ddd); border-radius: 4px; background: var(--bg-card, white); color: var(--text-primary, inherit);">
                         <span>~</span>
-                        <input type="datetime-local" id="endTimeFilter" onchange="applyFilters()" style="padding: 6px 10px; border: 1px solid #ddd; border-radius: 4px;">
+                        <input type="datetime-local" id="endTimeFilter" onchange="applyFilters()" style="padding: 6px 10px; border: 1px solid var(--border-color, #ddd); border-radius: 4px; background: var(--bg-card, white); color: var(--text-primary, inherit);">
                     </div>
                 </div>
 
@@ -2401,7 +3383,7 @@
                 <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap; margin-bottom: 15px;">
                     <div style="display: flex; align-items: center; gap: 8px;">
                         <label for="eventTypeFilter" style="font-weight: 500;">이벤트 유형:</label>
-                        <select id="eventTypeFilter" onchange="applyFilters()" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; background: white;">
+                        <select id="eventTypeFilter" onchange="applyFilters()" style="padding: 8px 12px; border: 1px solid var(--border-color, #ddd); border-radius: 4px; background: var(--bg-card, white); color: var(--text-primary, inherit);">
                             <option value="">전체</option>
                             <option value="AUTH_LOGIN_SUCCESS">로그인 성공</option>
                             <option value="AUTH_LOGIN_FAILED">로그인 실패</option>
@@ -2422,7 +3404,7 @@
                     </div>
                     <div style="display: flex; align-items: center; gap: 8px;">
                         <label for="levelFilter" style="font-weight: 500;">로그 레벨:</label>
-                        <select id="levelFilter" onchange="applyFilters()" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; background: white;">
+                        <select id="levelFilter" onchange="applyFilters()" style="padding: 8px 12px; border: 1px solid var(--border-color, #ddd); border-radius: 4px; background: var(--bg-card, white); color: var(--text-primary, inherit);">
                             <option value="">전체</option>
                             <option value="INFO">INFO</option>
                             <option value="WARNING">WARNING</option>
@@ -2441,21 +3423,21 @@
                         id="searchFilter"
                         placeholder="IP 주소, 사용자명, 메시지로 검색..."
                         oninput="searchLogs()"
-                        style="flex: 1; max-width: 400px; padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px;"
+                        style="flex: 1; max-width: 400px; padding: 8px 12px; border: 1px solid var(--border-color, #ddd); border-radius: 4px; background: var(--bg-card, white); color: var(--text-primary, inherit);"
                     >
-                    <span id="searchResultCount" style="color: #666; font-size: 0.9em;"></span>
+                    <span id="searchResultCount" style="color: var(--text-muted, #666); font-size: 0.9em;"></span>
                 </div>
             </div>
 
             <!-- 로그 통계 -->
-            <div id="logsStats" style="margin-bottom: 15px; padding: 10px; background: #e3f2fd; border-radius: 4px; display: none;">
+            <div id="logsStats" style="margin-bottom: 15px; padding: 10px; background: var(--color-info-light, #e3f2fd); border-radius: 4px; display: none;">
                 <span style="font-weight: 500;">📊 로그 통계:</span>
                 <span id="totalLogsCount" style="margin-left: 10px;">전체: 0</span>
                 <span id="filteredLogsCount" style="margin-left: 20px;">필터 결과: 0</span>
             </div>
 
             <div id="logsContainer">
-                <p style="text-align: center; padding: 40px; color: #666;">
+                <p style="text-align: center; padding: 40px; color: var(--text-muted, #666);">
                     보안 로그는 콘솔/파일에 기록됩니다.<br>
                     프로덕션 환경에서는 로그 집계 시스템을 구현하세요.
                 </p>
@@ -2494,28 +3476,28 @@
             </div>
 
             <!-- 필터 컨트롤 -->
-            <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+            <div style="background: var(--bg-muted, #f8f9fa); padding: 15px; border-radius: 8px; margin-bottom: 20px;">
                 <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
                     <div style="display: flex; align-items: center; gap: 8px;">
                         <label for="auditUserFilter" style="font-weight: 500;">사용자명:</label>
                         <input type="text" id="auditUserFilter" placeholder="사용자 이름"
-                               style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; min-width: 150px;">
+                               style="padding: 8px 12px; border: 1px solid var(--border-color, #ddd); border-radius: 4px; min-width: 150px; background: var(--bg-card, white); color: var(--text-primary, inherit);">
                     </div>
                     <div style="display: flex; align-items: center; gap: 8px;">
                         <label for="auditActionFilter" style="font-weight: 500;">작업:</label>
-                        <select id="auditActionFilter" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; background: white; min-width: 180px;">
+                        <select id="auditActionFilter" style="padding: 8px 12px; border: 1px solid var(--border-color, #ddd); border-radius: 4px; background: var(--bg-card, white); color: var(--text-primary, inherit); min-width: 180px;">
                             <option value="">전체</option>
                         </select>
                     </div>
                     <div style="display: flex; align-items: center; gap: 8px;">
                         <label for="auditStartDate" style="font-weight: 500;">시작:</label>
                         <input type="date" id="auditStartDate"
-                               style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px;">
+                               style="padding: 8px 12px; border: 1px solid var(--border-color, #ddd); border-radius: 4px; background: var(--bg-card, white); color: var(--text-primary, inherit);">
                     </div>
                     <div style="display: flex; align-items: center; gap: 8px;">
                         <label for="auditEndDate" style="font-weight: 500;">종료:</label>
                         <input type="date" id="auditEndDate"
-                               style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px;">
+                               style="padding: 8px 12px; border: 1px solid var(--border-color, #ddd); border-radius: 4px; background: var(--bg-card, white); color: var(--text-primary, inherit);">
                     </div>
                     <button class="btn btn-primary" onclick="applyAuditFilters()" style="padding: 8px 16px;">검색</button>
                     <button class="btn btn-secondary" onclick="clearAuditFilters()" style="padding: 8px 16px;">초기화</button>
@@ -2669,6 +3651,101 @@
                 </div>
             </div>
 
+            <!-- TTS (Text-to-Speech) Settings Card -->
+            <div class="card" style="margin-bottom: 20px;">
+                <div class="card-header">
+                    <h3 style="margin: 0;">🔊 TTS (음성 합성) 설정</h3>
+                </div>
+                <div class="card-body">
+                    <!-- TTS Enable Toggle -->
+                    <div style="margin-bottom: 20px;">
+                        <label style="display: flex; align-items: center; cursor: pointer;">
+                            <input type="checkbox" id="tts-enabled" style="width: 20px; height: 20px; margin-right: 10px;" onchange="onTTSEnabledChange()">
+                            <span style="font-weight: 600;">TTS 기능 활성화</span>
+                        </label>
+                        <small style="display: block; margin-top: 8px; color: #666;">
+                            💡 검색 결과를 음성으로 읽어주는 기능을 활성화합니다.
+                        </small>
+                    </div>
+
+                    <!-- TTS Configuration (shown when enabled) -->
+                    <div id="tts-config-section" style="display: none;">
+                        <!-- TTS Model Selection -->
+                        <div style="margin-bottom: 15px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600;">
+                                TTS 모델
+                            </label>
+                            <select id="tts-model-select" class="form-input" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #ddd;">
+                                <option value="edge-tts">Edge TTS (Fast) - 빠른 실시간 음성 합성</option>
+                                <option value="Qwen/Qwen3-TTS-12Hz-0.6B-Base">Qwen3 TTS 0.6B (Fast Local) - 빠른 로컬 음성 (Voice Clone)</option>
+                                <option value="Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice">Qwen3 TTS 0.6B CustomVoice (Fast) - 빠른 로컬 음성 합성</option>
+                                <option value="Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice">Qwen3 TTS 1.7B (High Quality) - 고품질 로컬 음성 (느림)</option>
+                            </select>
+                        </div>
+
+                        <!-- Default Language -->
+                        <div style="margin-bottom: 15px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600;">
+                                기본 언어
+                            </label>
+                            <select id="tts-language-select" class="form-input" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #ddd;">
+                                <option value="ko">한국어</option>
+                                <option value="en">English</option>
+                                <option value="zh">中文</option>
+                                <option value="ja">日本語</option>
+                            </select>
+                        </div>
+
+                        <!-- Default Speed -->
+                        <div style="margin-bottom: 15px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600;">
+                                음성 속도
+                                <span id="tts-speed-value" style="color: #667eea; margin-left: 10px;">1.0x</span>
+                            </label>
+                            <input type="range" id="tts-speed-slider" min="0.5" max="2.0" value="1.0" step="0.1"
+                                   style="width: 100%;" oninput="updateTTSSpeedValue()">
+                            <small style="color: #666;">0.5x (느리게) ~ 2.0x (빠르게)</small>
+                        </div>
+
+                        <!-- Max Text Length -->
+                        <div style="margin-bottom: 15px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600;">
+                                최대 텍스트 길이
+                                <span id="tts-max-length-value" style="color: #667eea; margin-left: 10px;">1000자</span>
+                            </label>
+                            <input type="range" id="tts-max-length-slider" min="100" max="5000" value="1000" step="100"
+                                   style="width: 100%;" oninput="updateTTSMaxLengthValue()">
+                            <small style="color: #666;">TTS로 변환할 최대 텍스트 길이</small>
+                        </div>
+
+                        <!-- Auto-play Toggle -->
+                        <div style="margin-bottom: 15px;">
+                            <label style="display: flex; align-items: center; cursor: pointer;">
+                                <input type="checkbox" id="tts-auto-play" style="width: 18px; height: 18px; margin-right: 10px;">
+                                <span>응답 후 자동 재생</span>
+                            </label>
+                            <small style="display: block; margin-top: 8px; color: #666;">
+                                검색 결과가 나오면 자동으로 음성을 재생합니다.
+                            </small>
+                        </div>
+
+                        <!-- TTS Status -->
+                        <div id="tts-status" style="padding: 12px; background: #f0f9ff; border-radius: 8px; margin-top: 15px;">
+                            <p style="margin: 0; font-size: 14px;">
+                                <strong>상태:</strong> <span id="tts-model-status">확인 중...</span>
+                            </p>
+                        </div>
+
+                        <!-- Clear TTS Cache Button -->
+                        <div style="margin-top: 15px;">
+                            <button type="button" class="btn btn-secondary" onclick="clearTTSCache()" style="font-size: 14px;">
+                                🗑️ TTS 캐시 삭제
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Save Button -->
             <div style="text-align: right;">
                 <button class="btn btn-primary" onclick="saveModelConfig()" id="save-model-btn">
@@ -2688,8 +3765,21 @@
         <div id="settings-tab" class="tab-content">
             <h2 style="margin-bottom: 20px;">시스템 설정</h2>
 
+            <!-- Settings Sub-tab Navigation -->
+            <div class="settings-subtabs">
+                <button class="settings-subtab active" data-group="security" onclick="switchSettingsGroup('security')">
+                    🔐 보안
+                </button>
+                <button class="settings-subtab" data-group="search" onclick="switchSettingsGroup('search')">
+                    🔍 검색
+                </button>
+                <button class="settings-subtab" data-group="prompts" onclick="switchSettingsGroup('prompts')">
+                    📝 프롬프트
+                </button>
+            </div>
+
             <!-- Auto-Logout Settings -->
-            <div class="card" style="margin-bottom: 20px;">
+            <div class="card settings-card" data-settings-group="security" style="margin-bottom: 20px;">
                 <div class="card-header">
                     <h3 style="margin: 0;">자동 로그아웃 설정</h3>
                 </div>
@@ -2749,7 +3839,7 @@
             </div>
 
             <!-- Cache Settings -->
-            <div class="card" style="margin-bottom: 20px;">
+            <div class="card settings-card" data-settings-group="search" style="margin-bottom: 20px;">
                 <div class="card-header">
                     <h3 style="margin: 0;">💾 캐시 설정</h3>
                 </div>
@@ -2813,7 +3903,7 @@
             </div>
 
             <!-- System Prompt Settings -->
-            <div class="card" style="margin-bottom: 20px;">
+            <div class="card settings-card" data-settings-group="prompts" style="margin-bottom: 20px;">
                 <div class="card-header">
                     <h3 style="margin: 0;">📝 시스템 프롬프트 관리</h3>
                 </div>
@@ -2877,7 +3967,7 @@
             </div>
 
             <!-- Rate Limit Settings -->
-            <div class="card" style="margin-bottom: 20px;">
+            <div class="card settings-card" data-settings-group="security" style="margin-bottom: 20px;">
                 <div class="card-header">
                     <h3 style="margin: 0;">🚦 Rate Limit 설정</h3>
                 </div>
@@ -2939,7 +4029,7 @@
             </div>
 
             <!-- CAPTCHA Settings -->
-            <div class="card" style="margin-bottom: 20px;">
+            <div class="card settings-card" data-settings-group="security" style="margin-bottom: 20px;">
                 <div class="card-header">
                     <h3 style="margin: 0;">🤖 CAPTCHA 설정</h3>
                 </div>
@@ -3023,7 +4113,7 @@
             </div>
 
             <!-- 2FA (Google OTP) Settings -->
-            <div class="card" style="margin-bottom: 20px;">
+            <div class="card settings-card" data-settings-group="security" style="margin-bottom: 20px;">
                 <div class="card-header">
                     <h3 style="margin: 0;">🔐 2차 인증 (Google OTP) 설정</h3>
                 </div>
@@ -3086,7 +4176,7 @@
             </div>
 
             <!-- Brute Force Protection Settings -->
-            <div class="card" style="margin-bottom: 20px;">
+            <div class="card settings-card" data-settings-group="security" style="margin-bottom: 20px;">
                 <div class="card-header">
                     <h3 style="margin: 0;">🛡️ 브루트 포스 보호 설정</h3>
                 </div>
@@ -3165,7 +4255,7 @@
             </div>
 
             <!-- Hybrid RAG Settings -->
-            <div class="card" style="margin-bottom: 20px;">
+            <div class="card settings-card" data-settings-group="search" style="margin-bottom: 20px;">
                 <div class="card-header">
                     <h3 style="margin: 0;">🔗 하이브리드 RAG 설정</h3>
                 </div>
@@ -3195,15 +4285,15 @@
                                 비활성화됨
                             </span>
                             <span id="tavilyConfigStatus"
-                                style="padding: 6px 12px; border-radius: 6px; font-size: 13px; background: #f3f4f6; color: #6b7280;">
+                                style="padding: 6px 12px; border-radius: 6px; font-size: 13px; background: var(--bg-muted, #f3f4f6); color: var(--text-muted, #6b7280);">
                                 Tavily: 미설정
                             </span>
                             <span id="context7ConfigStatus"
-                                style="padding: 6px 12px; border-radius: 6px; font-size: 13px; background: #f3f4f6; color: #6b7280;">
+                                style="padding: 6px 12px; border-radius: 6px; font-size: 13px; background: var(--bg-muted, #f3f4f6); color: var(--text-muted, #6b7280);">
                                 Context7: 미설정
                             </span>
                             <span id="searxngConfigStatus"
-                                style="padding: 6px 12px; border-radius: 6px; font-size: 13px; background: #f3f4f6; color: #6b7280;">
+                                style="padding: 6px 12px; border-radius: 6px; font-size: 13px; background: var(--bg-muted, #f3f4f6); color: var(--text-muted, #6b7280);">
                                 SearXNG: 미설정
                             </span>
                         </div>
@@ -3216,14 +4306,14 @@
                             <div style="margin-bottom: 20px; padding-bottom: 15px; border-bottom: 1px solid #e5e7eb;">
                                 <div style="font-weight: 600; margin-bottom: 8px; color: #374151;">🎯 검색 모드</div>
                                 <div style="display: flex; flex-direction: column; gap: 10px;">
-                                    <label style="display: flex; align-items: center; cursor: pointer; padding: 8px; border: 1px solid #e5e7eb; border-radius: 6px; transition: all 0.2s;" onmouseover="this.style.background='#f9fafb'" onmouseout="this.style.background='white'">
+                                    <label class="search-mode-label" style="display: flex; align-items: center; cursor: pointer; padding: 8px; border: 1px solid var(--border-color, #e5e7eb); border-radius: 6px; transition: all 0.2s; background: var(--bg-card, white);">
                                         <input type="radio" name="searchMode" value="smart" id="searchModeSmart" onchange="changeSearchMode()" style="margin-right: 10px;">
                                         <div>
                                             <div style="font-weight: 600; font-size: 13px;">🧠 Smart 모드 (자동 선택)</div>
                                             <div style="font-size: 12px; color: #666; margin-top: 2px;">질문 분석 기반으로 필요한 도구만 자동 선택</div>
                                         </div>
                                     </label>
-                                    <label style="display: flex; align-items: center; cursor: pointer; padding: 8px; border: 1px solid #e5e7eb; border-radius: 6px; transition: all 0.2s;" onmouseover="this.style.background='#f9fafb'" onmouseout="this.style.background='white'">
+                                    <label class="search-mode-label" style="display: flex; align-items: center; cursor: pointer; padding: 8px; border: 1px solid var(--border-color, #e5e7eb); border-radius: 6px; transition: all 0.2s; background: var(--bg-card, white);">
                                         <input type="radio" name="searchMode" value="comprehensive" id="searchModeComprehensive" onchange="changeSearchMode()" style="margin-right: 10px;">
                                         <div>
                                             <div style="font-weight: 600; font-size: 13px;">🔍 Comprehensive 모드 (모든 도구 사용)</div>
@@ -3416,7 +4506,7 @@
                                 </button>
                             </div>
 
-                            <div style="margin-top: 10px; padding: 10px; background: #f0f9ff; border-left: 3px solid #0ea5e9; border-radius: 4px; font-size: 12px; color: #0c4a6e;">
+                            <div class="settings-tip-box tip-info" style="margin-top: 10px; padding: 10px; background: #f0f9ff; border-left: 3px solid #0ea5e9; border-radius: 4px; font-size: 12px; color: #0c4a6e;">
                                 <strong>💡 팁:</strong> SearXNG는 <code>docker-compose -f docker-compose.searxng.yml up -d</code>로 실행할 수 있습니다
                             </div>
                         </div>
@@ -3473,7 +4563,7 @@
                                 </button>
                             </div>
 
-                            <div style="margin-top: 10px; padding: 10px; background: #fffbeb; border-left: 3px solid #f59e0b; border-radius: 4px; font-size: 12px; color: #92400e;">
+                            <div class="settings-tip-box tip-warning" style="margin-top: 10px; padding: 10px; background: #fffbeb; border-left: 3px solid #f59e0b; border-radius: 4px; font-size: 12px; color: #92400e;">
                                 <strong>💡 팁:</strong> Context7 API 키는 <strong>ctx7sk-</strong>로 시작합니다
                             </div>
                         </div>
@@ -3721,7 +4811,7 @@
                     </div>
                     <div class="card-body">
                         <div id="orgListContainer" style="min-height: 400px;">
-                            <div style="text-align: center; padding: 40px; color: #666;">조직을 불러오는 중...</div>
+                            <div style="text-align: center; padding: 40px; color: var(--text-muted, #666);">조직을 불러오는 중...</div>
                         </div>
                     </div>
                 </div>
@@ -3739,22 +4829,22 @@
                                     <span id="currentOrgName">조직 이름</span>
                                 </h4>
 
-                                <div style="background: #f9fafb; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+                                <div style="background: var(--bg-muted, #f9fafb); padding: 20px; border-radius: 8px; margin-bottom: 20px;">
                                     <div style="margin-bottom: 15px;">
-                                        <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">
+                                        <label style="display: block; margin-bottom: 8px; font-weight: 600; color: var(--text-secondary, #374151);">
                                             조직 이름
                                         </label>
                                         <input type="text" id="orgDetailName"
-                                               style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px;"
+                                               style="width: 100%; padding: 10px; border: 1px solid var(--border-color, #ddd); border-radius: 6px;"
                                                placeholder="조직 이름을 입력하세요">
                                     </div>
 
                                     <div style="margin-bottom: 15px;">
-                                        <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">
+                                        <label style="display: block; margin-bottom: 8px; font-weight: 600; color: var(--text-secondary, #374151);">
                                             설명
                                         </label>
                                         <textarea id="orgDetailDesc" rows="3"
-                                                  style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px;"
+                                                  style="width: 100%; padding: 10px; border: 1px solid var(--border-color, #ddd); border-radius: 6px;"
                                                   placeholder="조직 설명 (선택사항)"></textarea>
                                     </div>
 
@@ -3762,7 +4852,7 @@
                                         <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
                                             <input type="checkbox" id="orgDetailActive"
                                                    style="width: 20px; height: 20px; cursor: pointer;">
-                                            <span style="font-weight: 600; color: #374151;">활성화 상태</span>
+                                            <span style="font-weight: 600; color: var(--text-secondary, #374151);">활성화 상태</span>
                                         </label>
                                     </div>
 
@@ -3780,15 +4870,15 @@
                                 <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 20px;">
                                     <div style="background: #f0f9ff; padding: 15px; border-radius: 8px; text-align: center;">
                                         <div style="font-size: 24px; font-weight: 700; color: #0369a1;" id="orgMemberCount">0</div>
-                                        <div style="font-size: 12px; color: #666; margin-top: 5px;">총 멤버</div>
+                                        <div style="font-size: 12px; color: var(--text-muted, #666); margin-top: 5px;">총 멤버</div>
                                     </div>
                                     <div style="background: #fef3c7; padding: 15px; border-radius: 8px; text-align: center;">
                                         <div style="font-size: 24px; font-weight: 700; color: #d97706;" id="orgAdminCount">0</div>
-                                        <div style="font-size: 12px; color: #666; margin-top: 5px;">조직 관리자</div>
+                                        <div style="font-size: 12px; color: var(--text-muted, #666); margin-top: 5px;">조직 관리자</div>
                                     </div>
                                     <div style="background: #f0fdf4; padding: 15px; border-radius: 8px; text-align: center;">
                                         <div style="font-size: 24px; font-weight: 700; color: #15803d;" id="orgGroupCount">0</div>
-                                        <div style="font-size: 12px; color: #666; margin-top: 5px;">그룹 수</div>
+                                        <div style="font-size: 12px; color: var(--text-muted, #666); margin-top: 5px;">그룹 수</div>
                                     </div>
                                 </div>
                             </div>
@@ -3802,16 +4892,16 @@
                                         ➕ 멤버 추가
                                     </button>
                                 </div>
-                                <div id="orgMembersList" style="max-height: 300px; overflow-y: auto; border: 1px solid #e5e7eb; border-radius: 8px;">
-                                    <div style="text-align: center; padding: 20px; color: #666;">멤버가 없습니다</div>
+                                <div id="orgMembersList" style="max-height: 300px; overflow-y: auto; border: 1px solid var(--border-color, #e5e7eb); border-radius: 8px;">
+                                    <div style="text-align: center; padding: 20px; color: var(--text-muted, #666);">멤버가 없습니다</div>
                                 </div>
                             </div>
 
                             <!-- Organization Admins Section -->
                             <div>
                                 <h4 style="margin: 0 0 15px 0;">⭐ 조직 관리자</h4>
-                                <div id="orgAdminsList" style="border: 1px solid #e5e7eb; border-radius: 8px; padding: 15px; background: #fffbeb;">
-                                    <div style="color: #666; font-size: 13px;">조직 관리자는 멤버 목록에서 승격할 수 있습니다</div>
+                                <div id="orgAdminsList" style="border: 1px solid var(--border-color, #e5e7eb); border-radius: 8px; padding: 15px; background: #fffbeb;">
+                                    <div style="color: var(--text-muted, #666); font-size: 13px;">조직 관리자는 멤버 목록에서 승격할 수 있습니다</div>
                                 </div>
                             </div>
 
@@ -3823,8 +4913,8 @@
                                         ➕ 그룹 할당
                                     </button>
                                 </div>
-                                <div id="orgGroupsList" style="max-height: 300px; overflow-y: auto; border: 1px solid #e5e7eb; border-radius: 8px;">
-                                    <div style="text-align: center; padding: 20px; color: #666;">그룹이 없습니다</div>
+                                <div id="orgGroupsList" style="max-height: 300px; overflow-y: auto; border: 1px solid var(--border-color, #e5e7eb); border-radius: 8px;">
+                                    <div style="text-align: center; padding: 20px; color: var(--text-muted, #666);">그룹이 없습니다</div>
                                 </div>
                             </div>
                         </div>
@@ -3841,24 +4931,24 @@
                     <button class="modal-close" onclick="closeAssignGroupModal()">&times;</button>
                 </div>
                 <div class="modal-body">
-                    <p style="margin-bottom: 15px; color: #666;">
+                    <p style="margin-bottom: 15px; color: var(--text-secondary);">
                         그룹을 이 조직에 추가합니다. 기존 조직에서도 계속 사용할 수 있습니다 (공유).
                     </p>
 
                     <div style="margin-bottom: 20px;">
-                        <label style="display: block; margin-bottom: 8px; font-weight: 600;">대상 조직:</label>
-                        <div id="targetOrgDisplay" style="padding: 10px; background: #f3f4f6; border-radius: 4px; font-weight: 600;">
+                        <label style="display: block; margin-bottom: 8px; font-weight: 600; color: var(--text-primary);">대상 조직:</label>
+                        <div id="targetOrgDisplay" style="padding: 10px; background: var(--bg-tertiary); border-radius: 4px; font-weight: 600; color: var(--text-primary);">
                             <!-- Organization name will be displayed here -->
                         </div>
                     </div>
 
                     <div style="margin-bottom: 20px;">
-                        <label for="assignGroupSelect" style="display: block; margin-bottom: 8px; font-weight: 600;">추가할 그룹 선택:</label>
-                        <select id="assignGroupSelect" style="width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 14px;">
+                        <label for="assignGroupSelect" style="display: block; margin-bottom: 8px; font-weight: 600; color: var(--text-primary);">추가할 그룹 선택:</label>
+                        <select id="assignGroupSelect" style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 4px; font-size: 14px; background: var(--bg-secondary); color: var(--text-primary);">
                             <option value="">그룹을 선택하세요</option>
                         </select>
-                        <div id="assignGroupInfo" style="margin-top: 10px; padding: 10px; background: #dbeafe; border-left: 4px solid #0ea5e9; border-radius: 4px; display: none;">
-                            <p style="margin: 0; color: #075985; font-size: 13px;"></p>
+                        <div id="assignGroupInfo" style="margin-top: 10px; padding: 10px; background: var(--info-bg); border-left: 4px solid var(--info-border); border-radius: 4px; display: none;">
+                            <p style="margin: 0; color: var(--info-text); font-size: 13px;"></p>
                         </div>
                     </div>
 
@@ -3881,45 +4971,45 @@
                 </div>
                 <div class="card-body">
                     <div style="margin-bottom: 20px;">
-                        <p style="color: #666; margin-bottom: 15px;">
+                        <p style="color: var(--text-secondary); margin-bottom: 15px;">
                             모든 문서를 다시 색인합니다. 임베딩 모델을 변경한 경우 또는 문서 검색에 문제가 있는 경우 재색인을 수행하세요.
                         </p>
-                        <div style="padding: 15px; background: #fff3cd; border-left: 4px solid #ffc107; border-radius: 4px; margin-bottom: 20px;">
-                            <p style="margin: 0; color: #856404;"><strong>⚠️ 주의사항:</strong></p>
-                            <ul style="margin: 10px 0 0 20px; color: #856404;">
+                        <div style="padding: 15px; background: var(--warning-bg); border-left: 4px solid var(--warning-border); border-radius: 4px; margin-bottom: 20px;">
+                            <p style="margin: 0; color: var(--warning-text);"><strong>⚠️ 주의사항:</strong></p>
+                            <ul style="margin: 10px 0 0 20px; color: var(--warning-text);">
                                 <li>재색인은 수 분이 걸릴 수 있습니다</li>
                                 <li>재색인 중에도 챗봇은 정상적으로 사용 가능합니다</li>
                                 <li>진행 상황은 실시간으로 확인할 수 있습니다</li>
                             </ul>
                         </div>
-                        <button id="adminReindexBtn" onclick="adminStartReindex()" style="padding: 12px 24px; background: #667eea; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: 600;">
+                        <button id="adminReindexBtn" onclick="adminStartReindex()" style="padding: 12px 24px; background: var(--primary-color); color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: 600;">
                             🔄 재색인 시작
                         </button>
-                        <button id="adminClearProgressBtn" onclick="adminClearReindexProgress()" style="padding: 12px 24px; background: #6c757d; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: 600; margin-left: 10px;">
+                        <button id="adminClearProgressBtn" onclick="adminClearReindexProgress()" style="padding: 12px 24px; background: var(--text-muted); color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: 600; margin-left: 10px;">
                             🧹 진행 상태 초기화
                         </button>
                     </div>
 
-                    <div style="margin-top: 15px; padding: 12px; background: #e7f3ff; border-left: 4px solid #2196f3; border-radius: 4px;">
-                        <p style="margin: 0; color: #1565c0; font-size: 14px;">
+                    <div style="margin-top: 15px; padding: 12px; background: var(--info-bg); border-left: 4px solid var(--info-border); border-radius: 4px;">
+                        <p style="margin: 0; color: var(--info-text); font-size: 14px;">
                             <strong>💡 Tip:</strong> 재색인 에러 상태가 지속되면 "진행 상태 초기화" 버튼을 클릭하세요.
                             에러 상태는 1시간 후 자동으로 초기화되지만, 즉시 초기화가 필요한 경우 이 버튼을 사용할 수 있습니다.
                         </p>
                     </div>
 
-                    <div id="adminReindexProgress" style="display: none; margin-top: 30px; padding: 20px; background: #f8f9fa; border-radius: 8px;">
+                    <div id="adminReindexProgress" style="display: none; margin-top: 30px; padding: 20px; background: var(--bg-tertiary); border-radius: 8px;">
                         <div style="margin-bottom: 15px;">
-                            <h4 id="adminReindexStep" style="margin: 0 0 10px 0;">준비 중...</h4>
-                            <div style="width: 100%; height: 30px; background: #e2e8f0; border-radius: 15px; overflow: hidden;">
+                            <h4 id="adminReindexStep" style="margin: 0 0 10px 0; color: var(--text-primary);">준비 중...</h4>
+                            <div style="width: 100%; height: 30px; background: var(--border-color); border-radius: 15px; overflow: hidden;">
                                 <div id="adminReindexBar" style="height: 100%; background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); transition: width 0.3s; width: 0%;"></div>
                             </div>
-                            <p id="adminReindexPercent" style="margin: 10px 0 0 0; text-align: center; font-size: 18px; font-weight: 600;">0%</p>
+                            <p id="adminReindexPercent" style="margin: 10px 0 0 0; text-align: center; font-size: 18px; font-weight: 600; color: var(--text-primary);">0%</p>
                         </div>
                         <div style="text-align: center; margin-bottom: 10px;">
-                            <span id="adminReindexStats" style="font-size: 16px; font-weight: 600;">0 / 0</span>
+                            <span id="adminReindexStats" style="font-size: 16px; font-weight: 600; color: var(--text-primary);">0 / 0</span>
                         </div>
                         <div style="text-align: center; margin-bottom: 15px;">
-                            <span id="adminReindexTime" style="font-size: 14px; color: #666;">⏱️ 예상 남은 시간: 계산 중...</span>
+                            <span id="adminReindexTime" style="font-size: 14px; color: var(--text-secondary);">⏱️ 예상 남은 시간: 계산 중...</span>
                         </div>
                         <div style="text-align: center;">
                             <button id="adminCancelReindexBtn" onclick="adminCancelReindex()" style="padding: 10px 20px; background: #dc3545; color: white; border: none; border-radius: 6px; cursor: pointer;">
@@ -4071,14 +5161,14 @@
             <div class="card">
                 <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
                     <h3 style="margin: 0;">백업 목록</h3>
-                    <button onclick="refreshBackupList()" style="padding: 8px 16px; background: #667eea; color: white; border: none; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 6px;">
+                    <button onclick="refreshBackupList()" style="padding: 8px 16px; background: var(--primary-color); color: white; border: none; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 6px;">
                         <span>🔄</span>
                         새로고침
                     </button>
                 </div>
                 <div class="card-body">
                     <div id="backupListContainer">
-                        <div style="text-align: center; padding: 40px; color: #999;">
+                        <div style="text-align: center; padding: 40px; color: var(--text-muted);">
                             <div style="font-size: 48px; margin-bottom: 16px;">💾</div>
                             <p>백업 목록을 불러오는 중...</p>
                         </div>
@@ -4128,9 +5218,15 @@
                                 "시스템 설정" 탭에서 Hybrid RAG를 활성화하면 로컬 문서 + 웹 검색 + 공식 문서를 통합 검색할 수 있습니다. 웹 검색은 Tavily(클라우드) 또는 SearXNG(자체 호스팅)를 선택할 수 있습니다.
                             </p>
                         </div>
+                        <div style="padding: 15px; background: #f8f9fa; border-radius: 8px; border-left: 4px solid #4caf50;">
+                            <h4 style="margin: 0 0 10px 0; color: #4caf50;">6️⃣ TTS 설정 (선택)</h4>
+                            <p style="margin: 0; font-size: 14px; color: #666;">
+                                "시스템 설정" 탭에서 TTS를 활성화하면 사용자가 챗봇 답변을 음성으로 들을 수 있습니다. Edge TTS(클라우드)는 별도 설치 없이, Qwen3 TTS(로컬)는 GPU 서버가 필요합니다.
+                            </p>
+                        </div>
                     </div>
                     <div style="margin-top: 20px; padding: 15px; background: #e7f3ff; border-left: 4px solid #2196f3; border-radius: 4px;">
-                        <p style="margin: 0; color: #0d47a1;"><strong>💡 시작 팁:</strong> 먼저 문서를 업로드하고 그룹화한 후, 챗봇 페이지에서 검색해보세요. Hybrid RAG는 외부 정보가 필요할 때만 활성화하세요.</p>
+                        <p style="margin: 0; color: #0d47a1;"><strong>💡 시작 팁:</strong> 먼저 문서를 업로드하고 그룹화한 후, 챗봇 페이지에서 검색해보세요. Hybrid RAG와 TTS는 필요할 때 선택적으로 활성화하세요.</p>
                     </div>
                 </div>
             </div>
@@ -4774,6 +5870,39 @@
                         <li><strong>정상 작동 엔진:</strong> Google, Bing, DuckDuckGo, Brave, Wikipedia, GitHub, StackOverflow</li>
                     </ul>
 
+                    <h4 style="color: #dc3545; margin: 20px 0 15px 0;">❌ TTS 음성이 재생되지 않음</h4>
+                    <ul style="line-height: 1.8; color: #444;">
+                        <li><strong>증상:</strong> 음성 버튼을 클릭해도 소리가 나지 않거나 오류 발생</li>
+                        <li><strong>원인:</strong>
+                            <ul style="margin: 5px 0 0 20px;">
+                                <li>TTS가 비활성화 상태 (관리자 설정 필요)</li>
+                                <li>Edge TTS: 인터넷 연결 불량 또는 Microsoft 서비스 일시 장애</li>
+                                <li>Qwen3 TTS: 로컬 TTS 서버 미실행 또는 GPU 부족</li>
+                            </ul>
+                        </li>
+                        <li><strong>해결:</strong>
+                            <ul style="margin: 5px 0 0 20px;">
+                                <li>"시스템 설정" 탭 → TTS 설정 → TTS 활성화 확인</li>
+                                <li>Edge TTS 사용 시: 인터넷 연결 확인, 브라우저 새로고침</li>
+                                <li>Qwen3 TTS 사용 시: TTS 서버 실행 상태 확인, GPU 메모리 점검</li>
+                                <li>브라우저 오디오 권한 확인 (주소창 좌측 자물쇠 아이콘)</li>
+                            </ul>
+                        </li>
+                    </ul>
+
+                    <h4 style="color: #dc3545; margin: 20px 0 15px 0;">❌ 스트리밍 TTS 끊김 또는 지연</h4>
+                    <ul style="line-height: 1.8; color: #444;">
+                        <li><strong>증상:</strong> 실시간 음성 읽기 시 음성이 끊기거나 지연됨</li>
+                        <li><strong>원인:</strong> 네트워크 지연, 서버 부하, 긴 응답 텍스트</li>
+                        <li><strong>해결:</strong>
+                            <ul style="margin: 5px 0 0 20px;">
+                                <li>Edge TTS(클라우드)로 전환 시 안정성 향상</li>
+                                <li>네트워크 상태 확인</li>
+                                <li>스트리밍 TTS 대신 답변 완료 후 음성 버튼 사용</li>
+                            </ul>
+                        </li>
+                    </ul>
+
                     <div style="margin-top: 20px; padding: 15px; background: #f8d7da; border-left: 4px solid #dc3545; border-radius: 4px;">
                         <p style="margin: 0; color: #721c24;"><strong>🆘 추가 지원:</strong> 위 방법으로 해결되지 않는 경우 시스템 관리자에게 문의하세요.</p>
                     </div>
@@ -5008,6 +6137,203 @@
                 </div>
             </div>
 
+            <!-- TTS Management Help -->
+            <div class="card" style="margin-bottom: 20px;">
+                <div class="card-header" style="cursor: pointer;" onclick="toggleHelpSection('ttsHelp')">
+                    <h3 style="margin: 0; display: flex; justify-content: space-between; align-items: center;">
+                        🔊 TTS (음성 합성) 관리
+                        <span id="ttsHelpToggle">▼</span>
+                    </h3>
+                </div>
+                <div id="ttsHelp" class="card-body" style="display: none;">
+                    <h4 style="color: #667eea; margin-bottom: 15px;">🎧 TTS 개요</h4>
+                    <ul style="line-height: 1.8; color: #444;">
+                        <li><strong>용도:</strong> AI 답변을 음성으로 읽어주는 기능</li>
+                        <li><strong>설정 위치:</strong> 모델 설정 탭 → TTS (음성 합성) 설정</li>
+                        <li><strong>사용자 연동:</strong> TTS 활성화 시 사용자 채팅 화면에 음성 버튼(🔊)이 자동 표시됨</li>
+                        <li><strong>스트리밍 TTS:</strong> 사용자가 설정에서 실시간 음성 읽기를 활성화하면, 답변 생성 중 실시간 음성 재생</li>
+                    </ul>
+
+                    <h4 style="color: #667eea; margin: 20px 0 15px 0;">🤖 지원 모델</h4>
+                    <div style="margin-bottom: 15px;">
+                        <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+                            <thead>
+                                <tr style="background: #667eea; color: white;">
+                                    <th style="padding: 10px; text-align: left; border: 1px solid #ddd;">모델</th>
+                                    <th style="padding: 10px; text-align: left; border: 1px solid #ddd;">특징</th>
+                                    <th style="padding: 10px; text-align: left; border: 1px solid #ddd;">권장 용도</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td style="padding: 8px; border: 1px solid #ddd;"><strong>Edge TTS</strong></td>
+                                    <td style="padding: 8px; border: 1px solid #ddd;">Microsoft 클라우드, 빠른 속도, 다양한 음성</td>
+                                    <td style="padding: 8px; border: 1px solid #ddd;">일반적인 사용 (권장)</td>
+                                </tr>
+                                <tr style="background: #f8f9fa;">
+                                    <td style="padding: 8px; border: 1px solid #ddd;"><strong>Qwen3 TTS 0.6B</strong></td>
+                                    <td style="padding: 8px; border: 1px solid #ddd;">로컬 실행, 빠른 속도, 음성 복제 지원</td>
+                                    <td style="padding: 8px; border: 1px solid #ddd;">로컬 실행이 필요할 때</td>
+                                </tr>
+                                <tr>
+                                    <td style="padding: 8px; border: 1px solid #ddd;"><strong>Qwen3 TTS 0.6B CustomVoice</strong></td>
+                                    <td style="padding: 8px; border: 1px solid #ddd;">로컬 실행, 최적화된 음성</td>
+                                    <td style="padding: 8px; border: 1px solid #ddd;">빠른 로컬 음성 합성</td>
+                                </tr>
+                                <tr style="background: #f8f9fa;">
+                                    <td style="padding: 8px; border: 1px solid #ddd;"><strong>Qwen3 TTS 1.7B</strong></td>
+                                    <td style="padding: 8px; border: 1px solid #ddd;">로컬 실행, 최고 품질 (속도 느림)</td>
+                                    <td style="padding: 8px; border: 1px solid #ddd;">품질 우선 환경</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <h4 style="color: #667eea; margin: 20px 0 15px 0;">🌍 지원 언어</h4>
+                    <ul style="line-height: 1.8; color: #444;">
+                        <li><strong>한국어 (ko):</strong> 기본 언어</li>
+                        <li><strong>영어 (en):</strong> English</li>
+                        <li><strong>중국어 (zh):</strong> 中文</li>
+                        <li><strong>일본어 (ja):</strong> 日本語</li>
+                    </ul>
+
+                    <h4 style="color: #667eea; margin: 20px 0 15px 0;">⚙️ 설정 항목</h4>
+                    <ul style="line-height: 1.8; color: #444;">
+                        <li><strong>TTS 활성화:</strong> 전체 TTS 기능 활성화/비활성화</li>
+                        <li><strong>TTS 모델:</strong> 사용할 음성 합성 모델 선택</li>
+                        <li><strong>기본 언어:</strong> 음성 합성 시 기본 언어 설정</li>
+                        <li><strong>음성 속도:</strong> 0.5x (느리게) ~ 2.0x (빠르게) 조절</li>
+                        <li><strong>최대 텍스트 길이:</strong> 한 번에 음성으로 변환할 최대 글자 수</li>
+                    </ul>
+
+                    <div style="margin-top: 20px; padding: 15px; background: #e8f5e9; border-left: 4px solid #4caf50; border-radius: 4px;">
+                        <p style="margin: 0; color: #2e7d32;"><strong>💡 팁:</strong> Edge TTS는 인터넷 연결이 필요하지만 가장 빠르고 안정적입니다. 보안상 외부 통신이 불가능한 환경에서는 Qwen3 TTS 로컬 모델을 사용하세요.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Backup Management Help -->
+            <div class="card" style="margin-bottom: 20px;">
+                <div class="card-header" style="cursor: pointer;" onclick="toggleHelpSection('backupHelp')">
+                    <h3 style="margin: 0; display: flex; justify-content: space-between; align-items: center;">
+                        💾 백업 관리
+                        <span id="backupHelpToggle">▼</span>
+                    </h3>
+                </div>
+                <div id="backupHelp" class="card-body" style="display: none;">
+                    <h4 style="color: #667eea; margin-bottom: 15px;">📋 백업 개요</h4>
+                    <ul style="line-height: 1.8; color: #444;">
+                        <li><strong>대상:</strong> Redis에 저장된 모든 데이터 (문서 메타데이터, 임베딩, 설정, 사용자, 그룹, 조직 등)</li>
+                        <li><strong>형식:</strong> JSON 기반 백업 파일</li>
+                        <li><strong>설정 위치:</strong> 시스템 관리 → 백업 탭</li>
+                    </ul>
+
+                    <h4 style="color: #667eea; margin: 20px 0 15px 0;">📥 백업 생성</h4>
+                    <ul style="line-height: 1.8; color: #444;">
+                        <li><strong>수동 백업:</strong> "백업 생성" 버튼으로 즉시 백업 가능</li>
+                        <li><strong>자동 백업:</strong> 스케줄 설정으로 주기적 자동 백업 (매일, 매주 등)</li>
+                        <li><strong>백업 목록:</strong> 생성된 백업 파일 목록과 크기, 날짜 확인</li>
+                        <li><strong>백업 다운로드:</strong> 백업 파일을 로컬로 다운로드하여 안전하게 보관</li>
+                    </ul>
+
+                    <h4 style="color: #667eea; margin: 20px 0 15px 0;">📤 복원</h4>
+                    <ul style="line-height: 1.8; color: #444;">
+                        <li><strong>백업 복원:</strong> 백업 목록에서 원하는 시점의 백업으로 복원</li>
+                        <li><strong>복원 시 주의:</strong> 현재 Redis 데이터가 모두 삭제되고 백업 시점의 데이터로 교체됨</li>
+                        <li><strong>원본 파일:</strong> <code>data/</code> 디렉토리의 원본 문서는 별도 백업 필요</li>
+                    </ul>
+
+                    <div style="margin-top: 20px; padding: 15px; background: #fff3cd; border-left: 4px solid #ffc107; border-radius: 4px;">
+                        <p style="margin: 0; color: #856404;"><strong>⚠️ 주의:</strong> 복원 시 현재 데이터가 완전히 대체됩니다. 복원 전 반드시 현재 상태를 백업하고, 필요한 경우에만 복원하세요. 원본 문서 파일(<code>data/</code>)은 별도로 파일 시스템에서 백업해야 합니다.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Audit Log Help -->
+            <div class="card" style="margin-bottom: 20px;">
+                <div class="card-header" style="cursor: pointer;" onclick="toggleHelpSection('auditLogHelp')">
+                    <h3 style="margin: 0; display: flex; justify-content: space-between; align-items: center;">
+                        📋 감사 로그
+                        <span id="auditLogHelpToggle">▼</span>
+                    </h3>
+                </div>
+                <div id="auditLogHelp" class="card-body" style="display: none;">
+                    <h4 style="color: #667eea; margin-bottom: 15px;">📝 감사 로그 개요</h4>
+                    <ul style="line-height: 1.8; color: #444;">
+                        <li><strong>용도:</strong> 시스템 내 모든 주요 관리 활동의 추적 및 기록</li>
+                        <li><strong>기록 항목:</strong> 사용자 관리, 문서 업로드/삭제, 설정 변경, 조직 관리, 보안 이벤트 등</li>
+                        <li><strong>설정 위치:</strong> 모니터링 → 감사 로그 탭</li>
+                    </ul>
+
+                    <h4 style="color: #667eea; margin: 20px 0 15px 0;">🔍 필터링</h4>
+                    <ul style="line-height: 1.8; color: #444;">
+                        <li><strong>사용자 필터:</strong> 특정 사용자의 활동만 조회</li>
+                        <li><strong>작업 유형 필터:</strong> 로그인, 문서 관리, 설정 변경 등 유형별 필터링</li>
+                        <li><strong>기간 필터:</strong> 시작일~종료일 범위 지정하여 조회</li>
+                    </ul>
+
+                    <h4 style="color: #667eea; margin: 20px 0 15px 0;">📊 통계</h4>
+                    <ul style="line-height: 1.8; color: #444;">
+                        <li><strong>전체 기록:</strong> 총 감사 로그 수</li>
+                        <li><strong>성공률:</strong> 작업 성공/실패 비율</li>
+                        <li><strong>오늘 활동:</strong> 당일 발생한 활동 수</li>
+                        <li><strong>활성 사용자:</strong> 최근 활동이 있는 사용자 수</li>
+                    </ul>
+
+                    <h4 style="color: #667eea; margin: 20px 0 15px 0;">📋 기록 정보</h4>
+                    <ul style="line-height: 1.8; color: #444;">
+                        <li><strong>시간:</strong> 활동 발생 시각</li>
+                        <li><strong>사용자:</strong> 활동을 수행한 관리자/사용자</li>
+                        <li><strong>작업:</strong> 수행된 작업 유형</li>
+                        <li><strong>대상:</strong> 작업이 수행된 대상 (문서명, 사용자명 등)</li>
+                        <li><strong>결과:</strong> 성공/실패 여부</li>
+                        <li><strong>IP 주소:</strong> 요청 발생 IP</li>
+                        <li><strong>응답시간:</strong> 요청 처리 소요 시간</li>
+                    </ul>
+
+                    <div style="margin-top: 20px; padding: 15px; background: #e8f5e9; border-left: 4px solid #4caf50; border-radius: 4px;">
+                        <p style="margin: 0; color: #2e7d32;"><strong>💡 팁:</strong> 감사 로그를 정기적으로 확인하여 비정상적인 활동이나 보안 위협을 조기에 감지하세요. 특정 사용자의 활동이 의심되면 사용자 필터로 해당 활동을 추적할 수 있습니다.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Performance Metrics Help -->
+            <div class="card" style="margin-bottom: 20px;">
+                <div class="card-header" style="cursor: pointer;" onclick="toggleHelpSection('metricsHelp')">
+                    <h3 style="margin: 0; display: flex; justify-content: space-between; align-items: center;">
+                        📈 성능 메트릭
+                        <span id="metricsHelpToggle">▼</span>
+                    </h3>
+                </div>
+                <div id="metricsHelp" class="card-body" style="display: none;">
+                    <h4 style="color: #667eea; margin-bottom: 15px;">📊 성능 메트릭 개요</h4>
+                    <ul style="line-height: 1.8; color: #444;">
+                        <li><strong>용도:</strong> 시스템 검색 성능 및 사용 현황 모니터링</li>
+                        <li><strong>설정 위치:</strong> 모니터링 → 성능 메트릭 탭</li>
+                        <li><strong>자동 갱신:</strong> 탭 전환 시 최신 데이터로 자동 업데이트</li>
+                    </ul>
+
+                    <h4 style="color: #667eea; margin: 20px 0 15px 0;">📋 주요 지표</h4>
+                    <ul style="line-height: 1.8; color: #444;">
+                        <li><strong>전체 검색 수:</strong> 총 검색 요청 횟수</li>
+                        <li><strong>평균 응답 시간:</strong> 검색 요청 평균 처리 시간</li>
+                        <li><strong>캐시 적중률:</strong> 캐시에서 답변이 제공된 비율</li>
+                        <li><strong>검색 소스별 성능:</strong> 로컬, 웹, 공식 문서 등 소스별 검색 통계</li>
+                    </ul>
+
+                    <h4 style="color: #667eea; margin: 20px 0 15px 0;">🔍 최근 검색</h4>
+                    <ul style="line-height: 1.8; color: #444;">
+                        <li><strong>최근 검색 목록:</strong> 최근 수행된 검색 쿼리 및 결과</li>
+                        <li><strong>응답 시간:</strong> 각 검색의 처리 소요 시간</li>
+                        <li><strong>검색 모드:</strong> 사용된 검색 모드 (Smart, Local, Web 등)</li>
+                    </ul>
+
+                    <div style="margin-top: 20px; padding: 15px; background: #e8f5e9; border-left: 4px solid #4caf50; border-radius: 4px;">
+                        <p style="margin: 0; color: #2e7d32;"><strong>💡 팁:</strong> 평균 응답 시간이 지속적으로 높으면 캐시 설정을 최적화하거나, 문서 재색인을 수행하여 검색 성능을 개선할 수 있습니다. 캐시 적중률이 낮으면 캐시 임계값을 조정해 보세요.</p>
+                    </div>
+                </div>
+            </div>
+
             <!-- FAQ -->
             <div class="card">
                 <div class="card-header" style="cursor: pointer;" onclick="toggleHelpSection('faqHelp')">
@@ -5087,10 +6413,31 @@
                         </p>
                     </div>
 
-                    <div>
+                    <div style="margin-bottom: 20px;">
                         <h4 style="color: #667eea; margin-bottom: 10px;">Q: 문서 메타데이터를 찾을 수 없다는 오류가 나오는데 어떻게 해야 하나요?</h4>
                         <p style="margin: 0 0 0 20px; padding: 10px; background: #f8f9fa; border-radius: 4px;">
                             A: 문서 파일은 존재하지만 인덱싱이 실패한 경우입니다. "재색인" 탭에서 "문서 재인덱싱" 버튼을 클릭하여 전체 문서를 재인덱싱하거나, 해당 문서를 삭제 후 재업로드하세요. 상세한 해결 방법은 "문제 해결" 섹션을 참고하세요.
+                        </p>
+                    </div>
+
+                    <div style="margin-bottom: 20px;">
+                        <h4 style="color: #667eea; margin-bottom: 10px;">Q: TTS 기능이 활성화되었는데 사용자에게 음성 버튼이 안 보입니다</h4>
+                        <p style="margin: 0 0 0 20px; padding: 10px; background: #f8f9fa; border-radius: 4px;">
+                            A: 사용자가 페이지를 새로고침(F5)하면 TTS 상태가 자동으로 반영됩니다. Edge TTS를 사용하는 경우 서버의 인터넷 연결 상태를 확인하세요. Qwen3 TTS 모델의 경우 해당 모델이 서버에 설치되어 있어야 합니다.
+                        </p>
+                    </div>
+
+                    <div style="margin-bottom: 20px;">
+                        <h4 style="color: #667eea; margin-bottom: 10px;">Q: 백업 복원 후 문서가 검색되지 않습니다</h4>
+                        <p style="margin: 0 0 0 20px; padding: 10px; background: #f8f9fa; border-radius: 4px;">
+                            A: 백업은 Redis 데이터만 복원합니다. 원본 문서 파일(<code>data/</code> 디렉토리)이 백업 시점과 일치하는지 확인하세요. 불일치하면 "재색인" 탭에서 전체 재색인을 수행하세요.
+                        </p>
+                    </div>
+
+                    <div>
+                        <h4 style="color: #667eea; margin-bottom: 10px;">Q: 감사 로그에서 특정 기간의 활동을 확인하려면 어떻게 하나요?</h4>
+                        <p style="margin: 0 0 0 20px; padding: 10px; background: #f8f9fa; border-radius: 4px;">
+                            A: 감사 로그 탭에서 시작일과 종료일을 설정하고, 사용자명이나 작업 유형으로 추가 필터링할 수 있습니다. "새로고침" 버튼을 클릭하면 설정된 필터로 검색됩니다.
                         </p>
                     </div>
                 </div>
@@ -5713,8 +7060,13 @@
             // 세션 유효성 검증 초기화 (주기적 세션 체크)
             Auth.startSessionValidation();
 
-            // 초기 대시보드 로드
-            await loadDashboard();
+            // 초기 대시보드 로드 (해시가 없거나 dashboard인 경우만)
+            // 다른 탭 해시가 있으면 AdminCore.init()이 해당 탭을 로드하므로
+            // loadDashboard와의 isLoading 경합을 방지
+            const initialHash = window.location.hash.slice(1);
+            if (!initialHash || initialHash === 'dashboard') {
+                await loadDashboard();
+            }
         })();
 
         const user = Auth.getUser();
@@ -6380,14 +7732,14 @@
 
                 const hasFilters = eventTypeFilter || levelFilter || timeRangeText;
                 const filterInfo = hasFilters
-                    ? `<div style="padding: 10px; background: #e3f2fd; border-left: 4px solid #2196f3; margin-bottom: 15px; border-radius: 4px;">
+                    ? `<div style="padding: 10px; background: var(--color-info-light, #e3f2fd); border-left: 4px solid #2196f3; margin-bottom: 15px; border-radius: 4px; color: var(--text-primary, inherit);">
                         <strong>필터 적용됨:</strong>
                         ${timeRangeText ? `<div>${timeRangeText}</div>` : ''}
                         ${eventTypeFilter ? `이벤트 유형: <code>${eventTypeFilter}</code> ` : ''}
                         ${levelFilter ? `레벨: <code>${levelFilter}</code> ` : ''}
                         | 총 <strong>${data.total || data.logs.length}</strong>개 로그
                        </div>`
-                    : `<div style="padding: 10px; background: #f5f5f5; margin-bottom: 15px; border-radius: 4px;">
+                    : `<div style="padding: 10px; background: var(--bg-muted, #f5f5f5); margin-bottom: 15px; border-radius: 4px; color: var(--text-primary, inherit);">
                         ${timeRangeText ? `<div style="margin-bottom: 5px;">${timeRangeText}</div>` : ''}
                         총 <strong>${data.total || data.logs.length}</strong>개 로그
                        </div>`;
@@ -6403,9 +7755,9 @@
                     const levelColor = levelColors[log.level] || '#666';
 
                     return `
-                        <div class="log-entry" style="border-left: 4px solid ${levelColor}; margin-bottom: 12px; padding: 12px; background: white; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                        <div class="log-entry" style="border-left: 4px solid ${levelColor}; margin-bottom: 12px; padding: 12px; background: var(--bg-card, white); border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
                             <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px;">
-                                <div class="log-time" style="color: #666; font-size: 0.9em;">
+                                <div class="log-time" style="color: var(--text-muted, #666); font-size: 0.9em;">
                                     📅 ${new Date((log.timestamp || '').replace(/\+00:00Z$/, 'Z')).toLocaleString('ko-KR', {
                                         year: 'numeric',
                                         month: '2-digit',
@@ -6420,10 +7772,10 @@
                                     ${log.level}
                                 </span>
                             </div>
-                            <div class="log-message" style="font-size: 1em; margin-bottom: 8px; color: #333;">
+                            <div class="log-message" style="font-size: 1em; margin-bottom: 8px; color: var(--text-primary, #333);">
                                 ${log.message}
                             </div>
-                            <div class="log-details" style="color: #666; font-size: 0.9em; display: flex; gap: 15px; flex-wrap: wrap;">
+                            <div class="log-details" style="color: var(--text-muted, #666); font-size: 0.9em; display: flex; gap: 15px; flex-wrap: wrap;">
                                 <span>🏷️ <strong>유형:</strong> ${log.event_type}</span>
                                 ${log.username ? `<span>👤 <strong>사용자:</strong> ${log.username}</span>` : (log.user_id ? `<span>👤 <strong>사용자:</strong> ${log.user_id}</span>` : '')}
                                 ${log.ip_address ? `<span>🌐 <strong>IP:</strong> ${log.ip_address}</span>` : ''}
@@ -6456,7 +7808,7 @@
                 const isFiltered = eventTypeFilter || levelFilter;
 
                 container.innerHTML = `
-                    <p style="text-align: center; padding: 40px; color: #666;">
+                    <p style="text-align: center; padding: 40px; color: var(--text-muted, #666);">
                         ${isFiltered
                             ? '선택한 필터 조건에 해당하는 로그가 없습니다.<br>필터를 변경하거나 초기화해주세요.'
                             : (data.message || '아직 보안 로그가 기록되지 않았습니다.<br>사용자 로그인, 권한 오류 등의 보안 이벤트가 발생하면 여기에 표시됩니다.')}
@@ -6522,6 +7874,7 @@
 
             // 모든 탭 비활성화
             document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
+            document.querySelectorAll('.tab-dropdown').forEach(dd => dd.classList.remove('active'));
             document.querySelectorAll('.tab-dropdown-item').forEach(item => item.classList.remove('active'));
             document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
 
@@ -6530,6 +7883,11 @@
                 const clickedElement = event.target.closest('.tab, .tab-dropdown-item');
                 if (clickedElement) {
                     clickedElement.classList.add('active');
+                    // 드롭다운 아이템이면 부모 드롭다운도 활성화
+                    const parentDropdown = clickedElement.closest('.tab-dropdown');
+                    if (parentDropdown) {
+                        parentDropdown.classList.add('active');
+                    }
                 }
             }
             document.getElementById(tabName + '-tab').classList.add('active');
@@ -6552,8 +7910,19 @@
                 loadWebhooks();
             } else if (tabName === 'models') {
                 loadModels();
+                // TTS 설정 로드
+                console.log('[TAB] Models tab - loading TTS');
+                loadTTSModels().then(loadTTSConfig).catch(e => console.error('[TAB] TTS load error:', e));
             } else if (tabName === 'settings') {
                 loadSettings();
+                if (typeof adminRefreshCacheStats === 'function') adminRefreshCacheStats();
+                if (typeof loadPrompts === 'function') loadPrompts();
+                if (typeof loadRateLimitConfig === 'function') loadRateLimitConfig();
+                if (typeof loadCaptchaConfig === 'function') loadCaptchaConfig();
+                if (typeof loadTotpConfig === 'function') loadTotpConfig();
+                if (typeof loadBruteForceConfig === 'function') loadBruteForceConfig();
+                if (typeof loadHybridRagConfig === 'function') loadHybridRagConfig();
+                if (typeof loadRagQualityConfig === 'function') loadRagQualityConfig();
             } else if (tabName === 'documents') {
                 adminLoadDocuments();
             } else if (tabName === 'groups') {
@@ -6565,6 +7934,12 @@
                 loadPerformancemetrics();
             } else if (tabName === 'help') {
                 // 도움말 탭은 별도 로드 불필요
+            }
+
+            // Reapply theme styles after tab switch
+            var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+            if (typeof applyThemeStyles === 'function') {
+                setTimeout(function() { applyThemeStyles(isDark); }, 50);
             }
         }
 
@@ -7191,7 +8566,7 @@
                     `${filteredLogs.length}개 결과`;
             } else {
                 container.innerHTML = `
-                    <p style="text-align: center; padding: 40px; color: #666;">
+                    <p style="text-align: center; padding: 40px; color: var(--text-muted, #666);">
                         '<strong>${searchTerm}</strong>' 검색 결과가 없습니다.<br>
                         다른 검색어를 시도해보세요.
                     </p>
@@ -7264,10 +8639,6 @@
         });
 
         // 내비게이션
-        function goToProfile() {
-            window.location.href = '/static/profile.html';
-        }
-
         function goToMain() {
             window.location.href = '/';
         }
@@ -7595,7 +8966,7 @@
                 if (searches.length === 0) {
                     tbody.innerHTML = `
                         <tr>
-                            <td colspan="6" style="padding: 20px; text-align: center; color: #666;">
+                            <td colspan="6" style="padding: 20px; text-align: center; color: var(--text-muted, #666);">
                                 검색 기록이 없습니다
                             </td>
                         </tr>
@@ -7613,11 +8984,11 @@
                     const totalCount = search.total_count || 0;
 
                     return `
-                        <tr style="border-bottom: 1px solid #e5e7eb;">
+                        <tr style="border-bottom: 1px solid var(--border-color, #e5e7eb);">
                             <td style="padding: 12px; font-size: 14px;">${time}</td>
                             <td style="padding: 12px; font-size: 14px; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${query}</td>
                             <td style="padding: 12px; font-size: 14px;">
-                                <span style="padding: 2px 8px; background: #e0f2fe; color: #0369a1; border-radius: 4px; font-size: 12px;">
+                                <span class="mode-badge">
                                     ${mode}
                                 </span>
                             </td>
@@ -7633,7 +9004,7 @@
                 const tbody = document.getElementById('recent-searches-tbody');
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="6" style="padding: 20px; text-align: center; color: #dc2626;">
+                        <td colspan="6" style="padding: 20px; text-align: center; color: var(--color-danger, #dc2626);">
                             오류가 발생했습니다: ${error.message}
                         </td>
                     </tr>
@@ -8020,6 +9391,26 @@
         // 시스템 설정 함수
         // ====================================================================
 
+        // 설정 그룹 서브탭 전환
+        function switchSettingsGroup(group) {
+            // 모든 서브탭 비활성화
+            document.querySelectorAll('.settings-subtab').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            // 선택된 서브탭 활성화
+            const activeBtn = document.querySelector(`.settings-subtab[data-group="${group}"]`);
+            if (activeBtn) activeBtn.classList.add('active');
+
+            // 모든 카드 숨기기
+            document.querySelectorAll('.settings-card[data-settings-group]').forEach(card => {
+                card.classList.remove('settings-visible');
+            });
+            // 선택된 그룹 카드만 표시
+            document.querySelectorAll(`.settings-card[data-settings-group="${group}"]`).forEach(card => {
+                card.classList.add('settings-visible');
+            });
+        }
+
         // 설정 로드
         async function loadSettings() {
             try {
@@ -8240,7 +9631,7 @@
                 return `
                     <tr>
                         <td>${datetime}</td>
-                        <td><code style="background: #f5f5f5; padding: 2px 6px; border-radius: 3px;">${actionName}</code></td>
+                        <td><code style="background: var(--bg-muted, #f5f5f5); padding: 2px 6px; border-radius: 3px; color: var(--text-primary, inherit);">${actionName}</code></td>
                         <td>${log.username || log.user_id || 'anonymous'}</td>
                         <td>${log.ip_address || '-'}</td>
                         <td>${log.resource || '-'}</td>
@@ -8746,6 +10137,211 @@
         }
 
         // ====================================================================
+        // TTS Settings Functions (Admin)
+        // ====================================================================
+
+        // TTS 설정 로드
+        async function loadTTSConfig() {
+            console.log('[TTS] loadTTSConfig called');
+            try {
+                const config = await Auth.apiCall('/api/admin/tts/config');
+                console.log('[TTS] Config received:', config);
+
+                // TTS 활성화 체크박스
+                const checkbox = document.getElementById('tts-enabled');
+                console.log('[TTS] Checkbox element:', checkbox, 'Setting to:', config.enabled);
+                checkbox.checked = config.enabled;
+
+                // TTS 설정 섹션 표시/숨김
+                const configSection = document.getElementById('tts-config-section');
+                configSection.style.display = config.enabled ? 'block' : 'none';
+
+                // 설정값 적용
+                document.getElementById('tts-model-select').value = config.model_id || 'edge-tts';
+                _lastSavedTTSModelId = config.model_id || 'edge-tts';
+                document.getElementById('tts-language-select').value = config.default_language || 'ko';
+                document.getElementById('tts-speed-slider').value = config.default_speed || 1.0;
+                document.getElementById('tts-max-length-slider').value = config.max_text_length || 1000;
+                document.getElementById('tts-auto-play').checked = config.auto_play || false;
+
+                // 표시값 업데이트
+                updateTTSSpeedValue();
+                updateTTSMaxLengthValue();
+
+                // 상태 업데이트
+                const statusSpan = document.getElementById('tts-model-status');
+                if (config.model_loaded) {
+                    statusSpan.textContent = '✅ 모델 로드됨';
+                    statusSpan.style.color = '#16a34a';
+                } else if (config.enabled) {
+                    statusSpan.textContent = '⏳ 첫 사용 시 로드됨 (Lazy Loading)';
+                    statusSpan.style.color = '#d97706';
+                } else {
+                    statusSpan.textContent = '⏸️ 비활성화됨';
+                    statusSpan.style.color = '#6b7280';
+                }
+
+                devLog('TTS config loaded:', config);
+            } catch (error) {
+                console.error('[TTS] Error loading TTS config:', error);
+                logger.error('Error loading TTS config:', error);
+                // TTS API가 없는 경우 (이전 버전) 조용히 처리
+                const ttsCard = document.querySelector('.card:has(#tts-enabled)');
+                if (ttsCard) {
+                    ttsCard.style.display = 'none';
+                }
+            }
+        }
+
+        // TTS 활성화 상태 변경
+        function onTTSEnabledChange() {
+            const enabled = document.getElementById('tts-enabled').checked;
+            const configSection = document.getElementById('tts-config-section');
+            configSection.style.display = enabled ? 'block' : 'none';
+
+            // 자동 저장
+            saveTTSConfig();
+        }
+
+        // TTS 속도 값 업데이트
+        function updateTTSSpeedValue() {
+            const value = document.getElementById('tts-speed-slider').value;
+            document.getElementById('tts-speed-value').textContent = `${parseFloat(value).toFixed(1)}x`;
+        }
+
+        // TTS 최대 길이 값 업데이트
+        function updateTTSMaxLengthValue() {
+            const value = document.getElementById('tts-max-length-slider').value;
+            document.getElementById('tts-max-length-value').textContent = `${value}자`;
+        }
+
+        // TTS 설정 저장
+        let _lastSavedTTSModelId = null;
+        async function saveTTSConfig() {
+            const statusSpan = document.getElementById('tts-model-status');
+            const modelSelect = document.getElementById('tts-model-select');
+            try {
+                const config = {
+                    enabled: document.getElementById('tts-enabled').checked,
+                    model_id: modelSelect.value,
+                    default_language: document.getElementById('tts-language-select').value,
+                    default_speed: parseFloat(document.getElementById('tts-speed-slider').value),
+                    max_text_length: parseInt(document.getElementById('tts-max-length-slider').value),
+                    auto_play: document.getElementById('tts-auto-play').checked,
+                    default_voice: 'default'
+                };
+
+                // 모델이 변경되었는지 확인
+                const modelChanged = _lastSavedTTSModelId !== null && _lastSavedTTSModelId !== config.model_id;
+                const isLocalModel = config.model_id !== 'edge-tts';
+
+                // 모델 변경 시 로딩 진행 상태 표시
+                if (config.enabled && isLocalModel && modelChanged) {
+                    statusSpan.innerHTML = '<span class="spinner-inline"></span> 모델 로딩 중... (다운로드 및 초기화에 시간이 걸릴 수 있습니다)';
+                    statusSpan.style.color = '#3b82f6';
+                    modelSelect.disabled = true;
+                } else if (config.enabled && isLocalModel && _lastSavedTTSModelId === null) {
+                    statusSpan.innerHTML = '<span class="spinner-inline"></span> 설정 저장 중...';
+                    statusSpan.style.color = '#3b82f6';
+                }
+
+                const startTime = Date.now();
+                const result = await Auth.apiCall('/api/admin/tts/config', {
+                    method: 'PUT',
+                    body: JSON.stringify(config)
+                });
+                const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+
+                devLog('TTS config saved:', result);
+                _lastSavedTTSModelId = config.model_id;
+
+                // 상태 업데이트
+                if (result.model_loaded) {
+                    const timeInfo = elapsed > 2 ? ` (${elapsed}초)` : '';
+                    statusSpan.innerHTML = `✅ 모델 로드됨${timeInfo}`;
+                    statusSpan.style.color = '#16a34a';
+                } else if (result.enabled) {
+                    statusSpan.innerHTML = '⏳ 첫 사용 시 로드됨 (Lazy Loading)';
+                    statusSpan.style.color = '#d97706';
+                } else {
+                    statusSpan.innerHTML = '⏸️ 비활성화됨';
+                    statusSpan.style.color = '#6b7280';
+                }
+
+            } catch (error) {
+                logger.error('Error saving TTS config:', error);
+                statusSpan.innerHTML = '❌ 모델 로드 실패';
+                statusSpan.style.color = '#ef4444';
+                Auth.showError('TTS 설정 저장에 실패했습니다: ' + error.message);
+            } finally {
+                modelSelect.disabled = false;
+            }
+        }
+
+        // TTS 캐시 삭제
+        async function clearTTSCache() {
+            if (!confirm('TTS 음성 캐시를 삭제하시겠습니까?')) {
+                return;
+            }
+
+            try {
+                const result = await Auth.apiCall('/api/admin/tts/clear-cache', {
+                    method: 'POST'
+                });
+
+                alert(`✅ TTS 캐시가 삭제되었습니다. (${result.count || 0}개 파일)`);
+            } catch (error) {
+                logger.error('Error clearing TTS cache:', error);
+                Auth.showError('TTS 캐시 삭제에 실패했습니다: ' + error.message);
+            }
+        }
+
+        // TTS 모델 목록 로드
+        async function loadTTSModels() {
+            console.log('[TTS] loadTTSModels called');
+            try {
+                const models = await Auth.apiCall('/api/admin/tts/models');
+                console.log('[TTS] Models received:', models);
+                const select = document.getElementById('tts-model-select');
+
+                select.innerHTML = models.map(model =>
+                    `<option value="${model.id}">${model.name} - ${model.description}</option>`
+                ).join('');
+
+                devLog('TTS models loaded:', models);
+            } catch (error) {
+                console.error('[TTS] Error loading TTS models:', error);
+                logger.error('Error loading TTS models:', error);
+            }
+        }
+
+        // TTS 슬라이더 이벤트 리스너
+        const ttsSpeedSlider = document.getElementById('tts-speed-slider');
+        const ttsMaxLengthSlider = document.getElementById('tts-max-length-slider');
+
+        if (ttsSpeedSlider) {
+            ttsSpeedSlider.addEventListener('change', saveTTSConfig);
+        }
+        if (ttsMaxLengthSlider) {
+            ttsMaxLengthSlider.addEventListener('change', saveTTSConfig);
+        }
+
+        // TTS 모델 및 언어 변경 시 자동 저장
+        const ttsModelSelect = document.getElementById('tts-model-select');
+        const ttsLanguageSelect = document.getElementById('tts-language-select');
+        const ttsAutoPlay = document.getElementById('tts-auto-play');
+
+        if (ttsModelSelect) {
+            ttsModelSelect.addEventListener('change', saveTTSConfig);
+        }
+        if (ttsLanguageSelect) {
+            ttsLanguageSelect.addEventListener('change', saveTTSConfig);
+        }
+        if (ttsAutoPlay) {
+            ttsAutoPlay.addEventListener('change', saveTTSConfig);
+        }
+
+        // ====================================================================
         // Cache Settings Functions (Admin)
         // ====================================================================
 
@@ -8881,6 +10477,7 @@
 
             // 탭 버튼 활성화 상태 변경
             const tabs = document.querySelectorAll('.prompt-tab');
+            var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
             tabs.forEach(tab => {
                 if (tab.dataset.type === type) {
                     tab.classList.add('active');
@@ -8889,9 +10486,9 @@
                     tab.style.borderColor = colorMap[type];
                 } else {
                     tab.classList.remove('active');
-                    tab.style.background = '#f9fafb';
-                    tab.style.color = '#374151';
-                    tab.style.borderColor = '#e5e7eb';
+                    tab.style.background = isDark ? '#334155' : '#f9fafb';
+                    tab.style.color = isDark ? '#cbd5e1' : '#374151';
+                    tab.style.borderColor = isDark ? '#475569' : '#e5e7eb';
                 }
             });
 
@@ -9529,10 +11126,10 @@
                         const uploadDate = new Date(createdAt).toLocaleString('ko-KR');
 
                         html += `
-                            <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px; background: white; border-radius: 6px; border: 1px solid #e5e7eb;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px; background: var(--bg-card, white); border-radius: 6px; border: 1px solid var(--border-color, #e5e7eb);">
                                 <div style="flex: 1;">
-                                    <div style="font-weight: 500; color: #374151; margin-bottom: 4px;">📄 ${filename}</div>
-                                    <div style="font-size: 12px; color: #9ca3af;">
+                                    <div style="font-weight: 500; color: var(--text-primary, #374151); margin-bottom: 4px;">📄 ${filename}</div>
+                                    <div style="font-size: 12px; color: var(--text-muted, #9ca3af);">
                                         ${sizeMB} MB • ${chunkCount} 청크 • ${uploadDate}
                                     </div>
                                 </div>
@@ -9864,12 +11461,13 @@
                 const data = await Auth.apiCall('/api/documents');
                 adminAvailableDocuments = data.documents || [];
 
-                // Get current group's documents - use Auth.apiCall
+                // 현재 그룹에 이미 추가된 문서 목록 조회
                 const groupData = await Auth.apiCall(`/api/groups/${adminSelectedGroupId}/documents`);
                 const groupDocs = groupData.documents || [];
-                const groupDocFilenames = new Set(groupDocs.map(d => d.filename).filter(f => f));
+                // API가 파일명 문자열 배열을 반환하므로 직접 Set 생성
+                const groupDocFilenames = new Set(groupDocs);
 
-                // Filter out documents already in this group
+                // 이미 현재 그룹에 있는 문서 제외
                 const availableDocs = adminAvailableDocuments.filter(doc => !groupDocFilenames.has(doc.filename));
 
                 if (availableDocs.length === 0) {
@@ -9932,13 +11530,13 @@
             const searchTerm = searchInput.value.toLowerCase().trim();
 
             try {
-                // Get current group's documents - use Auth.apiCall
+                // 현재 그룹의 문서 목록 조회
                 const groupData = await Auth.apiCall(`/api/groups/${adminSelectedGroupId}/documents`);
                 const groupDocs = groupData.documents || [];
-                const groupDocFilenames = new Set(groupDocs.map(d => d.filename).filter(f => f));
+                const groupDocFilenames = new Set(groupDocs);
 
-                // Filter documents
-                let filtered = adminAvailableDocuments.filter(doc =>
+                // 현재 그룹 문서 제외 + 검색어 필터
+                const filtered = adminAvailableDocuments.filter(doc =>
                     !groupDocFilenames.has(doc.filename) &&
                     (searchTerm === '' || doc.filename.toLowerCase().includes(searchTerm))
                 );
@@ -10278,12 +11876,12 @@
                 let html = '<div style="display: grid; gap: 15px;">';
                 data.chunks.forEach(chunk => {
                     html += `
-                        <div style="background: white; padding: 15px; border-radius: 8px; border: 1px solid #e0e0e0;">
+                        <div style="background: var(--bg-card, white); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color, #e0e0e0);">
                             <div style="display: flex; justify-content: space-between; margin-bottom: 10px; color: #667eea; font-size: 14px; font-weight: 600;">
                                 <span>청크 #${chunk.index}</span>
                                 <span>📄 페이지 ${chunk.page || 'N/A'}</span>
                             </div>
-                            <div style="color: #333; line-height: 1.6; white-space: pre-wrap;">${escapeHtml(chunk.text)}</div>
+                            <div style="color: var(--text-primary, #333); line-height: 1.6; white-space: pre-wrap;">${escapeHtml(chunk.text)}</div>
                         </div>
                     `;
                 });
@@ -11115,7 +12713,7 @@
             } catch (error) {
                 logger.error('Error loading backups:', error);
                 document.getElementById('backupListContainer').innerHTML = `
-                    <div style="text-align: center; padding: 40px; color: #f44336;">
+                    <div style="text-align: center; padding: 40px; color: var(--error-text);">
                         <div style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
                         <p>백업 목록을 불러오지 못했습니다.</p>
                         <p style="font-size: 14px; margin-top: 8px;">${error.message}</p>
@@ -11130,7 +12728,7 @@
 
             if (!backups || backups.length === 0) {
                 container.innerHTML = `
-                    <div style="text-align: center; padding: 40px; color: #999;">
+                    <div style="text-align: center; padding: 40px; color: var(--text-muted);">
                         <div style="font-size: 48px; margin-bottom: 16px;">📁</div>
                         <p>백업이 없습니다.</p>
                         <p style="font-size: 14px; margin-top: 10px;">상단의 "지금 백업 생성" 버튼을 눌러 백업을 만드세요.</p>
@@ -11152,18 +12750,18 @@
                     </thead>
                     <tbody>
                         ${backups.map(backup => `
-                            <tr style="border-bottom: 1px solid #e0e0e0;">
+                            <tr style="border-bottom: 1px solid var(--border-color);">
                                 <td style="padding: 12px;">
                                     <div style="display: flex; align-items: center; gap: 8px;">
                                         <span style="font-size: 20px;">💾</span>
-                                        <code style="background: #f5f5f5; padding: 4px 8px; border-radius: 4px; font-size: 13px;">${backup.filename}</code>
+                                        <code style="background: var(--bg-tertiary); padding: 4px 8px; border-radius: 4px; font-size: 13px; color: var(--text-primary);">${backup.filename}</code>
                                     </div>
                                 </td>
-                                <td style="padding: 12px;">
+                                <td style="padding: 12px; color: var(--text-primary);">
                                     <div style="font-size: 14px;">${backup.created_at}</div>
-                                    <div style="font-size: 12px; color: #999;">${backup.age}</div>
+                                    <div style="font-size: 12px; color: var(--text-muted);">${backup.age}</div>
                                 </td>
-                                <td style="padding: 12px; text-align: right; font-family: monospace;">${backup.size}</td>
+                                <td style="padding: 12px; text-align: right; font-family: monospace; color: var(--text-primary);">${backup.size}</td>
                                 <td style="padding: 12px;">
                                     <span style="padding: 4px 12px; background: ${backup.type === 'manual' ? '#4CAF50' : '#2196F3'}; color: white; border-radius: 12px; font-size: 12px;">
                                         ${backup.type === 'manual' ? '수동' : '자동'}
@@ -12441,13 +14039,15 @@
         function updateContext7Status(configured) {
             const statusEl = document.getElementById('context7ConfigStatus');
             if (!statusEl) return;
+            const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
 
+            statusEl.style.background = isDark ? 'var(--bg-muted)' : '#f3f4f6';
             if (configured) {
                 statusEl.textContent = 'Context7: ✅ 설정 완료';
-                statusEl.style.color = '#10b981';
+                statusEl.style.color = isDark ? '#4ade80' : '#10b981';
             } else {
                 statusEl.textContent = 'Context7: ⚠️ API Key 미설정';
-                statusEl.style.color = '#f59e0b';
+                statusEl.style.color = isDark ? '#fbbf24' : '#f59e0b';
             }
         }
 
@@ -12808,15 +14408,16 @@
          */
         function updateHybridRagStatus(enabled) {
             const statusEl = document.getElementById('hybridRagStatus');
+            const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
 
             if (enabled) {
                 statusEl.textContent = '✅ 활성화됨';
-                statusEl.style.background = '#dcfce7';
-                statusEl.style.color = '#166534';
+                statusEl.style.background = isDark ? 'rgba(34, 197, 94, 0.2)' : '#dcfce7';
+                statusEl.style.color = isDark ? '#4ade80' : '#166534';
             } else {
                 statusEl.textContent = '❌ 비활성화됨';
-                statusEl.style.background = '#fee2e2';
-                statusEl.style.color = '#991b1b';
+                statusEl.style.background = isDark ? 'rgba(239, 68, 68, 0.2)' : '#fee2e2';
+                statusEl.style.color = isDark ? '#f87171' : '#991b1b';
             }
         }
 
@@ -12826,13 +14427,15 @@
          */
         function updateTavilyStatus(configured) {
             const statusEl = document.getElementById('tavilyConfigStatus');
+            const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
 
+            statusEl.style.background = isDark ? 'var(--bg-muted)' : '#f3f4f6';
             if (configured) {
                 statusEl.textContent = 'Tavily: ✅ 설정 완료';
-                statusEl.style.color = '#166534';
+                statusEl.style.color = isDark ? '#4ade80' : '#166534';
             } else {
                 statusEl.textContent = 'Tavily: ⚠️ API Key 미설정';
-                statusEl.style.color = '#dc2626';
+                statusEl.style.color = isDark ? '#f87171' : '#dc2626';
             }
         }
 
@@ -12842,13 +14445,15 @@
          */
         function updateSearxngStatus(configured) {
             const statusEl = document.getElementById('searxngConfigStatus');
+            const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
 
+            statusEl.style.background = isDark ? 'var(--bg-muted)' : '#f3f4f6';
             if (configured) {
                 statusEl.textContent = 'SearXNG: ✅ 설정 완료';
-                statusEl.style.color = '#166534';
+                statusEl.style.color = isDark ? '#4ade80' : '#166534';
             } else {
                 statusEl.textContent = 'SearXNG: ⚠️ URL 미설정';
-                statusEl.style.color = '#dc2626';
+                statusEl.style.color = isDark ? '#f87171' : '#dc2626';
             }
         }
 
@@ -13289,6 +14894,14 @@
         window.loadLoginhistory = loadLoginhistory;
         window.loadLogs = loadLogs;
         window.loadWebhooks = loadWebhooks;
+        window.loadPrompts = loadPrompts;
+        window.adminRefreshCacheStats = adminRefreshCacheStats;
+        window.loadRateLimitConfig = loadRateLimitConfig;
+        window.loadCaptchaConfig = loadCaptchaConfig;
+        window.loadTotpConfig = loadTotpConfig;
+        window.loadBruteForceConfig = loadBruteForceConfig;
+        window.loadHybridRagConfig = loadHybridRagConfig;
+        window.loadRagQualityConfig = loadRagQualityConfig;
 
     </script>
 
@@ -13408,12 +15021,30 @@
                             if (typeof refreshBackupList === 'function') refreshBackupList();
                             if (typeof loadBackupSchedule === 'function') loadBackupSchedule();
                             break;
+                        case 'models':
+                            console.log('[TabChange] Loading TTS config for models tab');
+                            if (typeof loadTTSModels === 'function' && typeof loadTTSConfig === 'function') {
+                                loadTTSModels().then(() => loadTTSConfig()).catch(e => console.error('[TTS] Load error:', e));
+                            }
+                            break;
                     }
                 });
                 console.log('[TabChange] Event handlers registered');
             } else {
                 console.error('[TabChange] AdminCore not found');
             }
+
+            // TTS 설정은 페이지 로드 시 미리 로드 (탭 전환과 무관하게)
+            setTimeout(() => {
+                console.log('[Init] Loading TTS config on page load');
+                if (typeof loadTTSConfig === 'function') {
+                    loadTTSConfig().then(() => {
+                        console.log('[Init] TTS config loaded successfully');
+                    }).catch(e => {
+                        console.error('[Init] TTS config load error:', e);
+                    });
+                }
+            }, 500);
         });
     </script>
 

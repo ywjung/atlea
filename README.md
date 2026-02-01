@@ -1,10 +1,10 @@
-# 📚 문서 RAG 챗봇 (Document RAG Chatbot)
+# 📚 ATLEA (Advanced Trusted Learning & Enterprise Assistant)
 
 <div align="center">
 
 **AI 기반 문서 질의응답 시스템**
 
-다양한 형식의 문서를 이해하고 자연어로 질문에 답변하는 인텔리전트 챗봇
+다양한 형식의 문서를 이해하고 자연어로 질문에 답변하는 AI 어시스턴트
 
 [![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![Java](https://img.shields.io/badge/Java-21-orange.svg)](https://openjdk.org/)
@@ -261,7 +261,7 @@ docker compose -f docker-compose.searxng.yml up -d
 
 ### 프로젝트 개요
 
-문서 RAG 챗봇은 **Retrieval-Augmented Generation (RAG)** 기술을 활용하여 다양한 형식의 문서에서 정보를 추출하고, 자연어 질문에 정확하게 답변하는 AI 시스템입니다.
+ATLEA는 **Retrieval-Augmented Generation (RAG)** 기술을 활용하여 다양한 형식의 문서에서 정보를 추출하고, 자연어 질문에 정확하게 답변하는 AI 시스템입니다.
 
 ### 주요 사용 사례
 
@@ -1841,7 +1841,7 @@ BACKLOG=2048                    # 연결 대기 큐 크기
 
 # ===== 로깅 설정 =====
 LOG_LEVEL=info                  # debug, info, warning, error
-LOG_FILE=/tmp/chatbot_production.log  # 로그 파일 경로
+LOG_FILE=logs/server.log             # 로그 파일 경로
 ACCESS_LOG=false                # 액세스 로그 활성화 (true/false)
 
 # ===== 보안 설정 (향후) =====
@@ -2167,7 +2167,7 @@ TIMEOUT_KEEP_ALIVE=3600
 
 ```bash
 # Python 서버 로그
-tail -f /tmp/chatbot_production.log
+tail -f logs/server.log
 
 # Docker 로그
 docker-compose logs -f
@@ -2190,7 +2190,7 @@ ENVIRONMENT=development LOG_LEVEL=debug python -m src.web_server
 
 ## 🚢 배포 가이드
 
-자세한 배포 가이드는 [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md)를 참조하세요.
+자세한 배포 가이드는 [DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md)를 참조하세요.
 
 ### 간단한 배포 단계
 
@@ -2228,7 +2228,7 @@ sudo nano /etc/systemd/system/chatbot.service
 
 ```ini
 [Unit]
-Description=Document RAG Chatbot
+Description=ATLEA Service
 After=network.target docker.service
 Requires=docker.service
 
@@ -2634,7 +2634,7 @@ SOFTWARE.
 
 #### v1.0.0 (2024-12-XX) - 초기 릴리스
 - ✅ PDF, HWP 문서 지원
-- ✅ 한국어 RAG 챗봇
+- ✅ 한국어 AI 어시스턴트
 - ✅ Redis Vector DB
 - ✅ KURE-v1 임베딩, Qwen LLM
 - ✅ 웹 기반 채팅 인터페이스
@@ -2674,8 +2674,8 @@ SOFTWARE.
   - 복합 필터 조건 확장 (AND 연산 추가)
 
 **문서**:
-- 📋 [v2.2.0 설계 문서](claudedocs/V2.2.0_DESIGN.md)
-- 🛠️ [v2.2.0 구현 가이드](claudedocs/V2.2.0_IMPLEMENTATION_GUIDE.md)
+- 📋 [v2.2.0 설계 문서](docs/claudedocs/V2.2.0_DESIGN.md)
+- 🛠️ [v2.2.0 구현 가이드](docs/claudedocs/V2.2.0_IMPLEMENTATION_GUIDE.md)
 
 **예상 개발 기간**: 6주 (Phase 1~4)
 
@@ -2697,7 +2697,7 @@ SOFTWARE.
 
 **⭐ 이 프로젝트가 도움이 되었다면 Star를 눌러주세요! ⭐**
 
-[맨 위로 이동](#-문서-rag-챗봇-document-rag-chatbot)
+[맨 위로 이동](#-atlea-advanced-trusted-learning--enterprise-assistant)
 
 Made with ❤️ by [Your Name]
 

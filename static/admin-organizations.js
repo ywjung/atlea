@@ -52,7 +52,7 @@ function renderOrganizationList() {
 
     if (!allOrganizations || allOrganizations.length === 0) {
         container.innerHTML = `
-            <div style="text-align: center; padding: 40px; color: #666;">
+            <div style="text-align: center; padding: 40px; color: var(--text-muted, #666);">
                 <p>생성된 조직이 없습니다</p>
                 <p style="font-size: 14px; margin-top: 10px;">➕ 새 조직 버튼을 클릭하여 조직을 생성하세요</p>
             </div>
@@ -65,18 +65,19 @@ function renderOrganizationList() {
             ${allOrganizations.map(org => `
                 <div class="org-item ${currentOrgId === org.id ? 'active' : ''}"
                      onclick="selectOrganization('${org.id}')"
-                     style="padding: 15px; border: 2px solid ${currentOrgId === org.id ? '#667eea' : '#e5e7eb'};
+                     style="padding: 15px; border: 2px solid ${currentOrgId === org.id ? '#667eea' : 'var(--border-color, #e5e7eb)'};
                             border-radius: 8px; cursor: pointer; transition: all 0.2s;
-                            background: ${currentOrgId === org.id ? '#f0f4ff' : 'white'};">
+                            background: ${currentOrgId === org.id ? '#f0f4ff' : 'var(--bg-card, white)'};
+                            color: var(--text-primary, inherit);">
                     <div style="display: flex; justify-content: space-between; align-items: start;">
                         <div style="flex: 1;">
-                            <div style="font-weight: 600; font-size: 16px; margin-bottom: 5px;">
+                            <div style="font-weight: 600; font-size: 16px; margin-bottom: 5px; color: var(--text-primary, inherit);">
                                 ${org.name}
                             </div>
-                            <div style="font-size: 13px; color: #666; margin-bottom: 8px;">
+                            <div style="font-size: 13px; color: var(--text-muted, #666); margin-bottom: 8px;">
                                 ${org.description || '설명 없음'}
                             </div>
-                            <div style="font-size: 12px; color: #666;">
+                            <div style="font-size: 12px; color: var(--text-muted, #666);">
                                 <span>👥 ${org.member_count || 0}명</span>
                                 <span style="margin-left: 10px;">📅 ${new Date(org.created_at).toLocaleDateString()}</span>
                             </div>
@@ -172,20 +173,20 @@ function renderMembersList(members) {
     const container = document.getElementById('orgMembersList');
 
     if (!members || members.length === 0) {
-        container.innerHTML = '<div style="color: #666; font-size: 13px;">멤버가 없습니다</div>';
+        container.innerHTML = '<div style="color: var(--text-muted, #666); font-size: 13px;">멤버가 없습니다</div>';
         return;
     }
 
     const html = members.map(member => `
         <div style="display: flex; justify-content: space-between; align-items: center;
-                    padding: 12px; background: white; border-radius: 6px; margin-bottom: 8px;
-                    border: 1px solid #e5e7eb;">
+                    padding: 12px; background: var(--bg-card, white); border-radius: 6px; margin-bottom: 8px;
+                    border: 1px solid var(--border-color, #e5e7eb);">
             <div>
-                <div style="font-weight: 500; margin-bottom: 3px;">
+                <div style="font-weight: 500; margin-bottom: 3px; color: var(--text-primary, inherit);">
                     ${member.username}
                     ${member.is_org_admin ? '<span class="badge-org-admin">조직 관리자</span>' : ''}
                 </div>
-                <div style="font-size: 12px; color: #666;">${member.email}</div>
+                <div style="font-size: 12px; color: var(--text-muted, #666);">${member.email}</div>
             </div>
             <div style="display: flex; gap: 8px;">
                 ${!member.is_org_admin ? `
@@ -221,17 +222,17 @@ function renderOrgAdminsList(members) {
     const admins = members.filter(m => m.is_org_admin);
 
     if (!admins || admins.length === 0) {
-        container.innerHTML = '<div style="color: #666; font-size: 13px;">조직 관리자는 멤버 목록에서 승격할 수 있습니다</div>';
+        container.innerHTML = '<div style="color: var(--text-muted, #666); font-size: 13px;">조직 관리자는 멤버 목록에서 승격할 수 있습니다</div>';
         return;
     }
 
     const html = admins.map(admin => `
         <div style="display: flex; justify-content: space-between; align-items: center;
-                    padding: 10px; background: white; border-radius: 6px; margin-bottom: 6px;
+                    padding: 10px; background: var(--bg-card, white); border-radius: 6px; margin-bottom: 6px;
                     border: 1px solid #fbbf24;">
             <div>
-                <div style="font-weight: 500;">👑 ${admin.username}</div>
-                <div style="font-size: 11px; color: #666;">${admin.email}</div>
+                <div style="font-weight: 500; color: var(--text-primary, inherit);">👑 ${admin.username}</div>
+                <div style="font-size: 11px; color: var(--text-muted, #666);">${admin.email}</div>
             </div>
         </div>
     `).join('');
@@ -588,7 +589,7 @@ async function loadOrgGroups(orgId) {
         const container = document.getElementById('orgGroupsList');
 
         if (groups.length === 0) {
-            container.innerHTML = '<div style="text-align: center; padding: 20px; color: #666;">그룹이 없습니다</div>';
+            container.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--text-muted, #666);">그룹이 없습니다</div>';
             return;
         }
 
@@ -621,13 +622,13 @@ async function loadOrgGroups(orgId) {
         function renderGroupTree(group, level = 0) {
             const indent = level * 24; // 24px per level
             const html = `
-                <div style="padding: 12px; padding-left: ${12 + indent}px; border-bottom: 1px solid #e5e7eb; display: flex; justify-content: space-between; align-items: center;">
+                <div style="padding: 12px; padding-left: ${12 + indent}px; border-bottom: 1px solid var(--border-color, #e5e7eb); display: flex; justify-content: space-between; align-items: center;">
                     <div style="flex: 1;">
-                        <div style="font-weight: 600; margin-bottom: 4px;">
-                            ${level > 0 ? '<span style="color: #9ca3af;">└─</span> ' : ''}${group.icon || '📁'} ${group.name}
+                        <div style="font-weight: 600; margin-bottom: 4px; color: var(--text-primary, inherit);">
+                            ${level > 0 ? '<span style="color: var(--text-muted, #9ca3af);">└─</span> ' : ''}${group.icon || '📁'} ${group.name}
                             ${group.org_count > 1 ? `<span style="font-size: 11px; color: #0ea5e9; margin-left: 8px;">🔗 ${group.org_count}개 조직 공유</span>` : ''}
                         </div>
-                        <div style="font-size: 13px; color: #666;">
+                        <div style="font-size: 13px; color: var(--text-muted, #666);">
                             문서: ${group.document_count || 0}개
                             ${group.description ? ` • ${group.description}` : ''}
                         </div>
@@ -657,7 +658,7 @@ async function loadOrgGroups(orgId) {
     } catch (error) {
         logger.error('그룹 목록 로드 실패:', error);
         document.getElementById('orgGroupsList').innerHTML =
-            '<div style="text-align: center; padding: 20px; color: #dc2626;">그룹 목록을 불러올 수 없습니다</div>';
+            '<div style="text-align: center; padding: 20px; color: var(--color-danger, #dc2626);">그룹 목록을 불러올 수 없습니다</div>';
     }
 }
 

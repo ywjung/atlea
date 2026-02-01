@@ -601,7 +601,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `LIMIT_CONCURRENCY`: Max concurrent connections (default: 1000)
 - `LIMIT_MAX_REQUESTS`: Requests before worker restart (default: 10000)
 - `LOG_LEVEL`: Logging level (default: info)
-- `LOG_FILE`: Log file path (default: /tmp/chatbot_production.log)
+- `LOG_FILE`: Log file path (default: logs/server.log)
 
 ### API Endpoints (New)
 - `GET /health` - System health check

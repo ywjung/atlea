@@ -41,6 +41,7 @@ def register_exception_handlers(app: FastAPI):
         return JSONResponse(
             status_code=exc.status_code,
             content={
+                "detail": detail,
                 "error": detail,
                 "status_code": exc.status_code
             }
@@ -154,6 +155,7 @@ def register_exception_handlers(app: FastAPI):
             return JSONResponse(
                 status_code=500,
                 content={
+                    "detail": "Internal server error",
                     "error": "Internal server error",
                     "status_code": 500
                 }
@@ -162,6 +164,7 @@ def register_exception_handlers(app: FastAPI):
         return JSONResponse(
             status_code=500,
             content={
+                "detail": str(exc),
                 "error": str(exc),
                 "type": type(exc).__name__,
                 "status_code": 500

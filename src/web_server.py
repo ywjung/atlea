@@ -67,7 +67,7 @@ from .exceptions import (
 )
 
 # v2.2.0: Authentication router
-from .routers import auth, admin, organizations, documents, cache, conversations, feedback, settings, groups, audit, models, prompts, query, redis_backup, questions
+from .routers import auth, admin, organizations, documents, cache, conversations, feedback, settings, groups, audit, models, prompts, query, redis_backup, questions, tts
 from .routers import metrics as metrics_router
 from .auth.middleware import get_current_active_user, require_admin
 from .middleware.exception_handlers import register_exception_handlers
@@ -176,8 +176,8 @@ tags_metadata = [
 
 # Initialize FastAPI
 app = FastAPI(
-    title="PDF RAG Chatbot",
-    description="PDF 문서 기반 질의응답 챗봇",
+    title="ATLEA",
+    description="ATLEA (Advanced Trusted Learning & Enterprise Assistant)",
     version="2.1.0",
     openapi_tags=tags_metadata,
     debug=config.DEBUG,
@@ -209,8 +209,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # Control referrer information
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
 
-        # Restrict feature permissions
-        response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+        # Restrict feature permissions (allow microphone for voice input)
+        response.headers["Permissions-Policy"] = "geolocation=(), microphone=(self), camera=()"
 
         # Relaxed CSP for API documentation pages (/docs, /redoc, /openapi.json)
         if request.url.path in ["/docs", "/redoc", "/openapi.json"]:
@@ -355,6 +355,9 @@ app.include_router(redis_backup.router)
 # Register questions router (Phase 3: Modularization - 1 endpoint)
 app.include_router(questions.router)
 
+# Register TTS router (Phase 4: TTS feature - 8 endpoints)
+app.include_router(tts.router)
+
 
 # WebSocket endpoint for real-time security alerts
 @app.websocket("/ws/alerts")
@@ -364,9 +367,34 @@ async def websocket_alerts(websocket: WebSocket):
     관리자만 접근 가능 (토큰 기반 인증)
     """
     from .auth.alert_system import alert_manager
+    from .auth.utils import verify_token
+
+    # WebSocket 인증: query parameter에서 토큰 추출
+    token = websocket.query_params.get("token")
+    if not token:
+        await websocket.close(code=4001, reason="인증 토큰이 필요합니다")
+        return
+
+    # JWT 토큰 검증
+    payload = verify_token(token, expected_type="access", redis_client=cache_manager.redis)
+    if not payload:
+        await websocket.close(code=4001, reason="유효하지 않은 토큰입니다")
+        return
+
+    # 관리자 권한 확인
+    user_id = payload.get("user_id")
+    if user_id:
+        user_data = cache_manager.redis.hgetall(f"user:{user_id}")
+        user_role = user_data.get(b"role", b"").decode("utf-8") if user_data else ""
+        if user_role != "admin":
+            await websocket.close(code=4003, reason="관리자 권한이 필요합니다")
+            return
+    else:
+        await websocket.close(code=4001, reason="유효하지 않은 토큰입니다")
+        return
 
     try:
-        # WebSocket 연결 수락
+        # WebSocket 연결 수락 (인증 통과 후)
         await alert_manager.connect(websocket)
 
         # 연결 유지 및 메시지 수신
@@ -509,21 +537,49 @@ async def get_rag_system() -> RAGSystem:
     return rag_system
 
 
+# Hybrid RAG config in-memory cache (TTL 기반)
+_hybrid_rag_config_cache = {
+    "data": None,
+    "timestamp": 0,
+    "ttl": 10  # 10초 캐시
+}
+
+
 async def get_hybrid_rag_orchestrator():
     """Get Hybrid RAG orchestrator instance, initializing it lazily based on Redis config"""
     global hybrid_rag_orchestrator
 
-    # Check Redis configuration
-    hybrid_rag_enabled = cache_manager.redis.get("config:hybrid_rag_enabled")
-    web_search_enabled = cache_manager.redis.get("config:hybrid_rag_web_search")
-    doc_search_enabled = cache_manager.redis.get("config:hybrid_rag_doc_search")
-    web_search_provider_raw = cache_manager.redis.get("config:web_search_provider")
+    # 인메모리 캐시에서 설정 조회 (TTL 기반, Redis 호출 최소화)
+    import time as _time
+    now = _time.time()
+    if (_hybrid_rag_config_cache["data"] is not None and
+            now - _hybrid_rag_config_cache["timestamp"] < _hybrid_rag_config_cache["ttl"]):
+        cached = _hybrid_rag_config_cache["data"]
+        is_enabled = cached["is_enabled"]
+        enable_web = cached["enable_web"]
+        enable_docs = cached["enable_docs"]
+        web_search_provider = cached["web_search_provider"]
+    else:
+        # Redis에서 설정 조회 (캐시 만료 또는 첫 호출)
+        hybrid_rag_enabled = cache_manager.redis.get("config:hybrid_rag_enabled")
+        web_search_enabled = cache_manager.redis.get("config:hybrid_rag_web_search")
+        doc_search_enabled = cache_manager.redis.get("config:hybrid_rag_doc_search")
+        web_search_provider_raw = cache_manager.redis.get("config:web_search_provider")
 
-    # Decode Redis values (they're stored as bytes)
-    is_enabled = hybrid_rag_enabled and hybrid_rag_enabled.decode() == "true"
-    enable_web = web_search_enabled and web_search_enabled.decode() == "true"
-    enable_docs = doc_search_enabled and doc_search_enabled.decode() == "true"
-    web_search_provider = web_search_provider_raw.decode() if web_search_provider_raw else 'tavily'
+        # Decode Redis values (they're stored as bytes)
+        is_enabled = hybrid_rag_enabled and hybrid_rag_enabled.decode() == "true"
+        enable_web = web_search_enabled and web_search_enabled.decode() == "true"
+        enable_docs = doc_search_enabled and doc_search_enabled.decode() == "true"
+        web_search_provider = web_search_provider_raw.decode() if web_search_provider_raw else 'tavily'
+
+        # 캐시 갱신
+        _hybrid_rag_config_cache["data"] = {
+            "is_enabled": is_enabled,
+            "enable_web": enable_web,
+            "enable_docs": enable_docs,
+            "web_search_provider": web_search_provider
+        }
+        _hybrid_rag_config_cache["timestamp"] = now
 
     if not is_enabled:
         return None  # Hybrid RAG disabled
@@ -655,8 +711,9 @@ async def startup_event():
 
     # Configure file logging (development mode) - only once
     environment = os.getenv("ENVIRONMENT", "development")
+    os.makedirs("logs", exist_ok=True)
     if environment != "production":
-        log_file = os.getenv("LOG_FILE", "server.log")
+        log_file = os.getenv("LOG_FILE", "logs/server.log")
         try:
             logger.add(
                 log_file,
@@ -1006,6 +1063,25 @@ async def startup_event():
         )
         logger.info("✅ Questions router dependencies injected (1 endpoint)")
 
+        # Inject dependencies into TTS router (8 endpoints)
+        logger.info("🔊 Injecting dependencies into TTS router...")
+        tts.inject_dependencies(
+            cache_mgr=cache_manager,
+            tts_svc=None  # Will be initialized below if enabled
+        )
+        logger.info("✅ TTS router dependencies injected (8 endpoints)")
+
+        # Eagerly load TTS model at startup if enabled
+        logger.info("🔊 Initializing TTS service (eager loading)...")
+        try:
+            tts_service = tts.initialize_tts_service(eager_load=True)
+            if tts_service:
+                logger.success("✅ TTS model loaded at startup")
+            else:
+                logger.info("⏭️ TTS is disabled or not configured")
+        except Exception as e:
+            logger.warning(f"⚠️ TTS initialization failed (non-critical): {e}")
+
         # Inject dependencies into scheduler_service (Phase 3: Modularization)
         logger.info("🕐 Injecting dependencies into scheduler_service...")
         scheduler_service.inject_dependencies(
@@ -1074,9 +1150,13 @@ async def startup_event():
             logger.warning(f"Version migration failed (non-critical): {e}")
             # Don't fail startup if migration fails
 
-        # LLM will be loaded lazily on first chat request
-        # Note: Indexing is now handled by documents router (manual reindex button)
-        logger.info("⚡ LLM will load on first use (lazy loading enabled)")
+        # Pre-load LLM at startup (includes think:false probe — saves ~1-2s on first query)
+        try:
+            logger.info("⚡ Pre-loading LLM at startup...")
+            await get_llm()
+            logger.success("✅ LLM pre-loaded successfully (think:false probe completed)")
+        except Exception as e:
+            logger.warning(f"⚠️ LLM pre-load failed (will lazy-load on first use): {e}")
 
         # Optional: Start question generation in background (only if enabled)
         if ENABLE_QUESTION_GENERATION:
@@ -2129,7 +2209,8 @@ if __name__ == "__main__":
         )
 
         # Add file logging with rotation (keep 7 days, rotate at 100MB)
-        log_file = os.getenv("LOG_FILE", "/tmp/chatbot_production.log")
+        os.makedirs("logs", exist_ok=True)
+        log_file = os.getenv("LOG_FILE", "logs/server.log")
         logger.add(
             log_file,
             rotation="100 MB",
@@ -2142,7 +2223,8 @@ if __name__ == "__main__":
         logger.info("Production logging configured")
     else:
         # Development: keep colorful logging to console AND add file logging
-        log_file = os.getenv("LOG_FILE", "server.log")
+        os.makedirs("logs", exist_ok=True)
+        log_file = os.getenv("LOG_FILE", "logs/server.log")
         logger.add(
             log_file,
             rotation="10 MB",

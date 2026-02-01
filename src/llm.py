@@ -360,6 +360,20 @@ class LLM:
                     "content": msg["content"]
                 })
 
+        # 🔴 문서명 참조 리스트 생성
+        doc_name_list = ""
+        if unique_filenames:
+            doc_names = []
+            for fname in unique_filenames:
+                name = fname.rsplit('.', 1)[0] if '.' in fname else fname
+                if name not in doc_names and name != 'Unknown':
+                    doc_names.append(name)
+            if doc_names:
+                doc_name_list = "\n=== 🔴 출처 표기용 정확한 문서명 (반드시 이 목록에서 복사) ===\n"
+                for name in doc_names:
+                    doc_name_list += f"- [내부:{name}]\n"
+                doc_name_list += "※ 위 문서명을 인용할 때 한 글자도 변경하지 말고 그대로 복사하세요.\n"
+
         # Add current query with enhanced context
         messages.append({
             "role": "user",
@@ -369,7 +383,7 @@ class LLM:
 고유 파일: {', '.join(unique_filenames)}
 
 {context_text}
-
+{doc_name_list}
 === ❓ 사용자 질문 ===
 {query}
 
