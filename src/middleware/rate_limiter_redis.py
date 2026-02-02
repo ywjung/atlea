@@ -111,8 +111,20 @@ class RedisRateLimiter:
 
         except Exception as e:
             logger.error(f"Rate limiter error: {e}")
-            # Redis 오류 시 요청 허용 (Fail-open)
-            return True, {"limit": self.rate, "remaining": self.rate, "reset": 60}
+
+            # 환경에 따른 Fail 정책
+            import os
+            env = os.getenv("ENV", "development")
+
+            if env == "production":
+                # 프로덕션: Fail-closed (보안 우선)
+                # Redis 장애 시 요청 거부하여 DDoS 우회 방지
+                logger.critical(f"Rate limiter failed in production - blocking request")
+                return False, {"limit": self.rate, "remaining": 0, "reset": 60}
+            else:
+                # 개발/테스트: Fail-open (개발 편의성)
+                logger.warning(f"Rate limiter failed in development - allowing request")
+                return True, {"limit": self.rate, "remaining": self.rate, "reset": 60}
 
     def cleanup_old_entries(self):
         """메모리 정리: 오래된 클라이언트 엔트리 제거"""

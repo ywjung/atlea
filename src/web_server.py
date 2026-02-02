@@ -225,11 +225,12 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 "frame-ancestors 'none';"
             )
         else:
-            # Stricter CSP for main application (removed unsafe-eval for security)
+            # Strict CSP for main application (nonce-based, no unsafe-inline)
+            # Note: CSPNonceMiddleware will inject nonce values
             response.headers["Content-Security-Policy"] = (
                 "default-src 'self'; "
-                "script-src 'self' 'unsafe-inline' blob: https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
-                "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
+                "script-src 'self' blob: https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
+                "style-src 'self' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
                 "img-src 'self' data:; "
                 "font-src 'self' https://cdn.jsdelivr.net; "
                 "connect-src 'self' https://cdn.jsdelivr.net wss: ws:; "
