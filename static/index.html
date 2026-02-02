@@ -11,20 +11,8 @@
     <meta name="version" content="2026.01.13-export7">
     <title>ATLEA v2026.01.13</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-    <!-- Early theme initialization to prevent flash -->
-    <script>
-        (function() {
-            try {
-                const savedTheme = localStorage.getItem('theme') || 'light';
-                // Validate theme value
-                const theme = (savedTheme === 'dark' || savedTheme === 'light') ? savedTheme : 'light';
-                document.documentElement.setAttribute('data-theme', theme);
-            } catch (error) {
-                // Fallback to light theme if localStorage is not available
-                document.documentElement.setAttribute('data-theme', 'light');
-            }
-        })();
-    </script>
+    <!-- Early theme initialization to prevent flash (external for CSP compliance) -->
+    <script src="/static/theme-init.js"></script>
     <link rel="stylesheet" href="/static/style.css?v=1767392000">
     <link rel="stylesheet" href="/static/error-styles.css?v=34">
     <link rel="stylesheet" href="/static/streaming-styles.css?v=34">
