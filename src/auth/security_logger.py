@@ -36,6 +36,7 @@ class SecurityEventType:
     RATE_LIMIT_EXCEEDED = "RATE_LIMIT_EXCEEDED"
     BRUTE_FORCE_ATTEMPT = "BRUTE_FORCE_ATTEMPT"
     SUSPICIOUS_ACTIVITY = "SUSPICIOUS_ACTIVITY"
+    CSP_VIOLATION = "CSP_VIOLATION"
 
     # 권한 관련
     UNAUTHORIZED_ACCESS = "UNAUTHORIZED_ACCESS"
@@ -435,5 +436,25 @@ class SecurityLogger:
             message=f"Permission denied for {resource}",
             required_permission=required_permission,
             resource=resource,
+            **extra
+        )
+
+    @staticmethod
+    def log_csp_violation(
+        ip_address: str,
+        blocked_uri: str,
+        violated_directive: str,
+        document_uri: str = "",
+        **extra
+    ):
+        """CSP 위반 로깅"""
+        SecurityLogger.log_event(
+            SecurityEventType.CSP_VIOLATION,
+            SecurityEventLevel.WARNING,
+            ip_address=ip_address,
+            message=f"CSP violation: {violated_directive} blocked {blocked_uri}",
+            blocked_uri=blocked_uri,
+            violated_directive=violated_directive,
+            document_uri=document_uri,
             **extra
         )

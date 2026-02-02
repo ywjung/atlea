@@ -67,7 +67,7 @@ from .exceptions import (
 )
 
 # v2.2.0: Authentication router
-from .routers import auth, admin, organizations, documents, cache, conversations, feedback, settings, groups, audit, models, prompts, query, redis_backup, questions, tts
+from .routers import auth, admin, organizations, documents, cache, conversations, feedback, settings, groups, audit, models, prompts, query, redis_backup, questions, tts, security
 from .routers import metrics as metrics_router
 from .auth.middleware import get_current_active_user, require_admin
 from .middleware.exception_handlers import register_exception_handlers
@@ -235,7 +235,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 "font-src 'self' https://cdn.jsdelivr.net; "
                 "connect-src 'self' https://cdn.jsdelivr.net wss: ws:; "
                 "worker-src 'self' blob:; "
-                "frame-ancestors 'none';"
+                "frame-ancestors 'none'; "
+                "report-uri /api/security/csp-report;"
             )
 
         # HSTS for HTTPS connections (enabled for production security)
@@ -358,6 +359,9 @@ app.include_router(questions.router)
 
 # Register TTS router (Phase 4: TTS feature - 8 endpoints)
 app.include_router(tts.router)
+
+# Register security router (Phase 1: Security monitoring - 3 endpoints)
+app.include_router(security.router)
 
 
 # WebSocket endpoint for real-time security alerts
@@ -910,6 +914,14 @@ async def startup_event():
             cache_mgr=cache_manager
         )
         logger.info("✅ Audit router dependencies injected (4 endpoints)")
+
+        # Inject dependencies into security router (3 endpoints)
+        logger.info("🛡️ Injecting dependencies into security router...")
+        security.inject_dependencies(
+            cache_mgr=cache_manager,
+            audit_log=audit_logger
+        )
+        logger.info("✅ Security router dependencies injected (3 endpoints)")
 
         # Define model reload callback for models router
         def model_reload_callback(backend: str, llm_model: str = None, embedding_model_name: str = None):
