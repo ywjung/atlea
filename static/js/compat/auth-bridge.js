@@ -11,6 +11,7 @@ import * as authRegister from '../auth/register.js';
 import * as authPassword from '../auth/password.js';
 import { showToast } from '../ui/toast.js';
 import { apiCall, post } from '../utils/http.js';
+import { validatePassword, validateEmail, validateUsername } from '../utils/validation.js';
 
 /**
  * Legacy Auth object for backward compatibility
@@ -90,6 +91,11 @@ window.Auth = {
 
     // Direct HTTP methods for compatibility
     post: post,
+
+    // Validation methods
+    validatePassword: validatePassword,
+    validateEmail: validateEmail,
+    validateUsername: validateUsername,
 
     // Utility methods
     isTokenExpired: (token) => {

@@ -66,38 +66,64 @@ export function validateEmail(email) {
 }
 
 /**
- * Validate password strength
+ * Validate password strength with detailed requirements
  * @param {string} password - Password to validate
- * @returns {Object} - Validation result {valid: boolean, error?: string, strength?: string}
+ * @returns {Object} - Validation result {valid: boolean, errors?: string[], strength?: string}
  */
 export function validatePassword(password) {
+    const errors = [];
+
+    // Check length
     if (password.length < 8) {
-        return { valid: false, error: '비밀번호는 최소 8자 이상이어야 합니다.' };
+        errors.push('비밀번호는 최소 8자 이상이어야 합니다.');
     }
 
     if (password.length > 128) {
-        return { valid: false, error: '비밀번호는 최대 128자까지 가능합니다.' };
+        errors.push('비밀번호는 최대 128자까지 가능합니다.');
     }
 
-    // Check for at least one number, one letter
-    const hasNumber = /\d/.test(password);
-    const hasLetter = /[a-zA-Z]/.test(password);
-
-    if (!hasNumber || !hasLetter) {
-        return { valid: false, error: '비밀번호는 숫자와 영문자를 포함해야 합니다.' };
+    // Check for uppercase
+    if (!/[A-Z]/.test(password)) {
+        errors.push('대문자를 최소 1개 포함해야 합니다.');
     }
 
-    // Determine strength
+    // Check for lowercase
+    if (!/[a-z]/.test(password)) {
+        errors.push('소문자를 최소 1개 포함해야 합니다.');
+    }
+
+    // Check for digit
+    if (!/[0-9]/.test(password)) {
+        errors.push('숫자를 최소 1개 포함해야 합니다.');
+    }
+
+    // Check for special character
+    if (!/[!@#$%^&*()_+\-=\[\]{}|;:',.<>?/~`]/.test(password)) {
+        errors.push('특수문자를 최소 1개 포함해야 합니다.');
+    }
+
+    // Check for no whitespace
+    if (/\s/.test(password)) {
+        errors.push('공백을 포함할 수 없습니다.');
+    }
+
+    // If there are errors, return invalid
+    if (errors.length > 0) {
+        return { valid: false, errors };
+    }
+
+    // Determine strength for valid passwords
     const hasUpperCase = /[A-Z]/.test(password);
     const hasLowerCase = /[a-z]/.test(password);
-    const hasSpecial = /[^a-zA-Z0-9]/.test(password);
+    const hasNumber = /[0-9]/.test(password);
+    const hasSpecial = /[!@#$%^&*()_+\-=\[\]{}|;:',.<>?/~`]/.test(password);
 
     let strength = 'weak';
     const criteria = [hasUpperCase, hasLowerCase, hasNumber, hasSpecial].filter(Boolean).length;
 
-    if (password.length >= 12 && criteria >= 3) {
+    if (password.length >= 12 && criteria >= 4) {
         strength = 'strong';
-    } else if (password.length >= 10 && criteria >= 2) {
+    } else if (password.length >= 10 && criteria >= 3) {
         strength = 'medium';
     }
 

@@ -136,7 +136,11 @@
         </div>
     </div>
 
-    <script src="/static/auth.js?v=2025-12-31-SIMPLE-CAPTCHA"></script>
+    <!-- ES6 Module: Compatibility Bridge for Auth -->
+    <script type="module">
+        // Import compatibility bridge (sets up window.Auth)
+        import '/static/js/compat/auth-bridge.js';
+    </script>
     <script>
         const form = document.getElementById('registerForm');
         const registerBtn = document.getElementById('registerBtn');
