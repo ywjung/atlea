@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+
+# Python
+__pycache__/
+*.pyc
+
+# External libraries (CDN)
+static/*.min.js
+static/**/*.min.js
+static/**/*.min.css
+
+# Legacy scripts (will be migrated)
+static/script.js
+static/auth.js
+static/session-manager.js
+static/error-handler.js
+static/streaming-visualizer.js
+static/autocomplete.js
+static/follow-up-questions.js
+static/group-manager.js
+static/optimizations.js
+static/performance-metrics.js
+
+# Test files
+*.test.js
+*.spec.js
+
+# Documentation
+*.md
