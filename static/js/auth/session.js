@@ -92,6 +92,126 @@ export function getUserId() {
 }
 
 /**
+ * Get current user info from server
+ * @returns {Promise<Object>} - User object
+ */
+export async function getCurrentUser() {
+    const response = await fetch('/api/users/me', {
+        headers: {
+            'Authorization': 'Bearer ' + getAccessToken()
+        }
+    });
+
+    if (!response.ok) {
+        throw new Error('Failed to fetch user info');
+    }
+
+    const data = await response.json();
+    setUser(data.user);
+    return data.user;
+}
+
+/**
+ * Get active sessions
+ * @returns {Promise<Object>} - Sessions data
+ */
+export async function getSessions() {
+    const response = await fetch('/api/auth/sessions', {
+        headers: {
+            'Authorization': 'Bearer ' + getAccessToken()
+        }
+    });
+
+    if (!response.ok) {
+        throw new Error('Failed to fetch sessions');
+    }
+
+    return await response.json();
+}
+
+/**
+ * Revoke specific session
+ * @param {string} sessionId - Session ID to revoke
+ * @returns {Promise<Object>} - Result
+ */
+export async function revokeSession(sessionId) {
+    const response = await fetch('/api/auth/sessions/' + sessionId, {
+        method: 'DELETE',
+        headers: {
+            'Authorization': 'Bearer ' + getAccessToken()
+        }
+    });
+
+    if (!response.ok) {
+        throw new Error('Failed to revoke session');
+    }
+
+    return await response.json();
+}
+
+/**
+ * Revoke all sessions
+ * @returns {Promise<Object>} - Result with revoked_count
+ */
+export async function revokeAllSessions() {
+    const response = await fetch('/api/auth/sessions', {
+        method: 'DELETE',
+        headers: {
+            'Authorization': 'Bearer ' + getAccessToken()
+        }
+    });
+
+    if (!response.ok) {
+        throw new Error('Failed to revoke all sessions');
+    }
+
+    return await response.json();
+}
+
+/**
+ * Update user profile
+ * @param {string} username - New username
+ * @returns {Promise<Object>} - Updated user
+ */
+export async function updateProfile(username) {
+    const response = await fetch('/api/users/profile', {
+        method: 'PUT',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + getAccessToken()
+        },
+        body: JSON.stringify({ username })
+    });
+
+    if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to update profile');
+    }
+
+    const data = await response.json();
+    setUser(data.user);
+    return data.user;
+}
+
+/**
+ * Initialize activity monitoring (placeholder for compatibility)
+ */
+export function initActivityMonitor() {
+    // Activity monitoring implementation
+    // This is a placeholder for compatibility with legacy code
+    console.log('Activity monitor initialized');
+}
+
+/**
+ * Start session validation (placeholder for compatibility)
+ */
+export function startSessionValidation() {
+    // Session validation implementation
+    // This is a placeholder for compatibility with legacy code
+    console.log('Session validation started');
+}
+
+/**
  * Clear All Auth Data
  */
 

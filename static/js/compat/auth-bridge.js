@@ -37,6 +37,15 @@ window.Auth = {
     getUserRole: authSession.getUserRole,
     getUserId: authSession.getUserId,
 
+    // Extended session methods
+    getCurrentUser: authSession.getCurrentUser,
+    getSessions: authSession.getSessions,
+    revokeSession: authSession.revokeSession,
+    revokeAllSessions: authSession.revokeAllSessions,
+    updateProfile: authSession.updateProfile,
+    initActivityMonitor: authSession.initActivityMonitor,
+    startSessionValidation: authSession.startSessionValidation,
+
     clearAuth: authSession.clearAuth,
 
     redirectToLogin: authSession.redirectToLogin,
@@ -60,28 +69,34 @@ window.Auth = {
     confirmPasswordReset: authPassword.confirmPasswordReset,
 
     // UI feedback methods (mapped to toast)
-    showError: (message) => {
+    showError: (message, elementId) => {
+        // elementId parameter for backward compatibility (ignored - using toast instead)
         showToast(message, 'error');
     },
 
-    showSuccess: (message) => {
+    showSuccess: (message, elementId) => {
+        // elementId parameter for backward compatibility (ignored - using toast instead)
         showToast(message, 'success');
     },
 
-    showInfo: (message) => {
+    showInfo: (message, elementId) => {
+        // elementId parameter for backward compatibility (ignored - using toast instead)
         showToast(message, 'info');
     },
 
-    showWarning: (message) => {
+    showWarning: (message, elementId) => {
+        // elementId parameter for backward compatibility (ignored - using toast instead)
         showToast(message, 'warning');
     },
 
-    hideError: () => {
+    hideError: (elementId) => {
+        // elementId parameter for backward compatibility
         // Toast auto-hides, no action needed
         // Kept for compatibility
     },
 
-    hideSuccess: () => {
+    hideSuccess: (elementId) => {
+        // elementId parameter for backward compatibility
         // Toast auto-hides, no action needed
         // Kept for compatibility
     },
