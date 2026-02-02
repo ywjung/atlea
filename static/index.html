@@ -2616,6 +2616,12 @@
     <!-- Performance Metrics -->
     <script src="/static/performance-metrics.js?v=1"></script>
 
+    <!-- ES6 Module: Compatibility Bridge for Auth -->
+    <script type="module">
+        // Import compatibility bridge (sets up window.Auth)
+        import '/static/js/compat/auth-bridge.js';
+    </script>
+
     <!-- Main Script -->
     <script src="/static/script.js?v=68"></script>
 
