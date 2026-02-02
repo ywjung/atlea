@@ -73,7 +73,11 @@ export {
     createElement, addClass, removeClass, toggleClass,
     show, hide, toggle, debounce, throttle,
     INPUT_VALIDATION, validateInput, validateEmail, validatePassword,
-    validateUsername, sanitizeFilename
+    validateUsername, sanitizeFilename,
+    generateSessionId, generateId, generateUUID, sleep, retry,
+    copyToClipboard, downloadAsFile,
+    parseQueryString, buildQueryString, getUrlParams,
+    isInViewport, scrollIntoView, getBrowserInfo, isFeatureSupported
 } from './utils/index.js';
 
 export {

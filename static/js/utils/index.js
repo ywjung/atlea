@@ -11,6 +11,7 @@ export * from './http.js';
 export * from './storage.js';
 export * from './dom.js';
 export * from './validation.js';
+export * from './helpers.js';
 
 // Named imports for convenience
 export { sanitizeHTML, safeSetInnerHTML, escapeHtml } from './sanitize.js';
@@ -25,3 +26,10 @@ export {
     INPUT_VALIDATION, validateInput, validateEmail, validatePassword,
     validateUsername, sanitizeFilename
 } from './validation.js';
+export {
+    generateSessionId, generateId, generateUUID, sleep, retry,
+    copyToClipboard, downloadAsFile,
+    parseQueryString, buildQueryString, getUrlParams,
+    isInViewport, scrollIntoView,
+    getBrowserInfo, isFeatureSupported
+} from './helpers.js';
