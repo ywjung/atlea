@@ -10,8 +10,35 @@ const __dirname = dirname(__filename);
  * Vite Configuration for Chatbot Redis
  *
  * Library mode: Bundles ES6 modules only, leaves HTML and legacy scripts as-is
+ * Test mode: Vitest for unit testing with coverage
  */
 export default defineConfig({
+    // Test configuration
+    test: {
+        globals: true,
+        environment: 'jsdom',
+        setupFiles: './tests/setup.js',
+        include: ['tests/unit/**/*.test.js'],
+        exclude: ['tests/e2e/**', 'node_modules/**', 'dist/**'],
+        coverage: {
+            provider: 'v8',
+            reporter: ['text', 'json', 'html', 'lcov'],
+            exclude: [
+                'node_modules/',
+                'dist/',
+                'tests/',
+                '**/*.spec.js',
+                '**/*.test.js',
+                'static/js/compat/**', // Compatibility layer
+                'static/*.js', // Legacy scripts
+            ],
+            all: true,
+            lines: 70,
+            functions: 70,
+            branches: 70,
+            statements: 70,
+        },
+    },
     // Build in library mode for ES6 modules
     build: {
         lib: {
