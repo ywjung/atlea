@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Module Test Suite</title>
+    <style>
+        body {
+            font-family: monospace;
+            padding: 20px;
+            background: #1e1e1e;
+            color: #d4d4d4;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #3c3c3c;
+            border-radius: 4px;
+        }
+        .test-section h2 {
+            margin-top: 0;
+            color: #4ec9b0;
+        }
+        .test-result {
+            padding: 8px;
+            margin: 5px 0;
+            border-radius: 3px;
+        }
+        .test-pass {
+            background: #1e3a1e;
+            border-left: 3px solid #4ec9b0;
+        }
+        .test-fail {
+            background: #3a1e1e;
+            border-left: 3px solid #f48771;
+        }
+        .summary {
+            margin-top: 30px;
+            padding: 20px;
+            background: #252526;
+            border-radius: 4px;
+            font-size: 18px;
+        }
+        .summary.all-pass {
+            border: 2px solid #4ec9b0;
+        }
+        .summary.has-fail {
+            border: 2px solid #f48771;
+        }
+    </style>
+</head>
+<body>
+    <h1>🧪 Module Test Suite</h1>
+    <div id="test-results"></div>
+    <div id="summary" class="summary"></div>
+
+    <script type="module">
+        const results = [];
+        const resultsContainer = document.getElementById('test-results');
+
+        function test(category, description, testFn) {
+            try {
+                testFn();
+                results.push({ category, description, passed: true });
+                return true;
+            } catch (error) {
+                results.push({ category, description, passed: false, error: error.message });
+                return false;
+            }
+        }
+
+        function renderResults() {
+            const categories = {};
+
+            // Group by category
+            results.forEach(result => {
+                if (!categories[result.category]) {
+                    categories[result.category] = [];
+                }
+                categories[result.category].push(result);
+            });
+
+            // Render categories
+            Object.entries(categories).forEach(([category, tests]) => {
+                const section = document.createElement('div');
+                section.className = 'test-section';
+
+                const title = document.createElement('h2');
+                title.textContent = `${category} (${tests.filter(t => t.passed).length}/${tests.length} passed)`;
+                section.appendChild(title);
+
+                tests.forEach(test => {
+                    const resultDiv = document.createElement('div');
+                    resultDiv.className = `test-result ${test.passed ? 'test-pass' : 'test-fail'}`;
+                    resultDiv.textContent = `${test.passed ? '✓' : '✗'} ${test.description}`;
+                    if (test.error) {
+                        const errorDiv = document.createElement('div');
+                        errorDiv.style.marginLeft = '20px';
+                        errorDiv.style.color = '#f48771';
+                        errorDiv.textContent = test.error;
+                        resultDiv.appendChild(errorDiv);
+                    }
+                    section.appendChild(resultDiv);
+                });
+
+                resultsContainer.appendChild(section);
+            });
+
+            // Summary
+            const totalPassed = results.filter(r => r.passed).length;
+            const totalTests = results.length;
+            const summary = document.getElementById('summary');
+            summary.className = `summary ${totalPassed === totalTests ? 'all-pass' : 'has-fail'}`;
+            summary.innerHTML = `
+                <strong>Summary:</strong> ${totalPassed}/${totalTests} tests passed
+                ${totalPassed === totalTests ? '🎉 All tests passed!' : '❌ Some tests failed'}
+            `;
+        }
+
+        // Run tests
+        (async () => {
+            // Test Utils Module
+            const { sanitizeHTML, formatTimestamp, createElement } = await import('/static/js/utils/index.js');
+
+            test('Utils', 'sanitizeHTML removes script tags', () => {
+                const dirty = '<p>Hello</p><script>alert("xss")</script>';
+                const clean = sanitizeHTML(dirty);
+                if (clean.includes('<script>')) throw new Error('Script tag not removed');
+            });
+
+            test('Utils', 'formatTimestamp returns string', () => {
+                const timestamp = Date.now();
+                const formatted = formatTimestamp(timestamp);
+                if (typeof formatted !== 'string') throw new Error('Not a string');
+            });
+
+            test('Utils', 'createElement creates element', () => {
+                const el = createElement('div', { className: 'test' });
+                if (!el || el.tagName !== 'DIV') throw new Error('Element not created');
+                if (el.className !== 'test') throw new Error('Class not set');
+            });
+
+            // Test Auth Module
+            const { setTokens, getAccessToken, clearTokens } = await import('/static/js/auth/index.js');
+
+            test('Auth', 'setTokens stores tokens', () => {
+                setTokens('test-access-token', 'test-refresh-token');
+                const token = getAccessToken();
+                if (token !== 'test-access-token') throw new Error('Token not stored');
+                clearTokens();
+            });
+
+            test('Auth', 'clearTokens removes tokens', () => {
+                setTokens('test-token', 'test-refresh');
+                clearTokens();
+                const token = getAccessToken();
+                if (token !== null) throw new Error('Token not cleared');
+            });
+
+            // Test UI Module
+            const { getCurrentTheme, setTheme } = await import('/static/js/ui/index.js');
+
+            test('UI', 'setTheme changes theme', () => {
+                setTheme('dark', true);
+                const theme = getCurrentTheme();
+                if (theme !== 'dark') throw new Error('Theme not set');
+            });
+
+            test('UI', 'getCurrentTheme returns string', () => {
+                const theme = getCurrentTheme();
+                if (typeof theme !== 'string') throw new Error('Not a string');
+                if (!['light', 'dark'].includes(theme)) throw new Error('Invalid theme');
+            });
+
+            // Test Markdown Module
+            const { isAsciiArt } = await import('/static/js/markdown/index.js');
+
+            test('Markdown', 'isAsciiArt detects box drawing', () => {
+                const art = '┌─────┐\n│ Box │\n└─────┘';
+                if (!isAsciiArt(art, '')) throw new Error('ASCII art not detected');
+            });
+
+            test('Markdown', 'isAsciiArt ignores code', () => {
+                const code = 'function test() { return true; }';
+                if (isAsciiArt(code, 'javascript')) throw new Error('Code detected as ASCII art');
+            });
+
+            // Test Storage Module
+            const { getItem, setItem, removeItem } = await import('/static/js/utils/storage.js');
+
+            test('Storage', 'setItem stores value', () => {
+                setItem('test-key', { value: 'test' });
+                const retrieved = getItem('test-key');
+                if (retrieved.value !== 'test') throw new Error('Value not stored');
+                removeItem('test-key');
+            });
+
+            test('Storage', 'getItem returns default for missing key', () => {
+                const value = getItem('non-existent-key', 'default');
+                if (value !== 'default') throw new Error('Default not returned');
+            });
+
+            // Render results
+            renderResults();
+        })();
+    </script>
+</body>
+</html>
