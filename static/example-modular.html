@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Modular JavaScript Example</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Modular JavaScript Example</h1>
+
+        <div class="section">
+            <h2>Theme</h2>
+            <button id="themeToggle">Toggle Theme</button>
+        </div>
+
+        <div class="section">
+            <h2>Toast Notifications</h2>
+            <button id="toastInfo">Info Toast</button>
+            <button id="toastSuccess">Success Toast</button>
+            <button id="toastWarning">Warning Toast</button>
+            <button id="toastError">Error Toast</button>
+        </div>
+
+        <div class="section">
+            <h2>Authentication</h2>
+            <div id="authStatus"></div>
+            <button id="logoutBtn">Logout</button>
+        </div>
+
+        <div class="section">
+            <h2>Modal</h2>
+            <button id="openModal">Open Modal</button>
+        </div>
+    </div>
+
+    <!-- Simple Modal -->
+    <div id="exampleModal" class="modal">
+        <div class="modal-content">
+            <h3>Example Modal</h3>
+            <p>This is a modular modal example.</p>
+            <button id="closeModal">Close</button>
+        </div>
+    </div>
+
+    <!-- Load modular JavaScript -->
+    <script type="module">
+        import {
+            initApp,
+            toggleTheme,
+            showToast,
+            getUser,
+            logout,
+            showModal,
+            hideModal
+        } from '/static/js/index.js';
+
+        // Initialize application
+        const initialized = await initApp();
+
+        if (initialized) {
+            // Display user info
+            const user = getUser();
+            const authStatus = document.getElementById('authStatus');
+            if (user) {
+                authStatus.textContent = `Logged in as: ${user.username} (${user.email})`;
+            } else {
+                authStatus.textContent = 'Not logged in';
+            }
+
+            // Theme toggle
+            document.getElementById('themeToggle')
+                .addEventListener('click', toggleTheme);
+
+            // Toast examples
+            document.getElementById('toastInfo')
+                .addEventListener('click', () => showToast('This is an info message', 'info'));
+
+            document.getElementById('toastSuccess')
+                .addEventListener('click', () => showToast('Success message!', 'success'));
+
+            document.getElementById('toastWarning')
+                .addEventListener('click', () => showToast('Warning message!', 'warning'));
+
+            document.getElementById('toastError')
+                .addEventListener('click', () => showToast('Error message!', 'error'));
+
+            // Logout
+            document.getElementById('logoutBtn')
+                .addEventListener('click', async () => {
+                    try {
+                        await logout();
+                    } catch (error) {
+                        showToast('Logout failed', 'error');
+                    }
+                });
+
+            // Modal
+            const modal = document.getElementById('exampleModal');
+
+            document.getElementById('openModal')
+                .addEventListener('click', () => showModal(modal, 'example'));
+
+            document.getElementById('closeModal')
+                .addEventListener('click', () => hideModal(modal));
+        }
+    </script>
+</body>
+</html>
