@@ -68,7 +68,9 @@ export {
     get, post, put, del, patch, apiCall, uploadFile,
     getItem, setItem, removeItem, session,
     createElement, addClass, removeClass, toggleClass,
-    show, hide, toggle, debounce, throttle
+    show, hide, toggle, debounce, throttle,
+    INPUT_VALIDATION, validateInput, validateEmail, validatePassword,
+    validateUsername, sanitizeFilename
 } from './utils/index.js';
 
 export {
