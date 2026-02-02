@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Compatibility Bridge Example</title>
+    <link rel="stylesheet" href="/static/auth.css">
+</head>
+<body>
+    <div class="auth-container">
+        <div class="auth-header">
+            <h1>호환성 레이어 예제</h1>
+            <p>기존 Auth 객체 인터페이스를 사용하면서 새 모듈 활용</p>
+        </div>
+
+        <div id="status" class="message"></div>
+
+        <form id="testForm" class="auth-form">
+            <div class="form-group">
+                <label>이메일</label>
+                <input type="email" id="email" class="form-input"
+                       placeholder="test@example.com" required>
+            </div>
+
+            <div class="form-group">
+                <label>비밀번호</label>
+                <input type="password" id="password" class="form-input"
+                       placeholder="비밀번호" required>
+            </div>
+
+            <button type="submit" class="btn btn-primary btn-block">
+                로그인 (호환성 레이어)
+            </button>
+        </form>
+
+        <div class="auth-links">
+            <button type="button" onclick="testAuthMethods()"
+                    class="btn btn-secondary btn-block">
+                Auth 메서드 테스트
+            </button>
+        </div>
+
+        <div id="testResults" style="margin-top: 20px; padding: 15px;
+             background: #f5f5f5; border-radius: 8px; display: none;">
+            <h3>테스트 결과</h3>
+            <pre id="resultsContent" style="white-space: pre-wrap;"></pre>
+        </div>
+    </div>
+
+    <!-- Load compatibility bridge -->
+    <script type="module">
+        // Import compatibility bridge (sets up window.Auth)
+        import '/static/js/compat/auth-bridge.js';
+
+        // Now Auth object is available globally
+        const form = document.getElementById('testForm');
+        const statusEl = document.getElementById('status');
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+
+            try {
+                // Using Auth object (legacy interface)
+                // But actually calling new ES6 modules underneath
+                const response = await Auth.login(email, password);
+
+                Auth.showSuccess('로그인 성공!');
+
+                statusEl.innerHTML = `
+                    <div class="success-message">
+                        ✅ 로그인 성공<br>
+                        사용자: ${response.user.username}<br>
+                        이메일: ${response.user.email}
+                    </div>
+                `;
+
+            } catch (error) {
+                Auth.showError('로그인 실패: ' + error.message);
+
+                statusEl.innerHTML = `
+                    <div class="error-message">
+                        ❌ 로그인 실패<br>
+                        ${error.message}
+                    </div>
+                `;
+            }
+        });
+
+        // Test Auth methods
+        window.testAuthMethods = function() {
+            const results = [];
+            const resultsDiv = document.getElementById('testResults');
+            const resultsContent = document.getElementById('resultsContent');
+
+            // Test authentication status
+            results.push('=== Auth 메서드 테스트 ===\n');
+            results.push(`isAuthenticated(): ${Auth.isAuthenticated()}`);
+            results.push(`isAdmin(): ${Auth.isAdmin()}`);
+            results.push(`getUserRole(): ${Auth.getUserRole()}`);
+            results.push(`getUserId(): ${Auth.getUserId()}`);
+
+            // Test user data
+            const user = Auth.getUser();
+            results.push(`\ngetUser(): ${user ? JSON.stringify(user, null, 2) : 'null'}`);
+
+            // Test tokens
+            const accessToken = Auth.getAccessToken();
+            results.push(`\ngetAccessToken(): ${accessToken ? accessToken.substring(0, 20) + '...' : 'null'}`);
+
+            // Test session
+            const sessionId = Auth.getSessionId();
+            results.push(`getSessionId(): ${sessionId || 'null'}`);
+
+            // Display results
+            resultsContent.textContent = results.join('\n');
+            resultsDiv.style.display = 'block';
+
+            // Test toast notifications
+            Auth.showInfo('이것은 정보 메시지입니다');
+
+            setTimeout(() => {
+                Auth.showSuccess('이것은 성공 메시지입니다');
+            }, 500);
+
+            setTimeout(() => {
+                Auth.showWarning('이것은 경고 메시지입니다');
+            }, 1000);
+        };
+    </script>
+
+    <style>
+        .message {
+            margin: 15px 0;
+            padding: 12px;
+            border-radius: 8px;
+        }
+
+        .success-message {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .error-message {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+            margin-top: 10px;
+        }
+
+        .btn-secondary:hover {
+            background: #5a6268;
+        }
+    </style>
+</body>
+</html>
