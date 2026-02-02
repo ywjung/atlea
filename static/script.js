@@ -419,7 +419,9 @@ function showNotification(message, type = 'info') {
 
     const notification = document.createElement('div');
     notification.className = 'toast-notification';
-    notification.innerHTML = `<span class="toast-icon">${icons[type] || icons.info}</span><span class="toast-message">${message}</span>`;
+    // Sanitize message to prevent XSS
+    const safeMessage = sanitizeHTML(message, { ALLOWED_TAGS: [], ALLOWED_ATTR: [] });
+    notification.innerHTML = `<span class="toast-icon">${icons[type] || icons.info}</span><span class="toast-message">${safeMessage}</span>`;
     notification.style.cssText = `
         position: fixed;
         bottom: 100px;
