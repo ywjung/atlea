@@ -68,7 +68,7 @@ export {
 export {
     sanitizeHTML, safeSetInnerHTML,
     formatTimestamp, formatFileSize, formatNumber,
-    get, post, put, del, patch, apiCall, uploadFile,
+    get, post, put, del, apiCall, uploadFile,
     getItem, setItem, removeItem, session,
     createElement, addClass, removeClass, toggleClass,
     show, hide, toggle, debounce, throttle,
