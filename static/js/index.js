@@ -11,6 +11,9 @@
 // Application initialization
 export * from './app/index.js';
 
+// Configuration
+export * from './config/index.js';
+
 // Authentication
 export * from './auth/index.js';
 
@@ -77,3 +80,9 @@ export {
     initMarked, parseMarkdown,
     isAsciiArt, normalizeLanguageClass, renderMath, highlightCodeBlocks
 } from './markdown/index.js';
+
+export {
+    MODEL_MAX_TOKENS, TTS_MODEL_NAMES, STORAGE_KEYS, HISTORY_CONFIG,
+    API_ENDPOINTS, UI_CONFIG, FEATURES,
+    getModelMaxTokens, getTTSModelName
+} from './config/index.js';
