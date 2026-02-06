@@ -3523,7 +3523,15 @@ function showTTSIndicator() {
                 <svg class="tts-indicator-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/>
                 </svg>
-                <span>재생 중</span>
+                <div class="tts-indicator-info">
+                    <span class="tts-indicator-label">재생 중</span>
+                    <div class="tts-progress-container">
+                        <div class="tts-progress-bar">
+                            <div class="tts-progress-fill" style="width: 0%"></div>
+                        </div>
+                        <span class="tts-time-display">0:00 / 0:00</span>
+                    </div>
+                </div>
                 <button class="tts-indicator-stop" onclick="stopTTS()" title="중지">
                     <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
                         <rect x="3" y="3" width="10" height="10" rx="2" fill="currentColor"/>
@@ -3584,13 +3592,112 @@ function showTTSIndicator() {
                 .tts-indicator-stop:hover {
                     background: rgba(255,255,255,0.3);
                 }
+                .tts-indicator-info {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 4px;
+                    flex: 1;
+                    min-width: 150px;
+                }
+                .tts-indicator-label {
+                    font-size: 13px;
+                    font-weight: 600;
+                }
+                .tts-progress-container {
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                }
+                .tts-progress-bar {
+                    flex: 1;
+                    height: 4px;
+                    background: rgba(255,255,255,0.3);
+                    border-radius: 2px;
+                    overflow: hidden;
+                    cursor: pointer;
+                    position: relative;
+                }
+                .tts-progress-bar:hover {
+                    height: 6px;
+                }
+                .tts-progress-fill {
+                    height: 100%;
+                    background: white;
+                    border-radius: 2px;
+                    transition: width 0.1s linear;
+                }
+                .tts-time-display {
+                    font-size: 11px;
+                    opacity: 0.9;
+                    min-width: 70px;
+                    text-align: right;
+                    font-variant-numeric: tabular-nums;
+                }
             `;
             document.head.appendChild(style);
+        }
+
+        // Add progress bar click handler for seeking
+        const progressBar = indicator.querySelector('.tts-progress-bar');
+        if (progressBar) {
+            progressBar.addEventListener('click', (e) => {
+                const audio = ttsAudio || streamingTTS.currentAudio;
+                if (!audio || !audio.duration) return;
+
+                const rect = progressBar.getBoundingClientRect();
+                const clickX = e.clientX - rect.left;
+                const percentage = clickX / rect.width;
+                const newTime = percentage * audio.duration;
+
+                audio.currentTime = newTime;
+                updateTTSProgress();
+            });
         }
 
         document.body.appendChild(indicator);
     }
     indicator.style.display = 'block';
+
+    // Start updating progress
+    updateTTSProgress();
+}
+
+// Update TTS progress bar and time display
+function updateTTSProgress() {
+    const indicator = document.getElementById('tts-floating-indicator');
+    if (!indicator || indicator.style.display === 'none') return;
+
+    const progressFill = indicator.querySelector('.tts-progress-fill');
+    const timeDisplay = indicator.querySelector('.tts-time-display');
+    if (!progressFill || !timeDisplay) return;
+
+    const audio = ttsAudio || streamingTTS.currentAudio;
+    if (!audio) return;
+
+    const currentTime = audio.currentTime || 0;
+    const duration = audio.duration || 0;
+
+    if (duration > 0) {
+        const percentage = (currentTime / duration) * 100;
+        progressFill.style.width = percentage + '%';
+
+        // Format time as MM:SS
+        const formatTime = (seconds) => {
+            const mins = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${mins}:${secs.toString().padStart(2, '0')}`;
+        };
+
+        timeDisplay.textContent = `${formatTime(currentTime)} / ${formatTime(duration)}`;
+    } else {
+        progressFill.style.width = '0%';
+        timeDisplay.textContent = '0:00 / 0:00';
+    }
+
+    // Continue updating if audio is playing
+    if (audio && !audio.paused) {
+        requestAnimationFrame(updateTTSProgress);
+    }
 }
 
 function hideTTSIndicator() {
