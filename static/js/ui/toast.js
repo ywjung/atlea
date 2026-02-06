@@ -4,7 +4,7 @@
  * Shows temporary notification messages with animations.
  */
 
-import { sanitizeHTML } from '../utils/sanitize.js';
+import { sanitizeHTML, safeSetInnerHTML } from '../utils/sanitize.js';
 
 /**
  * Show toast notification
@@ -38,7 +38,7 @@ export function showToast(message, type = 'info', duration = 3000) {
 
     // Sanitize message to prevent XSS
     const safeMessage = sanitizeHTML(message, { ALLOWED_TAGS: [], ALLOWED_ATTR: [] });
-    notification.innerHTML = `<span class="toast-icon">${icons[type] || icons.info}</span><span class="toast-message">${safeMessage}</span>`;
+    safeSetInnerHTML(notification, `<span class="toast-icon">${icons[type] || icons.info}</span><span class="toast-message">${safeMessage}</span>`);
 
     notification.style.cssText = `
         position: fixed;

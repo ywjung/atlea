@@ -10,50 +10,71 @@
     <!-- Logger System -->
     <script src="/static/env-config.js?v=1"></script>
     <script src="/static/logger.js?v=1"></script>
+
+    <!-- DOMPurify for XSS protection -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.8/purify.min.js"
+            crossorigin="anonymous"
+            referrerpolicy="no-referrer"></script>
+
+    <!-- Auth utilities -->
+    <script src="/static/auth.js?v=1"></script>
 </head>
 <body>
+    <!-- Skip to main content link for keyboard users -->
+    <a href="#loginForm" class="skip-link">메인 콘텐츠로 건너뛰기</a>
+
     <div class="auth-container">
-        <div class="auth-header">
-            <div class="auth-logo">🤖</div>
-            <h1>ATLEA 로그인</h1>
-            <p>계정에 로그인하여 챗봇을 사용하세요</p>
-        </div>
+        <header class="auth-header" role="banner">
+            <div class="auth-logo" role="img" aria-label="ATLEA 로봇 로고">🤖</div>
+            <h1 id="pageTitle">ATLEA 로그인</h1>
+            <p id="pageDescription">계정에 로그인하여 챗봇을 사용하세요</p>
+        </header>
 
-        <div id="error-message" class="message error-message"></div>
-        <div id="success-message" class="message success-message"></div>
+        <div id="error-message" class="message error-message" role="alert" aria-live="assertive" aria-atomic="true"></div>
+        <div id="success-message" class="message success-message" role="status" aria-live="polite" aria-atomic="true"></div>
 
-        <form id="loginForm" class="auth-form">
+        <main role="main">
+            <form id="loginForm" class="auth-form" aria-labelledby="pageTitle" aria-describedby="pageDescription">
             <div class="form-group">
                 <label for="email">
-                    이메일 <span class="required">*</span>
+                    이메일 <span class="required" aria-label="필수 입력">*</span>
                 </label>
                 <input
                     type="email"
                     id="email"
+                    name="email"
                     class="form-input"
                     placeholder="user@example.com"
                     required
                     autofocus
+                    aria-required="true"
+                    aria-describedby="emailHelp"
+                    autocomplete="email"
                 >
+                <span id="emailHelp" class="sr-only">이메일 주소를 입력하세요</span>
             </div>
 
             <div class="form-group">
                 <label for="password">
-                    비밀번호 <span class="required">*</span>
+                    비밀번호 <span class="required" aria-label="필수 입력">*</span>
                 </label>
                 <input
                     type="password"
                     id="password"
+                    name="password"
                     class="form-input"
                     placeholder="비밀번호를 입력하세요"
                     required
-                    autocomplete="off"
+                    aria-required="true"
+                    aria-describedby="passwordHelp"
+                    autocomplete="current-password"
                 >
+                <span id="passwordHelp" class="sr-only">비밀번호를 입력하세요</span>
             </div>
 
             <!-- CAPTCHA 영역 -->
-            <div id="captchaContainer" class="form-group" style="display: none;">
-                <label for="captchaAnswer">보안 확인 <span class="required">*</span></label>
+            <div id="captchaContainer" class="form-group" role="group" aria-labelledby="captchaLabel" style="display: none;">
+                <label id="captchaLabel" for="captchaAnswer">보안 확인 <span class="required" aria-label="필수 입력">*</span></label>
                 <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
                     <div style="
                         flex: 1;
@@ -65,36 +86,51 @@
                         border-radius: 8px;
                         padding: 8px;
                         min-height: 80px;
-                    ">
-                        <img id="captchaImage" src="" alt="CAPTCHA 이미지" style="
+                    " role="img" aria-labelledby="captchaDescription">
+                        <img id="captchaImage" src="" alt="수학 문제 CAPTCHA 이미지" style="
                             max-width: 100%;
                             height: auto;
                             display: block;
                         ">
                     </div>
-                    <button type="button" onclick="refreshCaptcha()" style="
-                        padding: 12px 16px;
-                        background: #4CAF50;
-                        color: white;
-                        border: none;
-                        border-radius: 8px;
-                        cursor: pointer;
-                        font-size: 20px;
-                    " title="새로고침">🔄</button>
+                    <button
+                        type="button"
+                        onclick="refreshCaptcha()"
+                        aria-label="CAPTCHA 이미지 새로고침"
+                        style="
+                            padding: 12px 16px;
+                            background: #4CAF50;
+                            color: white;
+                            border: none;
+                            border-radius: 8px;
+                            cursor: pointer;
+                            font-size: 20px;
+                        ">
+                        <span aria-hidden="true">🔄</span>
+                        <span class="sr-only">새로고침</span>
+                    </button>
                 </div>
-                <input type="number" id="captchaAnswer" name="captchaAnswer" class="form-input"
-                       placeholder="위 이미지의 답을 입력하세요">
+                <span id="captchaDescription" class="sr-only">이미지에 표시된 수학 문제의 답을 입력하세요</span>
+                <input
+                    type="number"
+                    id="captchaAnswer"
+                    name="captchaAnswer"
+                    class="form-input"
+                    placeholder="위 이미지의 답을 입력하세요"
+                    aria-required="true"
+                    aria-describedby="captchaDescription"
+                >
                 <input type="hidden" id="captchaId" name="captchaId">
             </div>
 
             <!-- 2FA (Google OTP) 영역 -->
-            <div id="totpContainer" class="form-group" style="display: none;">
-                <label for="totpToken">
-                    2차 인증 코드 (Google Authenticator) <span class="required">*</span>
+            <div id="totpContainer" class="form-group" role="group" aria-labelledby="totpLabel" style="display: none;">
+                <label id="totpLabel" for="totpToken">
+                    2차 인증 코드 (Google Authenticator) <span class="required" aria-label="필수 입력">*</span>
                 </label>
-                <div style="background: #f0f7ff; border-left: 4px solid #3b82f6; padding: 12px; margin-bottom: 12px; border-radius: 4px;">
+                <div role="note" aria-label="인증 코드 입력 안내" style="background: #f0f7ff; border-left: 4px solid #3b82f6; padding: 12px; margin-bottom: 12px; border-radius: 4px;">
                     <p style="margin: 0; font-size: 14px; color: #666;">
-                        📱 Google Authenticator 앱을 열어 6자리 코드를 확인하세요
+                        <span aria-hidden="true">📱</span> Google Authenticator 앱을 열어 6자리 코드를 확인하세요
                     </p>
                 </div>
                 <input
@@ -106,19 +142,23 @@
                     maxlength="6"
                     pattern="[0-9]{6}"
                     inputmode="numeric"
-                    autocomplete="off"
+                    autocomplete="one-time-code"
+                    aria-required="true"
+                    aria-describedby="totpHelp"
                 >
+                <span id="totpHelp" class="sr-only">Google Authenticator에서 생성된 6자리 숫자 코드를 입력하세요</span>
             </div>
 
-            <button type="submit" class="btn btn-primary btn-block" id="loginBtn">
+            <button type="submit" class="btn btn-primary btn-block" id="loginBtn" aria-label="로그인 제출">
                 로그인
             </button>
         </form>
 
-        <div class="auth-links">
+        <nav class="auth-links" aria-label="인증 관련 링크">
             <a href="/static/register.html">계정이 없으신가요? 회원가입</a>
             <a href="#" onclick="handleForgotPassword(event)" id="forgotPasswordLink">비밀번호를 잊으셨나요?</a>
-        </div>
+        </nav>
+        </main>
     </div>
 
     <!-- ES6 Module: Compatibility Bridge for Auth -->
@@ -139,10 +179,13 @@
         let totpRequired = false;
 
         // 로그인 페이지 접근 시 기존 세션 자동 삭제 (로그아웃 처리)
-        if (Auth.isAuthenticated()) {
-            Auth.apiCall('/api/auth/logout', { method: 'POST' }).catch(() => {});
-            Auth.clearAuth();
-        }
+        // Wait for Auth module to load
+        document.addEventListener('DOMContentLoaded', function() {
+            if (typeof Auth !== 'undefined' && Auth.isAuthenticated()) {
+                Auth.apiCall('/api/auth/logout', { method: 'POST' }).catch(() => {});
+                Auth.clearAuth();
+            }
+        });
 
         // URL 파라미터에서 메시지 확인
         const urlParams = new URLSearchParams(window.location.search);

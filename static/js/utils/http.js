@@ -32,17 +32,29 @@ export async function apiCall(endpoint, options = {}) {
 
         // Handle authentication errors
         if (response.status === 401) {
-            // Token expired or invalid
-            localStorage.removeItem('access_token');
-            localStorage.removeItem('user_id');
-            window.location.href = '/login.html';
-            throw new Error('Authentication required');
+            // Try to get the actual error message from server
+            const error = await response.json().catch(() => ({ detail: 'Authentication required' }));
+            const errorMessage = error.detail || error.error || error.message || 'Authentication required';
+
+            // Only redirect to login if we have a valid token (token expired case)
+            // Don't redirect on login page itself (login failed case)
+            const hasToken = localStorage.getItem('access_token');
+            const isLoginEndpoint = endpoint.includes('/auth/login');
+
+            if (hasToken && !isLoginEndpoint) {
+                // Token expired or invalid - clear and redirect
+                localStorage.removeItem('access_token');
+                localStorage.removeItem('user_id');
+                window.location.href = '/login.html';
+            }
+
+            throw new Error(errorMessage);
         }
 
         // Handle other HTTP errors
         if (!response.ok) {
             const error = await response.json().catch(() => ({ error: response.statusText }));
-            throw new Error(error.error || error.message || `HTTP ${response.status}`);
+            throw new Error(error.detail || error.error || error.message || `HTTP ${response.status}`);
         }
 
         // Parse response

@@ -26,11 +26,19 @@ export function sanitizeHTML(dirty, config = {}) {
             'dl', 'dt', 'em', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr', 'i',
             'img', 'ins', 'kbd', 'li', 'mark', 'ol', 'p', 'pre', 's', 'span',
             'strong', 'sub', 'sup', 'table', 'tbody', 'td', 'tfoot', 'th',
-            'thead', 'tr', 'u', 'ul'
+            'thead', 'tr', 'u', 'ul',
+            // SVG tags for icons
+            'svg', 'path', 'circle', 'rect', 'line', 'polyline', 'polygon',
+            'ellipse', 'g', 'text', 'tspan', 'defs', 'clipPath', 'mask', 'use'
         ],
         ALLOWED_ATTR: [
             'class', 'id', 'href', 'title', 'alt', 'src', 'width', 'height',
-            'data-*', 'aria-*', 'role', 'target', 'rel'
+            'data-*', 'aria-*', 'role', 'target', 'rel',
+            // SVG attributes for icons
+            'viewBox', 'fill', 'stroke', 'stroke-width', 'stroke-linecap',
+            'stroke-linejoin', 'd', 'x', 'y', 'x1', 'y1', 'x2', 'y2',
+            'cx', 'cy', 'r', 'rx', 'ry', 'points', 'transform',
+            'font-size', 'font-weight', 'text-anchor'
         ],
         ALLOW_DATA_ATTR: true,
         ALLOW_ARIA_ATTR: true,

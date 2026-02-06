@@ -10,6 +10,14 @@
     <!-- Logger System -->
     <script src="/static/env-config.js?v=1"></script>
     <script src="/static/logger.js?v=1"></script>
+
+    <!-- DOMPurify for XSS protection -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.8/purify.min.js"
+            crossorigin="anonymous"
+            referrerpolicy="no-referrer"></script>
+
+    <!-- Auth utilities -->
+    <script src="/static/auth.js?v=1"></script>
 </head>
 <body>
     <div class="auth-container">
@@ -67,12 +75,12 @@
                 <div id="passwordRequirements" class="password-requirements">
                     <strong>비밀번호 요구사항:</strong>
                     <ul>
-                        <li id="req-length" class="invalid">✗ 최소 8자 이상</li>
-                        <li id="req-uppercase" class="invalid">✗ 대문자 1개 이상</li>
-                        <li id="req-lowercase" class="invalid">✗ 소문자 1개 이상</li>
-                        <li id="req-digit" class="invalid">✗ 숫자 1개 이상</li>
-                        <li id="req-special" class="invalid">✗ 특수문자 1개 이상</li>
-                        <li id="req-nospace" class="invalid">✗ 공백 없음</li>
+                        <li id="req-length" class="invalid" data-text="최소 8자 이상">✗ 최소 8자 이상</li>
+                        <li id="req-uppercase" class="invalid" data-text="대문자 1개 이상">✗ 대문자 1개 이상</li>
+                        <li id="req-lowercase" class="invalid" data-text="소문자 1개 이상">✗ 소문자 1개 이상</li>
+                        <li id="req-digit" class="invalid" data-text="숫자 1개 이상">✗ 숫자 1개 이상</li>
+                        <li id="req-special" class="invalid" data-text="특수문자 1개 이상">✗ 특수문자 1개 이상</li>
+                        <li id="req-nospace" class="invalid" data-text="공백 없음">✗ 공백 없음</li>
                     </ul>
                 </div>
             </div>
@@ -211,12 +219,13 @@
 
         function updateRequirement(id, isValid) {
             const element = document.getElementById(id);
+            const text = element.getAttribute('data-text');
             if (isValid) {
                 element.className = 'valid';
-                element.textContent = '✓' + element.textContent.substring(1);
+                element.textContent = '✓ ' + text;
             } else {
                 element.className = 'invalid';
-                element.textContent = '✗' + element.textContent.substring(1);
+                element.textContent = '✗ ' + text;
             }
         }
 

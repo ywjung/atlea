@@ -23,6 +23,14 @@
     <!-- Logger System -->
     <script src="/static/env-config.js?v=1"></script>
     <script src="/static/logger.js?v=1"></script>
+
+    <!-- DOMPurify for XSS protection -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.8/purify.min.js"
+            crossorigin="anonymous"
+            referrerpolicy="no-referrer"></script>
+
+    <!-- Auth utilities -->
+    <script src="/static/auth.js?v=1"></script>
 </head>
 <body>
     <div class="profile-container">
@@ -67,6 +75,114 @@
                     <button type="submit" class="btn btn-primary" id="updateProfileBtn">
                         프로필 업데이트
                     </button>
+                </form>
+            </div>
+        </div>
+
+        <!-- 페르소나 설정 카드 -->
+        <div class="card">
+            <div class="card-header">🎭 AI 페르소나 설정</div>
+            <div class="card-body">
+                <p style="color: var(--text-muted, #666); margin-bottom: 1rem;">
+                    AI의 응답 스타일을 개인화하세요. 설정한 페르소나는 모든 검색 및 대화에 적용됩니다.
+                </p>
+
+                <div id="persona-error" class="message error-message"></div>
+                <div id="persona-success" class="message success-message"></div>
+
+                <form id="personaForm" class="auth-form">
+                    <div class="form-group">
+                        <label for="personaEnabled">
+                            <input type="checkbox" id="personaEnabled" checked>
+                            페르소나 활성화
+                        </label>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="role">역할</label>
+                        <input
+                            type="text"
+                            id="role"
+                            class="form-input"
+                            placeholder="예: 개발자, 연구원, 마케터, 학생"
+                            maxlength="100"
+                        >
+                        <small style="color: var(--text-muted, #666);">당신의 직업이나 역할</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="expertiseLevel">전문성 수준</label>
+                        <select id="expertiseLevel" class="form-input">
+                            <option value="">선택하세요</option>
+                            <option value="beginner">초보자 - 기본 개념부터 자세히 설명</option>
+                            <option value="intermediate">중급자 - 핵심 내용 중심으로 설명</option>
+                            <option value="expert">전문가 - 고급 개념과 세부사항 중심</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="expertiseDomains">전문 분야</label>
+                        <input
+                            type="text"
+                            id="expertiseDomains"
+                            class="form-input"
+                            placeholder="예: Python, 머신러닝, 웹 개발"
+                            maxlength="500"
+                        >
+                        <small style="color: var(--text-muted, #666);">쉼표로 구분하여 입력</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="tone">응답 톤</label>
+                        <select id="tone" class="form-input">
+                            <option value="">선택하세요</option>
+                            <option value="professional">전문적이고 공식적인 톤</option>
+                            <option value="casual">편안하고 캐주얼한 톤</option>
+                            <option value="friendly">친근하고 다정한 톤</option>
+                            <option value="technical">기술적이고 정확한 톤</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="languageStyle">언어 스타일</label>
+                        <select id="languageStyle" class="form-input">
+                            <option value="">선택하세요</option>
+                            <option value="formal">격식 있는 표현</option>
+                            <option value="informal">일상적인 표현</option>
+                            <option value="concise">간결하고 요약적</option>
+                            <option value="detailed">상세하고 구체적</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="responseFormatPreference">응답 형식 선호</label>
+                        <select id="responseFormatPreference" class="form-input">
+                            <option value="">선택하세요</option>
+                            <option value="code_focused">코드 예제 중심</option>
+                            <option value="explanation_focused">개념 설명 중심</option>
+                            <option value="balanced">설명과 코드 균형</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="additionalContext">추가 요구사항</label>
+                        <textarea
+                            id="additionalContext"
+                            class="form-input"
+                            rows="3"
+                            placeholder="특별한 요구사항이나 제약사항을 입력하세요"
+                            maxlength="1000"
+                        ></textarea>
+                    </div>
+
+                    <div style="display: flex; gap: 1rem;">
+                        <button type="submit" class="btn btn-primary" id="savePersonaBtn">
+                            페르소나 저장
+                        </button>
+                        <button type="button" class="btn btn-secondary" id="resetPersonaBtn">
+                            초기화
+                        </button>
+                    </div>
                 </form>
             </div>
         </div>
@@ -376,6 +492,180 @@
             }
         }
 
+        // 페르소나 로드
+        async function loadPersona() {
+            try {
+                const response = await fetch('/api/persona', {
+                    headers: {
+                        'Authorization': `Bearer ${Auth.getAccessToken()}`
+                    }
+                });
+
+                if (response.ok) {
+                    const persona = await response.json();
+
+                    // 폼에 페르소나 데이터 채우기
+                    document.getElementById('personaEnabled').checked = persona.enabled !== false;
+                    document.getElementById('role').value = persona.role || '';
+                    document.getElementById('expertiseLevel').value = persona.expertise_level || '';
+                    document.getElementById('expertiseDomains').value = persona.expertise_domains || '';
+                    document.getElementById('tone').value = persona.tone || '';
+                    document.getElementById('languageStyle').value = persona.language_style || '';
+                    document.getElementById('responseFormatPreference').value = persona.response_format_preference || '';
+                    document.getElementById('additionalContext').value = persona.additional_context || '';
+
+                    logger.info('페르소나 로드 완료');
+                } else if (response.status === 404) {
+                    logger.info('설정된 페르소나 없음');
+                }
+            } catch (error) {
+                logger.error('페르소나 로드 실패:', error);
+            }
+        }
+
+        // 페르소나 저장/업데이트
+        const personaForm = document.getElementById('personaForm');
+        let isSubmitting = false;  // 이중 제출 방지 플래그
+
+        personaForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            // 이중 제출 방지
+            if (isSubmitting) {
+                logger.warn('⚠️ 이미 제출 중입니다. 중복 제출 차단됨');
+                return;
+            }
+            isSubmitting = true;
+            logger.info('🔒 제출 시작 - 잠금 설정');
+
+            // 기존 메시지 숨기기
+            Auth.hideError('persona-error');
+            Auth.hideSuccess('persona-success');
+
+            const personaData = {
+                role: document.getElementById('role').value || null,
+                expertise_level: document.getElementById('expertiseLevel').value || null,
+                expertise_domains: document.getElementById('expertiseDomains').value || null,
+                tone: document.getElementById('tone').value || null,
+                language_style: document.getElementById('languageStyle').value || null,
+                response_format_preference: document.getElementById('responseFormatPreference').value || null,
+                additional_context: document.getElementById('additionalContext').value || null
+            };
+
+            logger.info('🚀 페르소나 저장 시도:', personaData);
+            logger.info('🔑 인증 토큰:', Auth.getAccessToken() ? '있음' : '없음');
+
+            try {
+                logger.info('📤 API 요청 전송 시작: PUT /api/persona');
+                const response = await fetch('/api/persona', {
+                    method: 'PUT',
+                    headers: {
+                        'Authorization': `Bearer ${Auth.getAccessToken()}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(personaData)
+                });
+
+                logger.info('📡 페르소나 저장 응답:', {
+                    status: response.status,
+                    statusText: response.statusText,
+                    ok: response.ok,
+                    headers: Object.fromEntries(response.headers.entries())
+                });
+
+                if (response.ok) {
+                    logger.info('✅ 응답 OK - 성공 처리 시작');
+                    const persona = await response.json();
+                    logger.info('페르소나 저장 완료:', persona);
+
+                    // 활성화 상태 업데이트
+                    const enabled = document.getElementById('personaEnabled').checked;
+                    const toggleResponse = await fetch('/api/persona/toggle?enabled=' + enabled, {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${Auth.getAccessToken()}`
+                        }
+                    });
+
+                    logger.info('페르소나 토글 응답:', toggleResponse.status);
+
+                    // 성공 메시지 표시 전 엘리먼트 상태 확인
+                    const successElement = document.getElementById('persona-success');
+                    logger.info('🔍 성공 메시지 엘리먼트 확인:', {
+                        exists: !!successElement,
+                        currentDisplay: successElement ? successElement.style.display : 'N/A',
+                        currentText: successElement ? successElement.textContent : 'N/A'
+                    });
+
+                    Auth.showSuccess('페르소나가 저장되었습니다', 'persona-success');
+
+                    // showSuccess 호출 후 상태 확인
+                    logger.info('✅ showSuccess 호출 완료:', {
+                        display: successElement ? successElement.style.display : 'N/A',
+                        textContent: successElement ? successElement.textContent : 'N/A',
+                        computedDisplay: successElement ? window.getComputedStyle(successElement).display : 'N/A',
+                        computedVisibility: successElement ? window.getComputedStyle(successElement).visibility : 'N/A'
+                    });
+                    setTimeout(() => Auth.hideSuccess('persona-success'), 3000);
+
+                    // 제출 완료 - 잠금 해제
+                    isSubmitting = false;
+                    logger.info('🔓 제출 완료 - 잠금 해제');
+                } else {
+                    logger.error('❌ 응답 실패 - 에러 처리 시작');
+                    const error = await response.json();
+                    logger.error('💥 페르소나 저장 실패 상세:', error);
+                    Auth.showError(error.detail || '페르소나 저장 실패', 'persona-error');
+                    logger.info('에러 메시지 표시 완료');
+
+                    // 제출 완료 - 잠금 해제
+                    isSubmitting = false;
+                    logger.info('🔓 제출 완료 (에러) - 잠금 해제');
+                }
+            } catch (error) {
+                logger.error('💣 페르소나 저장 중 예외 발생:', {
+                    message: error.message,
+                    stack: error.stack,
+                    name: error.name
+                });
+                Auth.showError('페르소나 저장 중 오류가 발생했습니다: ' + error.message, 'persona-error');
+                logger.info('에러 메시지 표시 완료 (catch)');
+
+                // 제출 완료 - 잠금 해제
+                isSubmitting = false;
+                logger.info('🔓 제출 완료 (예외) - 잠금 해제');
+            }
+        });
+
+        // 페르소나 초기화
+        document.getElementById('resetPersonaBtn').addEventListener('click', async () => {
+            if (!confirm('페르소나 설정을 초기화하시겠습니까?')) return;
+
+            try {
+                const response = await fetch('/api/persona', {
+                    method: 'DELETE',
+                    headers: {
+                        'Authorization': `Bearer ${Auth.getAccessToken()}`
+                    }
+                });
+
+                if (response.ok) {
+                    // 폼 초기화
+                    personaForm.reset();
+                    document.getElementById('personaEnabled').checked = true;
+
+                    Auth.showSuccess('페르소나가 초기화되었습니다', 'persona-success');
+                    setTimeout(() => Auth.hideSuccess('persona-success'), 3000);
+                } else {
+                    const error = await response.json();
+                    Auth.showError(error.detail || '초기화 실패', 'persona-error');
+                }
+            } catch (error) {
+                logger.error('페르소나 초기화 실패:', error);
+                Auth.showError('초기화 중 오류가 발생했습니다', 'persona-error');
+            }
+        });
+
         // 프로필 업데이트
         profileForm.addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -505,6 +795,7 @@
             // 초기 로드
             await displayUserInfo();
             loadSessions();
+            await loadPersona();
 
             // 전역 함수로 노출 (인라인 핸들러에서 사용)
             window.revokeSession = revokeSession;

@@ -704,3 +704,153 @@ body {
 [data-theme="dark"] small {
     color: #a0a0a0 !important;
 }
+/* ========================================
+   Accessibility Enhancements (WCAG 2.1 AA)
+   ======================================== */
+
+/* Skip to main content link */
+.skip-link {
+    position: absolute;
+    top: -40px;
+    left: 0;
+    background: var(--primary-color);
+    color: white;
+    padding: 8px 16px;
+    text-decoration: none;
+    border-radius: 0 0 4px 0;
+    z-index: 100;
+    font-weight: 600;
+}
+
+.skip-link:focus {
+    top: 0;
+    outline: 3px solid #ffd700;
+    outline-offset: 2px;
+}
+
+/* Screen reader only content */
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
+}
+
+/* Enhanced focus styles for keyboard navigation */
+a:focus,
+button:focus,
+input:focus,
+select:focus,
+textarea:focus {
+    outline: 3px solid #4CAF50;
+    outline-offset: 2px;
+}
+
+/* Focus visible (for browsers that support it) */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+    outline: 3px solid #4CAF50;
+    outline-offset: 2px;
+}
+
+/* Remove outline for mouse users */
+a:focus:not(:focus-visible),
+button:focus:not(:focus-visible),
+input:focus:not(:focus-visible),
+select:focus:not(:focus-visible),
+textarea:focus:not(:focus-visible) {
+    outline: none;
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+    :root {
+        --primary-color: #2d7a30;
+        --text-color: #000;
+        --border-color: #000;
+    }
+
+    .auth-container {
+        border: 2px solid #000;
+    }
+
+    .form-input {
+        border: 2px solid #000;
+    }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+}
+
+/* Enhanced color contrast for text */
+.form-label,
+label {
+    color: #1a1a1a;
+    font-weight: 600;
+}
+
+/* Required field indicator */
+.required {
+    color: #d32f2f;
+    font-weight: bold;
+}
+
+/* Error and success messages with adequate contrast */
+.error-message {
+    background-color: #ffebee;
+    color: #c62828;
+    border: 2px solid #ef5350;
+}
+
+.success-message {
+    background-color: #e8f5e9;
+    color: #2e7d32;
+    border: 2px solid #66bb6a;
+}
+
+/* Dark theme accessibility overrides */
+[data-theme="dark"] .skip-link {
+    background: #4CAF50;
+}
+
+[data-theme="dark"] a:focus,
+[data-theme="dark"] button:focus,
+[data-theme="dark"] input:focus,
+[data-theme="dark"] select:focus,
+[data-theme="dark"] textarea:focus {
+    outline-color: #81c784;
+}
+
+[data-theme="dark"] .form-label,
+[data-theme="dark"] label {
+    color: #e0e0e0;
+}
+
+[data-theme="dark"] .error-message {
+    background-color: #b71c1c;
+    color: #ffcdd2;
+    border-color: #ef5350;
+}
+
+[data-theme="dark"] .success-message {
+    background-color: #1b5e20;
+    color: #c8e6c9;
+    border-color: #66bb6a;
+}

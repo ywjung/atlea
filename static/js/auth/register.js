@@ -4,7 +4,7 @@
  * User registration functionality.
  */
 
-import { post } from '../utils/http.js';
+import { get, post } from '../utils/http.js';
 import { setTokens, setUser } from './session.js';
 
 /**
@@ -54,7 +54,7 @@ export async function register(email, username, password, captchaId = null, capt
  */
 export async function generateCaptcha(action = 'register') {
     try {
-        const response = await post('/auth/captcha/generate', { action });
+        const response = await get('/auth/captcha/generate', { action });
         return response;
     } catch (error) {
         console.error('Captcha generation failed:', error);
