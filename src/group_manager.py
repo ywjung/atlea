@@ -1112,6 +1112,47 @@ class GroupManager:
         collect_descendants(group_id)
         return result
 
+    def get_descendant_group_ids_batch(self, group_ids: List[str]) -> List[str]:
+        """
+        Get all descendant group IDs for multiple groups in a single operation
+
+        This is optimized to avoid N+1 queries by fetching all groups once
+        and building the hierarchy map once.
+
+        Args:
+            group_ids: List of parent group IDs
+
+        Returns:
+            List of all descendant group IDs (including parents), deduplicated
+        """
+        if not group_ids:
+            return []
+
+        result = set(group_ids)  # Include parent IDs
+        all_groups = self.get_all_groups()
+
+        # Build parent-children mapping once
+        children_map = {}
+        for group in all_groups:
+            parent_id = group.get('parent_id', '')
+            if parent_id:
+                if parent_id not in children_map:
+                    children_map[parent_id] = []
+                children_map[parent_id].append(group['id'])
+
+        # Recursively collect all descendants for each group
+        def collect_descendants(parent_id: str):
+            if parent_id in children_map:
+                for child_id in children_map[parent_id]:
+                    result.add(child_id)
+                    collect_descendants(child_id)
+
+        # Collect descendants for all requested groups
+        for group_id in group_ids:
+            collect_descendants(group_id)
+
+        return list(result)
+
     # ========================================================================
     # N:M Relationship Methods (Group ↔ Organization)
     # ========================================================================

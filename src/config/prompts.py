@@ -13,6 +13,13 @@ PROMPT_KEY_HYBRID = "system:prompt:hybrid"
 PROMPT_KEY_TOOLS_ONLY = "system:prompt:tools_only"
 PROMPT_KEY_LEGACY = "system:default_prompt"  # 레거시 호환용
 
+# Hybrid RAG Source Priority Prompts (Phase 2-3: Smart Search Fix)
+PROMPT_KEY_HYBRID_WEB_PRIORITY = "system:prompt:hybrid_web_priority"
+PROMPT_KEY_HYBRID_BALANCED = "system:prompt:hybrid_balanced"
+PROMPT_KEY_HYBRID_WEB_ONLY = "system:prompt:hybrid_web_only"
+PROMPT_KEY_HYBRID_LOCAL_ONLY = "system:prompt:hybrid_local_only"
+PROMPT_KEY_HYBRID_LOCAL_PRIORITY = "system:prompt:hybrid_local_priority"
+
 # System Prompt Default Values
 DEFAULT_BASIC_PROMPT = """당신은 문서 기반 질의응답 전문 AI 어시스턴트입니다.
 
@@ -746,3 +753,95 @@ def get_system_prompt_for_mode(redis_client, search_mode: str, sources_used: lis
         prompt = prompt.decode('utf-8')
 
     return prompt
+
+
+# ============================================================================
+# Hybrid RAG Source Priority Prompts (Phase 2-3: Smart Search Fix)
+# ============================================================================
+
+# 웹 정보 우선 (최신 정보 필요한 경우)
+DEFAULT_HYBRID_WEB_PRIORITY_PROMPT = """⭐ 최신 웹 정보 {web_count}개와 내부 문서 {local_count}개를 균등하게 참조하세요.
+- 질문이 최신 트렌드, 미래 전망, 최근 동향에 관한 것이면 웹 정보를 우선 활용하세요.
+- 내부 문서에 해당 정보가 없으면 웹 정보를 적극 활용하세요.
+"""
+
+# 균형적 참조 (웹과 내부 문서 모두 중요)
+DEFAULT_HYBRID_BALANCED_PROMPT = """⭐ 웹 정보 {web_count}개와 내부 문서 {local_count}개를 균등하게 참조하세요.
+- 두 소스를 동등하게 고려하여 가장 신뢰할 수 있는 답변을 작성하세요.
+- 정보가 충돌하는 경우 더 최신이거나 신뢰할 수 있는 소스를 우선하세요.
+"""
+
+# 웹 정보만 (내부 문서 없는 경우)
+DEFAULT_HYBRID_WEB_ONLY_PROMPT = """⭐ 웹 정보 {web_count}개를 참조하여 답변하세요.
+- 검색된 웹 정보를 종합하여 정확하고 신뢰할 수 있는 답변을 제공하세요.
+"""
+
+# 내부 문서만 (웹 검색 없는 경우)
+DEFAULT_HYBRID_LOCAL_ONLY_PROMPT = """내부 문서 {local_count}개를 참조하되, 정보가 부족하면 명확히 언급하세요.
+- 문서에 해당 정보가 없으면 추측하지 말고 정보 부족을 명시하세요.
+"""
+
+# 내부 문서 우선 (일반적인 경우)
+DEFAULT_HYBRID_LOCAL_PRIORITY_PROMPT = """⭐ 내부 문서 {local_count}개 최우선 참조. 부분 정보라도 활용. 웹/공식 문서는 보충용.
+"""
+
+
+def get_hybrid_rag_priority_prompt(
+    redis_client,
+    needs_fresh: bool = False,
+    benefits_web: bool = False,
+    has_web: bool = False,
+    has_local: bool = False,
+    web_count: int = 0,
+    local_count: int = 0
+) -> str:
+    """
+    하이브리드 RAG 소스 우선순위 프롬프트 가져오기
+
+    Args:
+        redis_client: Redis 클라이언트
+        needs_fresh: 최신 정보 필요 여부
+        benefits_web: 웹 검색이 도움되는 질문 여부
+        has_web: 웹 검색 결과 있음
+        has_local: 내부 문서 있음
+        web_count: 웹 결과 개수
+        local_count: 내부 문서 개수
+
+    Returns:
+        우선순위 지침 프롬프트
+    """
+    prompt = None
+
+    # 우선순위 결정 로직
+    if needs_fresh or benefits_web:
+        if has_web and has_local:
+            # 웹 우선 프롬프트
+            prompt = redis_client.get(PROMPT_KEY_HYBRID_WEB_PRIORITY)
+            if not prompt:
+                prompt = DEFAULT_HYBRID_WEB_PRIORITY_PROMPT
+        elif has_web:
+            # 웹만 프롬프트
+            prompt = redis_client.get(PROMPT_KEY_HYBRID_WEB_ONLY)
+            if not prompt:
+                prompt = DEFAULT_HYBRID_WEB_ONLY_PROMPT
+        elif has_local:
+            # 내부만 프롬프트
+            prompt = redis_client.get(PROMPT_KEY_HYBRID_LOCAL_ONLY)
+            if not prompt:
+                prompt = DEFAULT_HYBRID_LOCAL_ONLY_PROMPT
+    else:
+        # 일반적인 경우: 내부 문서 우선
+        if has_local:
+            prompt = redis_client.get(PROMPT_KEY_HYBRID_LOCAL_PRIORITY)
+            if not prompt:
+                prompt = DEFAULT_HYBRID_LOCAL_PRIORITY_PROMPT
+
+    # bytes to str 변환
+    if isinstance(prompt, bytes):
+        prompt = prompt.decode('utf-8')
+
+    # 변수 치환
+    if prompt:
+        prompt = prompt.format(web_count=web_count, local_count=local_count)
+
+    return prompt or ""

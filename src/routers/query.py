@@ -23,6 +23,8 @@ import time
 
 # Import auth dependency directly
 from ..auth.middleware import get_current_active_user as auth_get_current_active_user
+from ..services.persona_service import PersonaService
+from ..models.persona import build_persona_prompt
 
 # Create router
 router = APIRouter(tags=["Query"])
@@ -290,6 +292,28 @@ async def query(
     # Reindexing happens on a separate index, then swaps atomically
 
     try:
+        # Check semantic cache first (similarity-based, 5-min TTL)
+        cached_response = cache_manager.get_cached_response(
+            question=request.question,
+            top_k=request.top_k,
+            group_ids=request.group_ids,
+            document_ids=request.document_ids
+        )
+
+        if cached_response:
+            logger.info(f"✅ Cache HIT (similarity: {cached_response['similarity']:.4f})")
+
+            # Return cached response immediately
+            return QueryResponse(
+                answer=cached_response["response"],
+                sources=cached_response["sources"],
+                context=cached_response.get("context", []),
+                confidence=cached_response.get("confidence"),
+                search_summary=cached_response.get("search_summary")
+            )
+
+        logger.info("❌ Cache MISS - proceeding with RAG query")
+
         # Save user question to conversation history
         if request.session_id and conversation_manager:
             conversation_manager.add_message(
@@ -297,6 +321,14 @@ async def query(
                 role="user",
                 content=request.question
             )
+
+            # 🆕 Retrieve conversation history (last 10 messages = 5 Q&A pairs)
+            conversation_history = conversation_manager.get_messages(
+                session_id=request.session_id,
+                limit=10
+            )
+        else:
+            conversation_history = []
 
         # Create query embedding (비동기 + 캐시)
         cached_embedding = cache_manager.get_embedding_cache(request.question)
@@ -343,12 +375,11 @@ async def query(
             )
 
         # Expand group_ids to include all descendants (hierarchical search)
-        # 동기 Redis 호출을 비동기 래핑
-        expanded_group_ids = []
-        for group_id in validated_group_ids:
-            descendant_ids = await asyncio.to_thread(group_manager.get_descendant_group_ids, group_id)
-            expanded_group_ids.extend(descendant_ids)
-        expanded_group_ids = list(set(expanded_group_ids))
+        # Optimized batch operation to avoid N+1 query problem
+        expanded_group_ids = await asyncio.to_thread(
+            group_manager.get_descendant_group_ids_batch,
+            validated_group_ids
+        )
         logger.info(f"🏢 Org filter: {user_org_id} | 🌲 Expanded group_ids: {validated_group_ids} → {expanded_group_ids}")
 
         # 🆕 자동 프롬프트 선택 (사용자가 지정하지 않은 경우)
@@ -362,6 +393,22 @@ async def query(
             )
             request.system_prompt = auto_prompt
             logger.debug(f"📝 Auto-selected system prompt based on search mode")
+
+        # 🎭 페르소나 통합 (사용자별 맞춤 응답)
+        persona_service = PersonaService(cache_manager.redis)
+        user_persona = await persona_service.get_persona(current_user.get('user_id'))
+        logger.info(f"🔍 [PERSONA] Check - user: {current_user.get('user_id')}, found: {user_persona is not None}, enabled: {user_persona.enabled if user_persona else False}")
+        if user_persona and user_persona.enabled:
+            persona_prompt = build_persona_prompt(user_persona)
+            logger.info(f"🔍 [PERSONA] Prompt length: {len(persona_prompt)} chars")
+            if persona_prompt:
+                request.system_prompt = (request.system_prompt or "") + persona_prompt
+                logger.info(f"🎭 [PERSONA] Applied for user {current_user.get('user_id')}")
+                logger.info(f"📝 [PERSONA] Prompt: {persona_prompt[:300]}...")
+            else:
+                logger.warning(f"⚠️ [PERSONA] Enabled but prompt is empty for user {current_user.get('user_id')}")
+        else:
+            logger.info(f"ℹ️ [PERSONA] Not applied - persona not found or disabled")
 
         # Check if Hybrid RAG is enabled and use it, otherwise use basic RAG
         hybrid_rag = await get_hybrid_rag_orchestrator()
@@ -382,7 +429,8 @@ async def query(
                 system_prompt=request.system_prompt,  # 🆕 시스템 프롬프트 전달
                 top_k=request.top_k,  # 🆕 검색 문서 개수 전달
                 document_ids=request.document_ids,  # 🆕 문서 필터 전달
-                query_embedding=query_embedding  # 임베딩 재사용
+                query_embedding=query_embedding,  # 임베딩 재사용
+                conversation_history=conversation_history  # 🆕 대화 히스토리 전달
             )
 
             # 🔄 Convert Hybrid RAG format to basic RAG format
@@ -509,6 +557,23 @@ async def query(
                 metadata=metadata
             )
 
+        # Save to semantic cache for future queries (skip if empty or fallback response)
+        FALLBACK_MSG = "죄송합니다. 응답을 생성하지 못했습니다."
+        if result["answer"] and FALLBACK_MSG not in result["answer"]:
+            cache_manager.set_cached_response(
+                question=request.question,
+                response=result["answer"],
+                sources=result["sources"],
+                context=result["context"],
+                top_k=request.top_k,
+                group_ids=request.group_ids,
+                document_ids=request.document_ids,
+                confidence=confidence_result,
+                search_summary=result.get("search_summary")
+            )
+        else:
+            logger.info("🚫 Skipping cache save for empty/fallback response")
+
         return QueryResponse(
             answer=result["answer"],
             sources=result["sources"],
@@ -560,6 +625,14 @@ async def query_stream(
                 content=request.question
             )
 
+            # 🆕 Retrieve conversation history (last 10 messages = 5 Q&A pairs)
+            conversation_history = conversation_manager.get_messages(
+                session_id=request.session_id,
+                limit=10
+            )
+        else:
+            conversation_history = []
+
         # Lazy load RAG system on first use
         rag = await get_rag_system()
 
@@ -586,25 +659,48 @@ async def query_stream(
                 for i in range(0, len(response_text), chunk_size):
                     chunk = response_text[i:i + chunk_size]
                     yield f"data: {json.dumps({'type': 'chunk', 'data': chunk})}\n\n"
-                    await asyncio.sleep(0.01)
+                    # Minimal delay for smooth UX without latency penalty
+                    await asyncio.sleep(0.001)
 
                 # Send done FIRST (즉시 완료 표시)
                 yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
                 # 후속 질문을 done 후 비동기 생성
-                try:
-                    cached_follow_up = await asyncio.to_thread(
-                        _generate_llm_follow_up_questions,
-                        request.question, query_result_cached["response"], rag.llm
-                    )
-                    if len(cached_follow_up) < 3:
-                        cached_follow_up = _generate_context_aware_fallback(
-                            request.question, cached_follow_up, query_result_cached["response"]
+                followup_start_time = time.time()
+
+                # 🎯 캐시 확인 먼저 시도
+                cached_follow_up = cache_manager.get_follow_up_questions_cache(
+                    question=request.question,
+                    answer=query_result_cached["response"]
+                )
+
+                if not cached_follow_up:
+                    # 캐시 미스 - LLM 생성
+                    try:
+                        cached_follow_up = await asyncio.to_thread(
+                            _generate_llm_follow_up_questions,
+                            request.question, query_result_cached["response"], rag.llm
                         )
-                except Exception:
-                    cached_follow_up = _generate_context_aware_fallback(
-                        request.question, [], query_result_cached["response"]
-                    )
+                        if len(cached_follow_up) < 3:
+                            cached_follow_up = _generate_context_aware_fallback(
+                                request.question, cached_follow_up, query_result_cached["response"]
+                            )
+
+                        # 🎯 캐시에 저장
+                        if cached_follow_up and len(cached_follow_up) >= 3:
+                            cache_manager.set_follow_up_questions_cache(
+                                question=request.question,
+                                answer=query_result_cached["response"],
+                                questions=cached_follow_up,
+                                ttl=3600
+                            )
+                    except Exception:
+                        cached_follow_up = _generate_context_aware_fallback(
+                            request.question, [], query_result_cached["response"]
+                        )
+
+                followup_time = time.time() - followup_start_time
+                logger.info(f"⏱️ [TIMING] Follow-up generation (exact cache): {followup_time*1000:.0f}ms")
 
                 if cached_follow_up:
                     yield f"data: {json.dumps({'type': 'follow_up_questions', 'data': cached_follow_up})}\n\n"
@@ -631,6 +727,7 @@ async def query_stream(
             )
 
         # Check semantic cache (similarity-based, 1-hour TTL)
+        cache_start_time = time.time()
         cached_response = cache_manager.get_cached_response(
             question=request.question,
             top_k=request.top_k,
@@ -638,6 +735,8 @@ async def query_stream(
             document_ids=request.document_ids,
             group_ids=request.group_ids
         )
+        cache_time = time.time() - cache_start_time
+        logger.info(f"⏱️ [TIMING] Cache check: {cache_time*1000:.0f}ms")
 
         if cached_response:
             # Cache HIT - return cached response as stream
@@ -662,26 +761,48 @@ async def query_stream(
                 for i in range(0, len(response_text), chunk_size):
                     chunk = response_text[i:i + chunk_size]
                     yield f"data: {json.dumps({'type': 'chunk', 'data': chunk})}\n\n"
-                    # Small delay to simulate streaming
-                    await asyncio.sleep(0.01)
+                    # Minimal delay for smooth UX without latency penalty
+                    await asyncio.sleep(0.001)
 
                 # Send done FIRST (즉시 완료 표시)
                 yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
                 # 후속 질문을 done 후 비동기 생성
-                try:
-                    semantic_follow_up = await asyncio.to_thread(
-                        _generate_llm_follow_up_questions,
-                        request.question, cached_response["response"], rag.llm
-                    )
-                    if len(semantic_follow_up) < 3:
-                        semantic_follow_up = _generate_context_aware_fallback(
-                            request.question, semantic_follow_up, cached_response["response"]
+                followup_start_time = time.time()
+
+                # 🎯 캐시 확인 먼저 시도
+                semantic_follow_up = cache_manager.get_follow_up_questions_cache(
+                    question=request.question,
+                    answer=cached_response["response"]
+                )
+
+                if not semantic_follow_up:
+                    # 캐시 미스 - LLM 생성
+                    try:
+                        semantic_follow_up = await asyncio.to_thread(
+                            _generate_llm_follow_up_questions,
+                            request.question, cached_response["response"], rag.llm
                         )
-                except Exception:
-                    semantic_follow_up = _generate_context_aware_fallback(
-                        request.question, [], cached_response["response"]
-                    )
+                        if len(semantic_follow_up) < 3:
+                            semantic_follow_up = _generate_context_aware_fallback(
+                                request.question, semantic_follow_up, cached_response["response"]
+                            )
+
+                        # 🎯 캐시에 저장
+                        if semantic_follow_up and len(semantic_follow_up) >= 3:
+                            cache_manager.set_follow_up_questions_cache(
+                                question=request.question,
+                                answer=cached_response["response"],
+                                questions=semantic_follow_up,
+                                ttl=3600
+                            )
+                    except Exception:
+                        semantic_follow_up = _generate_context_aware_fallback(
+                            request.question, [], cached_response["response"]
+                        )
+
+                followup_time = time.time() - followup_start_time
+                logger.info(f"⏱️ [TIMING] Follow-up generation (semantic cache): {followup_time*1000:.0f}ms")
 
                 if semantic_follow_up:
                     yield f"data: {json.dumps({'type': 'follow_up_questions', 'data': semantic_follow_up})}\n\n"
@@ -715,6 +836,7 @@ async def query_stream(
         logger.info("❌ Cache MISS - generating new response")
 
         # Organization-based access control: validate and filter group_ids
+        org_start_time = time.time()
         user_org_id = current_user.get("org_id")
 
         # All users (including system admins) can only search their organization's groups
@@ -749,12 +871,13 @@ async def query_stream(
             )
 
         # Expand group_ids to include all descendants (hierarchical search)
-        # 동기 Redis 호출을 비동기 래핑
-        expanded_group_ids = []
-        for group_id in validated_group_ids:
-            descendant_ids = await asyncio.to_thread(group_manager.get_descendant_group_ids, group_id)
-            expanded_group_ids.extend(descendant_ids)
-        expanded_group_ids = list(set(expanded_group_ids))
+        # Optimized batch operation to avoid N+1 query problem
+        expanded_group_ids = await asyncio.to_thread(
+            group_manager.get_descendant_group_ids_batch,
+            validated_group_ids
+        )
+        org_time = time.time() - org_start_time
+        logger.info(f"⏱️ [TIMING] Organization validation: {org_time*1000:.0f}ms")
         logger.info(f"🏢 Org filter: {user_org_id} | 🌲 Expanded group_ids: {validated_group_ids} → {expanded_group_ids}")
 
         # 🆕 자동 프롬프트 선택 (사용자가 지정하지 않은 경우)
@@ -769,11 +892,28 @@ async def query_stream(
             request.system_prompt = auto_prompt
             logger.debug(f"📝 Auto-selected system prompt based on search mode")
 
+        # 🎭 페르소나 통합 (사용자별 맞춤 응답)
+        persona_service = PersonaService(cache_manager.redis)
+        user_persona = await persona_service.get_persona(current_user.get('user_id'))
+        logger.info(f"🔍 [PERSONA] Check - user: {current_user.get('user_id')}, found: {user_persona is not None}, enabled: {user_persona.enabled if user_persona else False}")
+        if user_persona and user_persona.enabled:
+            persona_prompt = build_persona_prompt(user_persona)
+            logger.info(f"🔍 [PERSONA] Prompt length: {len(persona_prompt)} chars")
+            if persona_prompt:
+                request.system_prompt = (request.system_prompt or "") + persona_prompt
+                logger.info(f"🎭 [PERSONA] Applied for user {current_user.get('user_id')}")
+                logger.info(f"📝 [PERSONA] Prompt: {persona_prompt[:300]}...")
+            else:
+                logger.warning(f"⚠️ [PERSONA] Enabled but prompt is empty for user {current_user.get('user_id')}")
+        else:
+            logger.info(f"ℹ️ [PERSONA] Not applied - persona not found or disabled")
+
         # Check if Hybrid RAG is enabled and use it, otherwise use basic RAG
         hybrid_rag = await get_hybrid_rag_orchestrator()
 
         # Track query start time (before RAG execution)
         query_start_time = time.time()
+        rag_start_time = time.time()
 
         if hybrid_rag is not None:
             # Use Hybrid RAG (combines local + web + docs) - non-streaming
@@ -802,7 +942,8 @@ async def query_stream(
                 top_k=request.top_k,
                 document_ids=request.document_ids,  # 🆕 문서 필터 전달
                 query_embedding=hybrid_query_embedding,  # 임베딩 재사용
-                stream=True  # 스트리밍 모드
+                stream=True,  # 스트리밍 모드
+                conversation_history=conversation_history  # 🆕 대화 히스토리 전달
             )
 
             # Convert Hybrid RAG response to streaming format
@@ -914,6 +1055,9 @@ async def query_stream(
                 group_ids=expanded_group_ids  # Use validated and expanded group_ids
             )
 
+        rag_time = time.time() - rag_start_time
+        logger.info(f"⏱️ [TIMING] RAG execution: {rag_time*1000:.0f}ms")
+
         # Prepare context and sources for the first message
         context_data = {
             "sources": result["sources"],
@@ -975,8 +1119,8 @@ async def query_stream(
                         full_response.append(chunk)
                         yield f"data: {json.dumps({'type': 'chunk', 'data': chunk})}\n\n"
 
-                        # Small delay to simulate streaming
-                        await asyncio.sleep(0.01)
+                        # Minimal delay for smooth UX without latency penalty
+                        await asyncio.sleep(0.001)
             else:
                 # answer is a generator, stream naturally
                 generation_start_time = time.time()
@@ -1137,23 +1281,51 @@ async def query_stream(
             logger.info("✅ [STREAM] done 이벤트 전송 완료, 후속 질문 생성 시작...")
 
             # 🔄 후속 질문을 done 이후 비동기 생성 (사용자 대기 없음)
-            try:
-                rag_system = await get_rag_system()
-                logger.info(f"🔄 [FOLLOW-UP] asyncio.to_thread 호출 시작...")
-                follow_up_qs = await asyncio.to_thread(
-                    _generate_llm_follow_up_questions,
-                    request.question, complete_response, rag_system.llm
-                )
-                logger.info(f"🔄 [FOLLOW-UP] LLM 생성 완료: {len(follow_up_qs)}개")
-                if len(follow_up_qs) < 3:
-                    follow_up_qs = _generate_context_aware_fallback(
-                        request.question, follow_up_qs, complete_response
+            followup_start_time = time.time()
+
+            # 🎯 캐시 확인 먼저 시도
+            cached_follow_up = cache_manager.get_follow_up_questions_cache(
+                question=request.question,
+                answer=complete_response
+            )
+
+            if cached_follow_up:
+                # 캐시 히트 - 즉시 반환
+                follow_up_qs = cached_follow_up
+                followup_time = time.time() - followup_start_time
+                logger.info(f"⏱️ [TIMING] Follow-up generation (CACHE HIT): {followup_time*1000:.0f}ms")
+            else:
+                # 캐시 미스 - LLM 생성
+                try:
+                    rag_system = await get_rag_system()
+                    logger.info(f"🔄 [FOLLOW-UP] asyncio.to_thread 호출 시작...")
+                    follow_up_qs = await asyncio.to_thread(
+                        _generate_llm_follow_up_questions,
+                        request.question, complete_response, rag_system.llm
                     )
-            except Exception as e:
-                logger.warning(f"⚠️ [FOLLOW-UP] 생성 실패: {type(e).__name__}: {e}")
-                follow_up_qs = _generate_context_aware_fallback(
-                    request.question, [], complete_response
-                )
+                    followup_time = time.time() - followup_start_time
+                    logger.info(f"⏱️ [TIMING] Follow-up generation (LLM): {followup_time*1000:.0f}ms")
+                    logger.info(f"🔄 [FOLLOW-UP] LLM 생성 완료: {len(follow_up_qs)}개")
+
+                    if len(follow_up_qs) < 3:
+                        follow_up_qs = _generate_context_aware_fallback(
+                            request.question, follow_up_qs, complete_response
+                        )
+
+                    # 🎯 캐시에 저장
+                    if follow_up_qs and len(follow_up_qs) >= 3:
+                        cache_manager.set_follow_up_questions_cache(
+                            question=request.question,
+                            answer=complete_response,
+                            questions=follow_up_qs,
+                            ttl=3600  # 1시간
+                        )
+                except Exception as e:
+                    followup_time = time.time() - followup_start_time
+                    logger.warning(f"⚠️ [FOLLOW-UP] 생성 실패 ({followup_time*1000:.0f}ms): {type(e).__name__}: {e}")
+                    follow_up_qs = _generate_context_aware_fallback(
+                        request.question, [], complete_response
+                    )
 
             logger.info(f"💬 [FOLLOW-UP] 최종 {len(follow_up_qs)}개 전송 예정")
             if follow_up_qs:
@@ -1229,9 +1401,9 @@ def _generate_llm_follow_up_questions(question: str, answer: str, llm_instance=N
             ]
             response = active_llm._generate_response(
                 messages=messages,
-                max_tokens=500,  # thinking 오버헤드 포함
+                max_tokens=150,  # 3개 질문만 생성 (축소: 500 → 150)
                 temperature=0.5,
-                think=True  # thinking 허용 (think:false 시 빈 응답 방지)
+                think=False  # thinking 비활성화로 속도 향상
             )
         else:
             # Use MLX generate
@@ -1600,28 +1772,33 @@ async def generate_follow_up_questions(
         if request.session_id and conversation_manager:
             logger.info(f"💾 [API] Saving follow-up questions to session {request.session_id}: {final_questions}")
 
-            # Retry logic: wait for assistant message to be the last message
+            # Use distributed lock to prevent race conditions
+            lock_key = f"lock:conversation:{request.session_id}:update"
             max_retries = 5
             retry_delay = 0.3  # 300ms
             result = False
 
-            for attempt in range(max_retries):
-                # Check if last message is from assistant
-                last_msg = conversation_manager.get_last_message(request.session_id)
-                if last_msg and last_msg.get('role') == 'assistant':
-                    result = conversation_manager.update_last_message_metadata(
-                        session_id=request.session_id,
-                        metadata_update={"follow_up_questions": final_questions}
-                    )
-                    if result:
-                        logger.info(f"💾 [API] Save result: True (attempt {attempt + 1})")
-                        break
-                else:
-                    logger.debug(f"💾 [API] Waiting for assistant message (attempt {attempt + 1}/{max_retries})")
-                    await asyncio.sleep(retry_delay)
+            try:
+                with conversation_manager._acquire_lock(lock_key, timeout=5):
+                    for attempt in range(max_retries):
+                        # Check if last message is from assistant
+                        last_msg = conversation_manager.get_last_message(request.session_id)
+                        if last_msg and last_msg.get('role') == 'assistant':
+                            result = conversation_manager.update_last_message_metadata(
+                                session_id=request.session_id,
+                                metadata_update={"follow_up_questions": final_questions}
+                            )
+                            if result:
+                                logger.info(f"💾 [API] Save result: True (attempt {attempt + 1})")
+                                break
+                        else:
+                            logger.debug(f"💾 [API] Waiting for assistant message (attempt {attempt + 1}/{max_retries})")
+                            await asyncio.sleep(retry_delay)
 
-            if not result:
-                logger.warning(f"💾 [API] Failed to save follow-up questions after {max_retries} attempts")
+                    if not result:
+                        logger.warning(f"💾 [API] Failed to save follow-up questions after {max_retries} attempts")
+            except RuntimeError as e:
+                logger.error(f"💾 [API] Lock acquisition failed: {e}")
 
         return {"questions": final_questions}
 

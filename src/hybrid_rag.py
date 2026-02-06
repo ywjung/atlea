@@ -40,6 +40,7 @@ from .metrics_collector import MetricsCollector
 from .performance_utils import log_slow_query
 from .reranker import get_reranker
 from .query_rewriter import HybridQueryRewriter
+from .config.prompts import get_hybrid_rag_priority_prompt
 
 
 class HybridRAGOrchestrator:
@@ -450,7 +451,8 @@ class HybridRAGOrchestrator:
         top_k: int = 5,
         document_ids: Optional[List[str]] = None,
         query_embedding=None,
-        stream: bool = False
+        stream: bool = False,
+        conversation_history: Optional[List[Dict]] = None
     ) -> Dict:
         """
         하이브리드 검색 및 답변 생성
@@ -470,6 +472,7 @@ class HybridRAGOrchestrator:
             document_ids: 검색할 문서 ID/파일명 목록 (Optional)
             query_embedding: 라우터에서 미리 생성한 쿼리 임베딩 (Optional, 중복 생성 방지)
             stream: 스트리밍 모드 여부 (True면 generator 반환)
+            conversation_history: 대화 히스토리 (Optional) - 최근 N개 메시지
 
         Returns:
             {
@@ -539,10 +542,10 @@ class HybridRAGOrchestrator:
         # 5. LLM 답변 생성 (스트리밍 또는 일반)
         generator = None
         if stream:
-            generator = self._generate_answer_stream(query, merged_results, analysis, system_prompt)
+            generator = self._generate_answer_stream(query, merged_results, analysis, system_prompt, conversation_history)
             answer = ""  # 스트리밍 모드에서는 generator로 전달
         else:
-            answer = await self._generate_answer(query, merged_results, analysis, system_prompt)
+            answer = await self._generate_answer(query, merged_results, analysis, system_prompt, conversation_history)
 
         # 6. 검색 요약 정보
         search_summary = {
@@ -1246,7 +1249,8 @@ class HybridRAGOrchestrator:
         query: str,
         merged_results: List[Dict],
         analysis: Dict,
-        system_prompt: Optional[str] = None
+        system_prompt: Optional[str] = None,
+        conversation_history: Optional[List[Dict]] = None
     ) -> str:
         """통합 답변 생성"""
 
@@ -1264,11 +1268,24 @@ class HybridRAGOrchestrator:
             analysis
         )
 
-        # LLM 답변 생성 (system_prompt 지원)
+        # LLM 답변 생성 (system_prompt 및 conversation_history 지원)
         # Create messages format for OllamaLLM
         messages = []
+
+        # 1. System prompt
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
+
+        # 2. 🆕 Conversation history (excluding current question)
+        if conversation_history:
+            # Include all messages except the last one (current question)
+            for msg in conversation_history[:-1]:
+                messages.append({
+                    "role": msg.get("role"),
+                    "content": msg.get("content")
+                })
+
+        # 3. Current question with RAG context
         messages.append({"role": "user", "content": prompt})
 
         # Use generate_response method (non-streaming)
@@ -1290,7 +1307,8 @@ class HybridRAGOrchestrator:
         query: str,
         merged_results: List[Dict],
         analysis: Dict,
-        system_prompt: Optional[str] = None
+        system_prompt: Optional[str] = None,
+        conversation_history: Optional[List[Dict]] = None
     ):
         """스트리밍 답변 생성 - 토큰 단위로 yield하는 generator 반환"""
 
@@ -1308,10 +1326,23 @@ class HybridRAGOrchestrator:
             analysis
         )
 
-        # LLM 메시지 구성
+        # LLM 메시지 구성 (system_prompt 및 conversation_history 지원)
         messages = []
+
+        # 1. System prompt
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
+
+        # 2. 🆕 Conversation history (excluding current question)
+        if conversation_history:
+            # Include all messages except the last one (current question)
+            for msg in conversation_history[:-1]:
+                messages.append({
+                    "role": msg.get("role"),
+                    "content": msg.get("content")
+                })
+
+        # 3. Current question with RAG context
         messages.append({"role": "user", "content": prompt})
 
         # 동기 스트리밍 generator 반환 (query.py에서 isgenerator로 감지)
@@ -1337,7 +1368,7 @@ class HybridRAGOrchestrator:
         # 소스 타입별 최대 개수 제한
         # Note: score 필드가 없는 결과도 포함 (score 필터링 제거 - 검색 엔진이 이미 관련도 순으로 정렬)
         local = local[:5]
-        web = web[:3]
+        web = web[:5]  # 웹 결과도 5개로 증가 (내부 문서와 균형)
         docs = docs[:2]
         logger.debug(f"📊 [PROMPT] Context compression: local={len(local)}, web={len(web)}, docs={len(docs)}")
 
@@ -1421,8 +1452,24 @@ class HybridRAGOrchestrator:
         # 답변 작성 지침 (시스템 프롬프트와 중복 제거 — 핵심만 유지)
         prompt += "\n# 지침\n"
 
-        if local:
-            prompt += f"⭐ 내부 문서 {len(local)}개 최우선 참조. 부분 정보라도 활용. 웹/공식 문서는 보충용.\n"
+        # 우선순위 결정: Redis에서 관리되는 프롬프트 사용
+        needs_fresh = analysis.get('needs_fresh_info', False)
+        benefits_web = analysis.get('benefits_from_web', False)
+
+        # Redis 기반 우선순위 프롬프트 가져오기
+        priority_prompt = get_hybrid_rag_priority_prompt(
+            redis_client=self.cache.redis,
+            needs_fresh=needs_fresh,
+            benefits_web=benefits_web,
+            has_web=bool(web),
+            has_local=bool(local),
+            web_count=len(web) if web else 0,
+            local_count=len(local) if local else 0
+        )
+
+        if priority_prompt:
+            prompt += priority_prompt
+
         prompt += """출처 형식: [내부:실제문서명], [웹:사이트명], [문서:라이브러리명] — 번호 표기 금지
 """
 

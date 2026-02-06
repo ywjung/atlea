@@ -412,9 +412,20 @@ async def logout(
                     blacklist.add_token(token, config.SECRET_KEY, reason="logout")
 
                     # 사용자의 모든 활성 세션 조회 및 삭제
-                    session_ids = request.app.state.cache_manager.redis.smembers(
-                        f"user:sessions:{user_id}"
-                    )
+                    # Get all session IDs using SSCAN to avoid blocking
+                    session_ids = []
+                    cursor = 0
+
+                    while True:
+                        cursor, ids = request.app.state.cache_manager.redis.sscan(
+                            f"user:sessions:{user_id}",
+                            cursor=cursor,
+                            count=100
+                        )
+                        session_ids.extend(ids)
+
+                        if cursor == 0:
+                            break
 
                     for session_id in session_ids:
                         session_id_str = decode_bytes(session_id)
@@ -553,18 +564,19 @@ async def request_password_reset(
                     "email_sent": True
                 }
             else:
-                # 이메일 전송 실패 시 토큰 반환 (폴백)
-                logger.warning(f"Failed to send password reset email to {reset_request.email}, returning token")
+                # 이메일 전송 실패 - 보안을 위해 토큰 노출하지 않음
+                logger.warning(f"Failed to send password reset email to {reset_request.email}")
+                # 일반적인 성공 메시지 반환 (보안상 실패 여부를 노출하지 않음)
                 return {
-                    "message": "이메일 전송에 실패했습니다. 아래 토큰을 사용하세요",
-                    "reset_token": reset_token,
+                    "message": "비밀번호 재설정 링크가 이메일로 전송되었습니다",
                     "email_sent": False
                 }
         else:
-            # SMTP 미설정 시 토큰 반환
+            # SMTP 미설정 시 - 보안을 위해 토큰 노출하지 않음
+            logger.warning(f"Password reset requested but SMTP not configured for {reset_request.email}")
+            # 일반적인 성공 메시지 반환 (보안상 설정 상태를 노출하지 않음)
             return {
-                "message": "비밀번호 재설정 토큰이 발급되었습니다",
-                "reset_token": reset_token,
+                "message": "비밀번호 재설정 링크가 이메일로 전송되었습니다",
                 "email_sent": False
             }
 
@@ -1284,6 +1296,104 @@ async def delete_user_admin(
         )
 
 
+@router.put("/admin/users/{user_id}/password")
+async def reset_user_password_admin(
+    user_id: str,
+    password_data: dict,
+    request: Request,
+    admin_user: dict = Depends(require_admin)
+):
+    """사용자 비밀번호 강제 변경 (관리자용)
+
+    Args:
+        user_id: 대상 사용자 ID
+        password_data: {"new_password": "새비밀번호"}
+        request: FastAPI Request
+        admin_user: 관리자 사용자
+
+    Returns:
+        성공 메시지
+    """
+    from ..auth.utils import hash_password
+    from ..auth.password_policy import PasswordPolicy
+    from ..auth.security_logger import SecurityLogger, SecurityEventType, SecurityEventLevel
+    from ..utils.ip_utils import IPValidator
+
+    # 자기 자신의 비밀번호 변경 방지 (보안상 일반 비밀번호 변경 사용 권장)
+    if user_id == admin_user["user_id"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="자기 자신의 비밀번호는 일반 비밀번호 변경 기능을 사용하세요"
+        )
+
+    redis = request.app.state.cache_manager.redis
+
+    try:
+        # 새 비밀번호 가져오기
+        new_password = password_data.get("new_password")
+        if not new_password:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="새 비밀번호를 입력해주세요"
+            )
+
+        # 비밀번호 유효성 검증
+        is_valid, errors = PasswordPolicy.validate(new_password)
+        if not is_valid:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"비밀번호 요구사항을 충족하지 않습니다: {', '.join(errors)}"
+            )
+
+        # 사용자 존재 확인
+        user_data = redis.hgetall(f"user:{user_id}")
+        if not user_data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="사용자를 찾을 수 없습니다"
+            )
+
+        # 비밀번호 해싱 및 업데이트
+        password_hash = hash_password(new_password)
+        redis.hset(f"user:{user_id}", "password_hash", password_hash)
+
+        # 감사 로그 기록
+        user_email = user_data.get("email", "").decode() if isinstance(user_data.get("email"), bytes) else user_data.get("email", "")
+        ip_address = IPValidator.get_client_ip(request, trust_proxy=True)
+
+        # 보안 로그 기록 (실패해도 비밀번호 변경 작업은 성공으로 처리)
+        try:
+            SecurityLogger.log_event(
+                event_type=SecurityEventType.PASSWORD_RESET_BY_ADMIN,
+                level=SecurityEventLevel.WARNING,
+                user_id=user_id,
+                ip_address=ip_address,
+                message=f"Password reset by admin {admin_user['email']} for user {user_email}",
+                admin_id=admin_user["user_id"],
+                admin_email=admin_user["email"],
+                target_user_email=user_email
+            )
+        except Exception as log_error:
+            # 로깅 실패는 경고만 하고 계속 진행
+            logger.warning(f"Failed to log security event: {log_error}")
+
+        logger.info(f"Password reset by admin {admin_user['email']} for user {user_email}")
+
+        return {
+            "message": "사용자 비밀번호가 변경되었습니다",
+            "user_email": user_email
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to reset user password: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"비밀번호 변경 실패: {str(e)}"
+        )
+
+
 @router.get("/admin/security-logs")
 async def get_security_logs_admin(
     request: Request,
@@ -1310,6 +1420,9 @@ async def get_security_logs_admin(
     Returns:
         보안 로그 목록
     """
+    from loguru import logger
+    logger.debug(f"Security logs request - event_type: {event_type}, level: {level}, page: {page}")
+
     auth_service = AuthService(request.app.state.cache_manager.redis)
     result = await auth_service.get_security_logs(
         page=page,

@@ -24,6 +24,8 @@ class AuditAction(str, Enum):
     DOCUMENT_DELETE = "document_delete"
     DOCUMENT_VIEW = "document_view"
     DOCUMENT_DOWNLOAD = "document_download"
+    VIRUS_SCAN = "virus_scan"  # 수동 바이러스 검사
+    VIRUS_SCAN_AUTO = "virus_scan_auto"  # 업로드 시 자동 바이러스 검사
 
     # 채팅/질의
     CHAT_QUERY = "chat_query"

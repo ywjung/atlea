@@ -818,10 +818,13 @@ class VectorDB:
         results = pipe.execute()
 
         # Count all filenames
+        import unicodedata
         for filename_bytes in results:
             if filename_bytes:
                 filename = filename_bytes.decode('utf-8')
-                filename_counts[filename] = filename_counts.get(filename, 0) + 1
+                # Normalize to NFC to match API layer (macOS uses NFD in filesystem)
+                filename_nfc = unicodedata.normalize('NFC', filename)
+                filename_counts[filename_nfc] = filename_counts.get(filename_nfc, 0) + 1
 
     def _count_filenames_in_batch(self, keys: List[bytes], filename_counts: Dict[str, int], target_filenames: set):
         """
@@ -842,12 +845,15 @@ class VectorDB:
         results = pipe.execute()
 
         # Count filenames
+        import unicodedata
         for filename_bytes in results:
             if filename_bytes:
                 filename = filename_bytes.decode('utf-8')
+                # Normalize to NFC to match API layer (macOS uses NFD in filesystem)
+                filename_nfc = unicodedata.normalize('NFC', filename)
                 # Only count if this is one of the target filenames
-                if filename in target_filenames:
-                    filename_counts[filename] = filename_counts.get(filename, 0) + 1
+                if filename_nfc in target_filenames:
+                    filename_counts[filename_nfc] = filename_counts.get(filename_nfc, 0) + 1
 
     def get_chunks_by_filename(self, filename: str) -> List[Dict]:
         """

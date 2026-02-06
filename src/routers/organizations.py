@@ -567,7 +567,21 @@ async def get_organization_groups(
             group['org_count'] = counts['org_count']
 
         # Get root group IDs (groups explicitly assigned to this organization as top-level)
-        root_group_ids_bytes = cache_manager.redis.smembers(f'org:groups:root:{org_id}')
+        # Get all root group IDs using SSCAN to avoid blocking
+        root_group_ids_bytes = []
+        cursor = 0
+
+        while True:
+            cursor, ids = cache_manager.redis.sscan(
+                f'org:groups:root:{org_id}',
+                cursor=cursor,
+                count=100
+            )
+            root_group_ids_bytes.extend(ids)
+
+            if cursor == 0:
+                break
+
         root_group_ids = [gid.decode('utf-8') for gid in root_group_ids_bytes]
         logger.info(f"📂 [최상위 그룹] {org['name']}의 최상위 그룹 개수: {len(root_group_ids)}")
 

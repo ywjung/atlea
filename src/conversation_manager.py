@@ -5,8 +5,10 @@ Manages chat conversation sessions and message history using Redis
 
 import json
 import uuid
+import time
 from datetime import datetime
 from typing import List, Dict, Optional
+from contextlib import contextmanager
 from redis import Redis
 from loguru import logger
 
@@ -25,6 +27,52 @@ class ConversationManager:
             redis_client: Redis client instance
         """
         self.client = redis_client
+
+    @contextmanager
+    def _acquire_lock(self, lock_key: str, timeout: int = 10, retry_delay: float = 0.1):
+        """
+        Distributed lock using Redis SETNX
+
+        Args:
+            lock_key: Unique key for the lock
+            timeout: Lock expiration timeout in seconds
+            retry_delay: Delay between retry attempts in seconds
+
+        Yields:
+            True if lock acquired, raises RuntimeError if timeout
+        """
+        lock_id = str(uuid.uuid4())
+        acquired = False
+        start_time = time.time()
+
+        try:
+            # Try to acquire lock
+            while time.time() - start_time < timeout:
+                # SET NX (set if not exists) with expiration
+                acquired = self.client.set(lock_key, lock_id, nx=True, ex=timeout)
+                if acquired:
+                    logger.debug(f"🔒 Lock acquired: {lock_key}")
+                    break
+                time.sleep(retry_delay)
+
+            if not acquired:
+                raise RuntimeError(f"Failed to acquire lock: {lock_key} after {timeout}s")
+
+            yield True
+
+        finally:
+            # Release lock only if we own it
+            if acquired:
+                # Use Lua script for atomic check-and-delete
+                lua_script = """
+                if redis.call("get", KEYS[1]) == ARGV[1] then
+                    return redis.call("del", KEYS[1])
+                else
+                    return 0
+                end
+                """
+                self.client.eval(lua_script, 1, lock_key, lock_id)
+                logger.debug(f"🔓 Lock released: {lock_key}")
 
     def create_session(self, title: str = None) -> str:
         """

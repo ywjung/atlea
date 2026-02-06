@@ -20,9 +20,19 @@ from ..config.prompts import (
     PROMPT_KEY_HYBRID,
     PROMPT_KEY_TOOLS_ONLY,
     PROMPT_KEY_LEGACY,
+    PROMPT_KEY_HYBRID_WEB_PRIORITY,
+    PROMPT_KEY_HYBRID_BALANCED,
+    PROMPT_KEY_HYBRID_WEB_ONLY,
+    PROMPT_KEY_HYBRID_LOCAL_ONLY,
+    PROMPT_KEY_HYBRID_LOCAL_PRIORITY,
     DEFAULT_BASIC_PROMPT,
     DEFAULT_HYBRID_PROMPT,
-    DEFAULT_TOOLS_ONLY_PROMPT
+    DEFAULT_TOOLS_ONLY_PROMPT,
+    DEFAULT_HYBRID_WEB_PRIORITY_PROMPT,
+    DEFAULT_HYBRID_BALANCED_PROMPT,
+    DEFAULT_HYBRID_WEB_ONLY_PROMPT,
+    DEFAULT_HYBRID_LOCAL_ONLY_PROMPT,
+    DEFAULT_HYBRID_LOCAL_PRIORITY_PROMPT
 )
 from ..utils.error_handling import get_safe_error_message
 
@@ -56,6 +66,11 @@ class PromptsUpdateRequest(BaseModel):
     basic: Optional[str] = None
     hybrid: Optional[str] = None
     tools_only: Optional[str] = None
+    hybrid_web_priority: Optional[str] = None
+    hybrid_balanced: Optional[str] = None
+    hybrid_web_only: Optional[str] = None
+    hybrid_local_only: Optional[str] = None
+    hybrid_local_priority: Optional[str] = None
 
 
 # ============================================================================
@@ -164,7 +179,12 @@ async def get_all_prompts(request: Request):
             'prompts': {
                 'basic': str,  # 일반 검색용 프롬프트 (로컬 문서만)
                 'hybrid': str,  # 하이브리드 검색용 프롬프트 (로컬 + 외부 도구)
-                'tools_only': str  # 외부 도구 전용 프롬프트 (웹 + 공식문서만)
+                'tools_only': str,  # 외부 도구 전용 프롬프트 (웹 + 공식문서만)
+                'hybrid_web_priority': str,  # 웹 정보 우선 프롬프트
+                'hybrid_balanced': str,  # 웹/로컬 균등 참조 프롬프트
+                'hybrid_web_only': str,  # 웹 정보 전용 프롬프트
+                'hybrid_local_only': str,  # 로컬 문서 전용 프롬프트
+                'hybrid_local_priority': str  # 로컬 문서 우선 프롬프트
             }
         }
     """
@@ -182,29 +202,29 @@ async def get_all_prompts(request: Request):
         basic_prompt = redis_client.get(PROMPT_KEY_BASIC)
         hybrid_prompt = redis_client.get(PROMPT_KEY_HYBRID)
         tools_only_prompt = redis_client.get(PROMPT_KEY_TOOLS_ONLY)
+        hybrid_web_priority = redis_client.get(PROMPT_KEY_HYBRID_WEB_PRIORITY)
+        hybrid_balanced = redis_client.get(PROMPT_KEY_HYBRID_BALANCED)
+        hybrid_web_only = redis_client.get(PROMPT_KEY_HYBRID_WEB_ONLY)
+        hybrid_local_only = redis_client.get(PROMPT_KEY_HYBRID_LOCAL_ONLY)
+        hybrid_local_priority = redis_client.get(PROMPT_KEY_HYBRID_LOCAL_PRIORITY)
 
-        # bytes to str 변환
-        if isinstance(basic_prompt, bytes):
-            basic_prompt = basic_prompt.decode('utf-8')
-        if isinstance(hybrid_prompt, bytes):
-            hybrid_prompt = hybrid_prompt.decode('utf-8')
-        if isinstance(tools_only_prompt, bytes):
-            tools_only_prompt = tools_only_prompt.decode('utf-8')
-
-        # 기본값 적용
-        if not basic_prompt:
-            basic_prompt = DEFAULT_BASIC_PROMPT
-        if not hybrid_prompt:
-            hybrid_prompt = DEFAULT_HYBRID_PROMPT
-        if not tools_only_prompt:
-            tools_only_prompt = DEFAULT_TOOLS_ONLY_PROMPT
+        # bytes to str 변환 및 기본값 적용 헬퍼 함수
+        def decode_and_default(value, default):
+            if isinstance(value, bytes):
+                return value.decode('utf-8')
+            return value if value else default
 
         return {
             'success': True,
             'prompts': {
-                'basic': basic_prompt,
-                'hybrid': hybrid_prompt,
-                'tools_only': tools_only_prompt
+                'basic': decode_and_default(basic_prompt, DEFAULT_BASIC_PROMPT),
+                'hybrid': decode_and_default(hybrid_prompt, DEFAULT_HYBRID_PROMPT),
+                'tools_only': decode_and_default(tools_only_prompt, DEFAULT_TOOLS_ONLY_PROMPT),
+                'hybrid_web_priority': decode_and_default(hybrid_web_priority, DEFAULT_HYBRID_WEB_PRIORITY_PROMPT),
+                'hybrid_balanced': decode_and_default(hybrid_balanced, DEFAULT_HYBRID_BALANCED_PROMPT),
+                'hybrid_web_only': decode_and_default(hybrid_web_only, DEFAULT_HYBRID_WEB_ONLY_PROMPT),
+                'hybrid_local_only': decode_and_default(hybrid_local_only, DEFAULT_HYBRID_LOCAL_ONLY_PROMPT),
+                'hybrid_local_priority': decode_and_default(hybrid_local_priority, DEFAULT_HYBRID_LOCAL_PRIORITY_PROMPT)
             }
         }
 
@@ -223,13 +243,18 @@ async def update_prompts(data: PromptsUpdateRequest, request: Request):
         {
             "basic": "일반 검색용 프롬프트 (optional)",
             "hybrid": "하이브리드 검색용 프롬프트 (optional)",
-            "tools_only": "외부 도구 전용 프롬프트 (optional)"
+            "tools_only": "외부 도구 전용 프롬프트 (optional)",
+            "hybrid_web_priority": "웹 정보 우선 프롬프트 (optional)",
+            "hybrid_balanced": "웹/로컬 균등 참조 프롬프트 (optional)",
+            "hybrid_web_only": "웹 정보 전용 프롬프트 (optional)",
+            "hybrid_local_only": "로컬 문서 전용 프롬프트 (optional)",
+            "hybrid_local_priority": "로컬 문서 우선 프롬프트 (optional)"
         }
 
     Returns:
         {
             'success': True,
-            'message': '프롬프트 업데이트 완료: basic, hybrid, tools_only'
+            'message': '프롬프트 업데이트 완료: basic, hybrid, ...'
         }
     """
     try:
@@ -244,30 +269,30 @@ async def update_prompts(data: PromptsUpdateRequest, request: Request):
 
         updated = []
 
-        if data.basic is not None:
-            # 유효성 검증
-            if len(data.basic) > 10000:
-                raise HTTPException(status_code=400, detail="일반 프롬프트가 너무 깁니다 (최대 10,000자)")
+        # 프롬프트 유효성 검증 및 저장 헬퍼 함수
+        def validate_and_save(prompt_value, prompt_key, prompt_name, max_length=10000, legacy_key=None):
+            if prompt_value is not None:
+                if len(prompt_value) > max_length:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"{prompt_name} 프롬프트가 너무 깁니다 (최대 {max_length:,}자)"
+                    )
+                redis_client.set(prompt_key, prompt_value)
+                if legacy_key:
+                    redis_client.set(legacy_key, prompt_value)
+                updated.append(prompt_name)
 
-            redis_client.set(PROMPT_KEY_BASIC, data.basic)
-            redis_client.set(PROMPT_KEY_LEGACY, data.basic)  # 레거시 호환
-            updated.append('basic')
+        # 기존 프롬프트 업데이트
+        validate_and_save(data.basic, PROMPT_KEY_BASIC, 'basic', legacy_key=PROMPT_KEY_LEGACY)
+        validate_and_save(data.hybrid, PROMPT_KEY_HYBRID, 'hybrid')
+        validate_and_save(data.tools_only, PROMPT_KEY_TOOLS_ONLY, 'tools_only')
 
-        if data.hybrid is not None:
-            # 유효성 검증
-            if len(data.hybrid) > 10000:
-                raise HTTPException(status_code=400, detail="하이브리드 프롬프트가 너무 깁니다 (최대 10,000자)")
-
-            redis_client.set(PROMPT_KEY_HYBRID, data.hybrid)
-            updated.append('hybrid')
-
-        if data.tools_only is not None:
-            # 유효성 검증
-            if len(data.tools_only) > 10000:
-                raise HTTPException(status_code=400, detail="외부 도구 전용 프롬프트가 너무 깁니다 (최대 10,000자)")
-
-            redis_client.set(PROMPT_KEY_TOOLS_ONLY, data.tools_only)
-            updated.append('tools_only')
+        # 새로운 하이브리드 RAG 우선순위 프롬프트 업데이트
+        validate_and_save(data.hybrid_web_priority, PROMPT_KEY_HYBRID_WEB_PRIORITY, 'hybrid_web_priority', max_length=2000)
+        validate_and_save(data.hybrid_balanced, PROMPT_KEY_HYBRID_BALANCED, 'hybrid_balanced', max_length=2000)
+        validate_and_save(data.hybrid_web_only, PROMPT_KEY_HYBRID_WEB_ONLY, 'hybrid_web_only', max_length=2000)
+        validate_and_save(data.hybrid_local_only, PROMPT_KEY_HYBRID_LOCAL_ONLY, 'hybrid_local_only', max_length=2000)
+        validate_and_save(data.hybrid_local_priority, PROMPT_KEY_HYBRID_LOCAL_PRIORITY, 'hybrid_local_priority', max_length=2000)
 
         if not updated:
             raise HTTPException(status_code=400, detail="업데이트할 프롬프트를 제공해주세요")
