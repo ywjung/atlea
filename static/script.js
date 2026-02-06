@@ -6937,19 +6937,41 @@ function applySettings() {
                 const savedVolume = localStorage.getItem('ttsVolume') || '100';
                 previewAudio.volume = savedVolume / 100;
 
-                previewAudio.addEventListener('ended', () => {
-                    ttsVoicePreview.disabled = false;
-                    ttsVoicePreview.textContent = '▶️ 미리듣기';
-                });
+                // Wait for audio to be ready before playing
+                const playAudio = () => {
+                    return new Promise((resolve, reject) => {
+                        previewAudio.addEventListener('ended', () => {
+                            ttsVoicePreview.disabled = false;
+                            ttsVoicePreview.textContent = '▶️ 미리듣기';
+                            resolve();
+                        });
 
-                previewAudio.addEventListener('error', () => {
-                    ttsVoicePreview.disabled = false;
-                    ttsVoicePreview.textContent = '▶️ 미리듣기';
-                    showNotification('미리듣기 재생 실패', 'error');
-                });
+                        previewAudio.addEventListener('error', (e) => {
+                            console.error('Preview audio error:', e);
+                            ttsVoicePreview.disabled = false;
+                            ttsVoicePreview.textContent = '▶️ 미리듣기';
+                            reject(new Error('오디오 로드 실패'));
+                        });
 
-                await previewAudio.play();
-                showNotification('미리듣기 재생 중...', 'success');
+                        previewAudio.addEventListener('canplay', () => {
+                            previewAudio.play()
+                                .then(() => {
+                                    showNotification('미리듣기 재생 중...', 'success');
+                                })
+                                .catch((playError) => {
+                                    console.error('Audio play error:', playError);
+                                    ttsVoicePreview.disabled = false;
+                                    ttsVoicePreview.textContent = '▶️ 미리듣기';
+                                    reject(new Error('재생 실패: ' + playError.message));
+                                });
+                        }, { once: true });
+
+                        // Trigger loading
+                        previewAudio.load();
+                    });
+                };
+
+                await playAudio();
 
             } catch (error) {
                 console.error('Voice preview error:', error);
