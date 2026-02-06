@@ -1507,6 +1507,7 @@
                         <li><strong>로그인:</strong> 등록된 계정으로 안전하게 로그인</li>
                         <li><strong>세션 관리:</strong> 자동 로그인 유지 및 보안 세션 관리</li>
                         <li><strong>비밀번호 변경:</strong> 프로필 메뉴에서 언제든지 비밀번호 변경 가능</li>
+                        <li><strong>비밀번호 재설정:</strong> 로그인 화면의 "비밀번호를 잊으셨나요?" 링크를 통해 이메일 또는 OTP(2FA) 방식으로 비밀번호 재설정 가능</li>
                         <li><strong>로그아웃:</strong> 우측 상단 프로필 메뉴에서 안전하게 로그아웃</li>
                         <li><strong>보안 로깅:</strong> 모든 로그인/로그아웃 이벤트가 기록되어 보안 강화</li>
                     </ul>
@@ -1585,10 +1586,14 @@
                     <h3>📥 대화 내보내기</h3>
                     <p>대화 내용을 다양한 형식으로 내보내어 외부에서 활용할 수 있습니다.</p>
                     <ul>
-                        <li><strong>3가지 형식:</strong> JSON, 텍스트(TXT), 마크다운(MD) 형식 지원</li>
+                        <li><strong>7가지 형식:</strong> JSON, 텍스트(TXT), 마크다운(MD), HTML, PDF, DOCX, HWPX 지원</li>
                         <li><strong>JSON:</strong> 원본 데이터 구조 보존, 프로그래밍 활용에 최적</li>
                         <li><strong>텍스트:</strong> 단순 텍스트 형식, 모든 프로그램에서 열기 가능</li>
                         <li><strong>마크다운:</strong> 서식 보존, GitHub/노션 등에서 사용 가능</li>
+                        <li><strong>HTML:</strong> 웹 브라우저에서 서식과 함께 열기 가능</li>
+                        <li><strong>PDF:</strong> 인쇄 및 배포에 적합한 고정 레이아웃 형식</li>
+                        <li><strong>DOCX:</strong> Microsoft Word 형식으로 편집 및 공유 가능</li>
+                        <li><strong>HWPX:</strong> 한글(HWP) 호환 형식으로 한국 공공기관에서 활용</li>
                         <li><strong>내보내기:</strong> 헤더의 "내보내기" 버튼 또는 Ctrl/Cmd + E</li>
                         <li><strong>타임스탬프:</strong> 모든 형식에 날짜와 시간 정보 포함</li>
                     </ul>
@@ -1599,7 +1604,7 @@
                     <h3>📤 대화 가져오기</h3>
                     <p>이전에 내보낸 대화 파일을 불러와서 계속 이어갈 수 있습니다.</p>
                     <ul>
-                        <li><strong>3가지 형식 지원:</strong> JSON, 텍스트(TXT), 마크다운(MD) 파일 모두 가능</li>
+                        <li><strong>7가지 형식 지원:</strong> JSON, TXT, MD, HTML, PDF, DOCX, HWPX 파일 모두 가능</li>
                         <li><strong>자동 파싱:</strong> 파일 확장자를 자동으로 감지하여 적절히 파싱</li>
                         <li><strong>가져오기:</strong> 헤더의 "가져오기" 버튼 또는 Ctrl/Cmd + I</li>
                         <li><strong>덮어쓰기 확인:</strong> 현재 대화가 있으면 덮어쓸지 확인</li>
@@ -1831,6 +1836,15 @@
                         <li><strong>Edge TTS (Fast):</strong> Microsoft 클라우드 기반, 빠른 응답 속도</li>
                         <li><strong>Qwen3 TTS 0.6B:</strong> 로컬 실행, 빠른 속도, 음성 복제 지원</li>
                         <li><strong>Qwen3 TTS 1.7B:</strong> 로컬 실행, 고품질 음성 (속도 느림)</li>
+                    </ul>
+
+                    <h4 style="margin-top: 16px; color: var(--primary-600);">📋 재생 목록 (플레이리스트)</h4>
+                    <ul>
+                        <li><strong>목록 추가:</strong> AI 답변의 "목록에 추가" 버튼을 클릭하면 재생 목록에 추가됩니다</li>
+                        <li><strong>전체 재생:</strong> 재생 목록의 ▶ 버튼을 클릭하면 추가된 답변을 순서대로 자동 재생합니다</li>
+                        <li><strong>개별 관리:</strong> 각 항목을 개별 재생하거나 목록에서 제거할 수 있습니다</li>
+                        <li><strong>전체 삭제:</strong> 재생 목록의 🗑️ 버튼으로 전체 목록을 비울 수 있습니다</li>
+                        <li><strong>플로팅 버튼:</strong> 화면 하단의 플로팅 버튼으로 재생 목록 패널을 열고 닫을 수 있습니다</li>
                     </ul>
 
                     <div style="margin-top: 12px; padding: 10px; background: #e3f2fd; border-left: 4px solid #2196F3; border-radius: 4px;">
