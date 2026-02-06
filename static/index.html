@@ -1420,6 +1420,40 @@
                 </div>
 
                 <div class="setting-item">
+                    <label>
+                        <span class="setting-label">🌍 언어 선택</span>
+                    </label>
+                    <select id="ttsLanguageSelect" style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-color); color: var(--text-primary); font-size: 14px; cursor: pointer;">
+                        <option value="ko">한국어 (Korean)</option>
+                        <option value="en">영어 (English)</option>
+                        <option value="zh">중국어 (Chinese)</option>
+                        <option value="ja">일본어 (Japanese)</option>
+                        <option value="de">독일어 (German)</option>
+                        <option value="fr">프랑스어 (French)</option>
+                        <option value="es">스페인어 (Spanish)</option>
+                        <option value="pt">포르투갈어 (Portuguese)</option>
+                        <option value="ru">러시아어 (Russian)</option>
+                        <option value="it">이탈리아어 (Italian)</option>
+                    </select>
+                    <p class="setting-hint">TTS 음성 언어 선택</p>
+                </div>
+
+                <div class="setting-item">
+                    <label>
+                        <span class="setting-label">🎙️ 음성 선택</span>
+                    </label>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <select id="ttsVoiceSelect" style="flex: 1; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-color); color: var(--text-primary); font-size: 14px; cursor: pointer;">
+                            <!-- Will be populated dynamically based on language and model -->
+                        </select>
+                        <button id="ttsVoicePreview" style="padding: 10px 16px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-color); color: var(--text-primary); cursor: pointer; white-space: nowrap; transition: all 0.2s;" title="음성 미리듣기">
+                            ▶️ 미리듣기
+                        </button>
+                    </div>
+                    <p class="setting-hint">선택한 언어의 음성 선택 및 미리듣기</p>
+                </div>
+
+                <div class="setting-item">
                     <label class="toggle-label">
                         <span class="setting-label">🔊 실시간 음성 읽기</span>
                         <div class="toggle-switch">

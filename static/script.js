@@ -3340,6 +3340,10 @@ async function playTTS(text, button) {
         let response;
         let ttsStartTime = Date.now();
         try {
+            // Get selected voice settings
+            const selectedLanguage = localStorage.getItem('ttsLanguage') || 'ko';
+            const selectedVoice = localStorage.getItem('ttsVoice') || 'ko-KR-SunHiNeural';
+
             response = await fetch('/api/tts/synthesize', {
                 method: 'POST',
                 headers: {
@@ -3348,7 +3352,8 @@ async function playTTS(text, button) {
                 },
                 body: JSON.stringify({
                     text: finalText,
-                    language: 'ko'
+                    language: selectedLanguage,
+                    voice_id: selectedVoice
                 }),
                 signal: ttsAbortController.signal
             });
@@ -4597,10 +4602,20 @@ const streamingTTS = {
                 if (token) {
                     headers['Authorization'] = `Bearer ${token}`;
                 }
+
+                // Get selected voice settings
+                const selectedLanguage = localStorage.getItem('ttsLanguage') || 'ko';
+                const selectedVoice = localStorage.getItem('ttsVoice') || 'ko-KR-SunHiNeural';
+
                 response = await fetch('/api/tts/synthesize', {
                     method: 'POST',
                     headers,
-                    body: JSON.stringify({ text, use_cache: true }),
+                    body: JSON.stringify({
+                        text,
+                        language: selectedLanguage,
+                        voice_id: selectedVoice,
+                        use_cache: true
+                    }),
                     signal: fetchController.signal
                 });
             } finally {
@@ -6773,6 +6788,172 @@ function applySettings() {
             }
             if (streamingTTS.currentAudio) {
                 streamingTTS.currentAudio.playbackRate = speedMultiplier;
+            }
+        });
+    }
+
+    // TTS Language and Voice Selection
+    const ttsLanguageSelect = document.getElementById('ttsLanguageSelect');
+    const ttsVoiceSelect = document.getElementById('ttsVoiceSelect');
+    const ttsVoicePreview = document.getElementById('ttsVoicePreview');
+
+    // Voice mappings for different models
+    const TTS_VOICES = {
+        'edge-tts': {
+            ko: [{ id: 'ko-KR-SunHiNeural', name: 'SunHi (여성)' }, { id: 'ko-KR-InJoonNeural', name: 'InJoon (남성)' }],
+            en: [{ id: 'en-US-JennyNeural', name: 'Jenny (여성)' }, { id: 'en-US-GuyNeural', name: 'Guy (남성)' }],
+            zh: [{ id: 'zh-CN-XiaoxiaoNeural', name: 'Xiaoxiao (여성)' }, { id: 'zh-CN-YunxiNeural', name: 'Yunxi (남성)' }],
+            ja: [{ id: 'ja-JP-NanamiNeural', name: 'Nanami (여성)' }, { id: 'ja-JP-KeitaNeural', name: 'Keita (남성)' }],
+            de: [{ id: 'de-DE-KatjaNeural', name: 'Katja (여성)' }, { id: 'de-DE-ConradNeural', name: 'Conrad (남성)' }],
+            fr: [{ id: 'fr-FR-DeniseNeural', name: 'Denise (여성)' }, { id: 'fr-FR-HenriNeural', name: 'Henri (남성)' }],
+            es: [{ id: 'es-ES-ElviraNeural', name: 'Elvira (여성)' }, { id: 'es-ES-AlvaroNeural', name: 'Alvaro (남성)' }],
+            pt: [{ id: 'pt-BR-FranciscaNeural', name: 'Francisca (여성)' }, { id: 'pt-BR-AntonioNeural', name: 'Antonio (남성)' }],
+            ru: [{ id: 'ru-RU-SvetlanaNeural', name: 'Svetlana (여성)' }, { id: 'ru-RU-DmitryNeural', name: 'Dmitry (남성)' }],
+            it: [{ id: 'it-IT-ElsaNeural', name: 'Elsa (여성)' }, { id: 'it-IT-DiegoNeural', name: 'Diego (남성)' }]
+        },
+        'qwen': {
+            ko: [{ id: 'sohee', name: 'Sohee' }],
+            en: [
+                { id: 'ryan', name: 'Ryan' },
+                { id: 'serena', name: 'Serena' },
+                { id: 'aiden', name: 'Aiden' },
+                { id: 'dylan', name: 'Dylan' },
+                { id: 'eric', name: 'Eric' }
+            ],
+            zh: [{ id: 'uncle_fu', name: 'Uncle Fu' }, { id: 'vivian', name: 'Vivian' }],
+            ja: [{ id: 'ono_anna', name: 'Ono Anna' }]
+        }
+    };
+
+    // Function to update voice options based on language
+    function updateVoiceOptions(language, modelType = 'edge-tts') {
+        if (!ttsVoiceSelect) return;
+
+        const voices = TTS_VOICES[modelType][language] || [];
+        ttsVoiceSelect.innerHTML = '';
+
+        voices.forEach(voice => {
+            const option = document.createElement('option');
+            option.value = voice.id;
+            option.textContent = voice.name;
+            ttsVoiceSelect.appendChild(option);
+        });
+
+        // Load saved voice or use first option
+        const savedVoice = localStorage.getItem('ttsVoice');
+        if (savedVoice && voices.some(v => v.id === savedVoice)) {
+            ttsVoiceSelect.value = savedVoice;
+        } else if (voices.length > 0) {
+            ttsVoiceSelect.value = voices[0].id;
+            localStorage.setItem('ttsVoice', voices[0].id);
+        }
+    }
+
+    if (ttsLanguageSelect && ttsVoiceSelect) {
+        // Load saved language (default: ko)
+        const savedLanguage = localStorage.getItem('ttsLanguage') || 'ko';
+        ttsLanguageSelect.value = savedLanguage;
+
+        // Initialize voice options
+        updateVoiceOptions(savedLanguage);
+
+        // Language change handler
+        ttsLanguageSelect.addEventListener('change', (e) => {
+            const language = e.target.value;
+            localStorage.setItem('ttsLanguage', language);
+            updateVoiceOptions(language);
+        });
+
+        // Voice change handler
+        ttsVoiceSelect.addEventListener('change', (e) => {
+            const voice = e.target.value;
+            localStorage.setItem('ttsVoice', voice);
+        });
+    }
+
+    // Voice preview button
+    if (ttsVoicePreview) {
+        ttsVoicePreview.addEventListener('click', async () => {
+            const language = ttsLanguageSelect?.value || 'ko';
+            const voiceId = ttsVoiceSelect?.value;
+
+            if (!voiceId) {
+                showNotification('음성을 선택해주세요', 'warning');
+                return;
+            }
+
+            // Preview text based on language
+            const previewTexts = {
+                ko: '안녕하세요. 음성 미리듣기입니다.',
+                en: 'Hello. This is a voice preview.',
+                zh: '你好。这是语音预览。',
+                ja: 'こんにちは。音声プレビューです。',
+                de: 'Hallo. Dies ist eine Sprachvorschau.',
+                fr: 'Bonjour. Ceci est un aperçu vocal.',
+                es: 'Hola. Esta es una vista previa de voz.',
+                pt: 'Olá. Esta é uma prévia de voz.',
+                ru: 'Привет. Это предварительный просмотр голоса.',
+                it: 'Ciao. Questa è un\'anteprima vocale.'
+            };
+
+            const previewText = previewTexts[language] || previewTexts.ko;
+
+            // Disable button during preview
+            ttsVoicePreview.disabled = true;
+            ttsVoicePreview.textContent = '⏳ 생성 중...';
+
+            try {
+                const token = getCookie('access_token');
+                if (!token) {
+                    showNotification('로그인이 필요합니다', 'error');
+                    return;
+                }
+
+                const response = await fetch('/api/tts/synthesize', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({
+                        text: previewText,
+                        voice_id: voiceId,
+                        language: language,
+                        speed: 1.0
+                    })
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || 'TTS 생성 실패');
+                }
+
+                const result = await response.json();
+
+                // Play preview audio
+                const previewAudio = new Audio(result.audio_url + '?token=' + encodeURIComponent(token));
+                const savedVolume = localStorage.getItem('ttsVolume') || '100';
+                previewAudio.volume = savedVolume / 100;
+
+                previewAudio.addEventListener('ended', () => {
+                    ttsVoicePreview.disabled = false;
+                    ttsVoicePreview.textContent = '▶️ 미리듣기';
+                });
+
+                previewAudio.addEventListener('error', () => {
+                    ttsVoicePreview.disabled = false;
+                    ttsVoicePreview.textContent = '▶️ 미리듣기';
+                    showNotification('미리듣기 재생 실패', 'error');
+                });
+
+                await previewAudio.play();
+                showNotification('미리듣기 재생 중...', 'success');
+
+            } catch (error) {
+                console.error('Voice preview error:', error);
+                showNotification(error.message || '미리듣기 실패', 'error');
+                ttsVoicePreview.disabled = false;
+                ttsVoicePreview.textContent = '▶️ 미리듣기';
             }
         });
     }
