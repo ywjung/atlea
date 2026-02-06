@@ -3226,41 +3226,50 @@ function safeUpdateTTSButton(button, callback) {
 // Split text into sentences for progressive TTS
 function splitIntoSentences(text) {
     const sentences = [];
-    const sentenceEndPattern = /[.!?。！？]\s*$|[.!?。！？](?=\s)|다\.\s*$|요\.\s*$|니다\.\s*$|세요\.\s*$/;
+    const MIN_SENTENCE_LENGTH = 5; // Minimum 5 characters
 
-    // Split by sentence boundaries
-    const parts = text.split(/([.!?。！？])/);
-    let currentSentence = '';
+    // Split by sentence endings (., !, ?, 。, ！, ？)
+    // Keep the delimiter with the sentence
+    const parts = text.split(/(?<=[.!?。！？])\s+/);
 
-    for (let i = 0; i < parts.length; i++) {
-        currentSentence += parts[i];
-
-        // Check if this part is a sentence ending
-        if (sentenceEndPattern.test(currentSentence.trim())) {
-            const trimmed = currentSentence.trim();
-            if (trimmed.length > 0) {
+    for (let part of parts) {
+        const trimmed = part.trim();
+        // Filter out empty or very short fragments
+        if (trimmed.length >= MIN_SENTENCE_LENGTH) {
+            sentences.push(trimmed);
+        } else if (trimmed.length > 0) {
+            // If too short but not empty, append to previous sentence
+            if (sentences.length > 0) {
+                sentences[sentences.length - 1] += ' ' + trimmed;
+            } else {
+                // First fragment is too short, keep it anyway
                 sentences.push(trimmed);
             }
-            currentSentence = '';
         }
     }
 
-    // Add remaining text
-    if (currentSentence.trim().length > 0) {
-        sentences.push(currentSentence.trim());
-    }
-
-    // If no sentences found, return whole text
+    // If no valid sentences found, return whole text as one sentence
     if (sentences.length === 0) {
-        sentences.push(text.trim());
+        const trimmed = text.trim();
+        if (trimmed.length > 0) {
+            sentences.push(trimmed);
+        }
     }
 
+    console.log('Split into sentences:', sentences);
     return sentences;
 }
 
 // Generate TTS audio for a sentence
 async function synthesizeSentence(sentence, token, language, voiceId) {
     try {
+        // Validate sentence before sending
+        const trimmed = sentence.trim();
+        if (!trimmed || trimmed.length < 3) {
+            console.warn('Skipping too short sentence:', sentence);
+            return null;
+        }
+
         const response = await fetch('/api/tts/synthesize', {
             method: 'POST',
             headers: {
@@ -3268,7 +3277,7 @@ async function synthesizeSentence(sentence, token, language, voiceId) {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                text: sentence,
+                text: trimmed,
                 language: language,
                 voice_id: voiceId,
                 use_cache: true
@@ -3277,7 +3286,10 @@ async function synthesizeSentence(sentence, token, language, voiceId) {
         });
 
         if (!response.ok) {
-            throw new Error(`TTS request failed: ${response.status}`);
+            const errorData = await response.json().catch(() => ({}));
+            console.error('TTS synthesis failed:', response.status, errorData);
+            // Return null instead of throwing - allows other sentences to continue
+            return null;
         }
 
         const result = await response.json();
@@ -3293,8 +3305,9 @@ async function synthesizeSentence(sentence, token, language, voiceId) {
 
         return audio;
     } catch (error) {
-        console.error('Sentence synthesis error:', error);
-        throw error;
+        // Don't throw - return null to skip this sentence and continue with others
+        console.error('Sentence synthesis error:', error.message, 'for sentence:', sentence.substring(0, 50));
+        return null;
     }
 }
 
@@ -3311,6 +3324,13 @@ async function playAudioQueue() {
 
         try {
             const audio = await audioPromise;
+
+            // Skip if synthesis failed (returned null)
+            if (!audio) {
+                console.log('Skipping failed sentence, continuing with next...');
+                continue;
+            }
+
             ttsAudio = audio;
 
             // Show indicator
