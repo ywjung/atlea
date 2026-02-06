@@ -3209,8 +3209,7 @@ async function loadTTSStatus() {
 // Global reference for current TTS button (for background playback support)
 let currentTTSButton = null;
 let ttsIsPaused = false;  // Track if TTS is paused (not stopped)
-let ttsAudioQueue = [];  // Queue for progressive playback
-let ttsIsPlayingQueue = false;  // Track if queue is being played
+let ttsIsPlayingQueue = false;  // Track if progressive playback is active
 
 // Safely update TTS button if it still exists in DOM
 function safeUpdateTTSButton(button, callback) {
@@ -3311,21 +3310,30 @@ async function synthesizeSentence(sentence, token, language, voiceId) {
     }
 }
 
-// Play audio queue progressively
-async function playAudioQueue() {
-    if (ttsIsPlayingQueue || ttsAudioQueue.length === 0) {
+// Play audio queue progressively - generate while playing
+async function playAudioQueueProgressive(sentences, token, language, voiceId) {
+    if (ttsIsPlayingQueue) {
         return;
     }
 
     ttsIsPlayingQueue = true;
+    let currentIndex = 0;
 
-    while (ttsAudioQueue.length > 0) {
-        const audioPromise = ttsAudioQueue.shift();
-
+    while (currentIndex < sentences.length && ttsIsPlayingQueue) {
         try {
-            const audio = await audioPromise;
+            const sentence = sentences[currentIndex];
+            currentIndex++;
 
-            // Skip if synthesis failed (returned null)
+            // Check if stopped
+            if (!ttsIsPlayingQueue) break;
+
+            // Generate current sentence
+            const audio = await synthesizeSentence(sentence, token, language, voiceId);
+
+            // Check if stopped during generation
+            if (!ttsIsPlayingQueue) break;
+
+            // Skip if synthesis failed
             if (!audio) {
                 console.log('Skipping failed sentence, continuing with next...');
                 continue;
@@ -3347,7 +3355,8 @@ async function playAudioQueue() {
 
         } catch (error) {
             console.error('Audio playback error:', error);
-            // Continue with next audio
+            // Continue with next sentence if not stopped
+            if (!ttsIsPlayingQueue) break;
         }
     }
 
@@ -3477,32 +3486,10 @@ async function playTTS(text, button) {
 
         // Split text into sentences for progressive playback
         const sentences = splitIntoSentences(finalText);
-        devLog(`Split text into ${sentences.length} sentences for progressive playback`);
+        devLog(`Split text into ${sentences.length} sentences for sequential playback`);
 
         // Use abort controller for all requests
         ttsAbortController = new AbortController();
-
-        // Clear existing queue
-        ttsAudioQueue = [];
-        ttsIsPlayingQueue = false;
-
-        // Start generating all sentences in parallel
-        const ttsStartTime = Date.now();
-        sentences.forEach((sentence, index) => {
-            const audioPromise = synthesizeSentence(sentence, token, selectedLanguage, selectedVoice);
-            ttsAudioQueue.push(audioPromise);
-
-            // Log first sentence generation
-            if (index === 0) {
-                audioPromise.then(() => {
-                    devLog(`First sentence ready in ${((Date.now() - ttsStartTime) / 1000).toFixed(1)}s - starting playback`);
-                }).catch(err => {
-                    console.error('First sentence generation failed:', err);
-                });
-            }
-        });
-
-        devLog(`Started generating ${sentences.length} sentences in parallel`);
 
         // Update button to playing state
         safeUpdateTTSButton(button, (btn) => {
@@ -3516,9 +3503,9 @@ async function playTTS(text, button) {
             btn.disabled = false;
         });
 
-        // Start progressive playback
-        playAudioQueue().catch(error => {
-            console.error('Audio queue playback error:', error);
+        // Start progressive playback (generate and play sequentially)
+        playAudioQueueProgressive(sentences, token, selectedLanguage, selectedVoice).catch(error => {
+            console.error('Audio playback error:', error);
             safeUpdateTTSButton(currentTTSButton, (btn) => {
                 btn.classList.remove('tts-playing');
                 resetTTSButton(btn);
@@ -3576,8 +3563,7 @@ function stopTTS() {
     }
     ttsIsPaused = false;  // Reset paused state
 
-    // Clear audio queue
-    ttsAudioQueue = [];
+    // Stop progressive playback
     ttsIsPlayingQueue = false;
 
     // Abort any pending TTS requests
