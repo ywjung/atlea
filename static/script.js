@@ -2900,7 +2900,7 @@ function addActionButtons(contentDiv, text) {
         </svg>
     `;
     playlistBtn.onclick = () => {
-        addToTTSPlaylist(text);
+        addToTTSPlaylist(text, null, playlistBtn);
     };
     playlistBtn.style.display = 'none'; // Initially hidden, shown when TTS is available
 
@@ -3102,7 +3102,7 @@ function addActionButtonsToWrapper(wrapperDiv, text) {
         </svg>
     `;
     playlistBtn.onclick = () => {
-        addToTTSPlaylist(text);
+        addToTTSPlaylist(text, null, playlistBtn);
     };
     playlistBtn.style.display = 'none'; // Initially hidden, shown when TTS is available
 
@@ -10972,7 +10972,7 @@ function toggleTTSPlaylistPanel() {
 /**
  * Add text to TTS playlist
  */
-function addToTTSPlaylist(text, messageId = null) {
+function addToTTSPlaylist(text, messageId = null, button = null) {
     if (!text || text.trim().length === 0) {
         showNotification('추가할 텍스트가 없습니다', 'error');
         return;
@@ -10989,6 +10989,33 @@ function addToTTSPlaylist(text, messageId = null) {
     saveTTSPlaylistToStorage();
     renderTTSPlaylist();
     updateTTSPlaylistBadge();
+
+    // Visual feedback on button
+    if (button) {
+        button.classList.add('added');
+        button.setAttribute('title', '목록에 추가됨');
+
+        // Change icon to checkmark
+        button.innerHTML = `
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M20 6L9 17l-5-5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+        `;
+
+        // Reset after 2 seconds
+        setTimeout(() => {
+            button.classList.remove('added');
+            button.setAttribute('title', '재생 목록에 추가');
+            button.innerHTML = `
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M9 18V5l12-2v13"/>
+                    <circle cx="6" cy="18" r="3"/>
+                    <circle cx="18" cy="16" r="3"/>
+                    <path d="M15 8v6m-3-3h6" stroke-linecap="round"/>
+                </svg>
+            `;
+        }, 2000);
+    }
 
     showNotification('재생 목록에 추가되었습니다', 'success');
 }
