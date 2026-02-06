@@ -6839,35 +6839,57 @@ function applySettings() {
             ttsVoiceSelect.appendChild(option);
         });
 
-        // Load saved voice or use first option
+        // Check if saved voice is valid for current language
         const savedVoice = localStorage.getItem('ttsVoice');
-        if (savedVoice && voices.some(v => v.id === savedVoice)) {
+        const savedLanguage = localStorage.getItem('ttsLanguage');
+
+        // If language matches and voice exists in current language, use saved voice
+        if (savedLanguage === language && savedVoice && voices.some(v => v.id === savedVoice)) {
             ttsVoiceSelect.value = savedVoice;
         } else if (voices.length > 0) {
+            // Otherwise, use first voice of current language
             ttsVoiceSelect.value = voices[0].id;
             localStorage.setItem('ttsVoice', voices[0].id);
+            console.log(`Voice auto-selected for ${language}:`, voices[0].id);
         }
     }
 
     if (ttsLanguageSelect && ttsVoiceSelect) {
         // Load saved language (default: ko)
-        const savedLanguage = localStorage.getItem('ttsLanguage') || 'ko';
-        ttsLanguageSelect.value = savedLanguage;
+        const savedLanguage = localStorage.getItem('ttsLanguage');
+        if (!savedLanguage) {
+            // First time - save default language
+            localStorage.setItem('ttsLanguage', 'ko');
+            ttsLanguageSelect.value = 'ko';
+        } else {
+            ttsLanguageSelect.value = savedLanguage;
+        }
 
-        // Initialize voice options
-        updateVoiceOptions(savedLanguage);
+        // Initialize voice options for current language
+        updateVoiceOptions(ttsLanguageSelect.value);
+
+        console.log('TTS initialized:', {
+            language: ttsLanguageSelect.value,
+            voice: ttsVoiceSelect.value,
+            savedInLocalStorage: {
+                language: localStorage.getItem('ttsLanguage'),
+                voice: localStorage.getItem('ttsVoice')
+            }
+        });
 
         // Language change handler
         ttsLanguageSelect.addEventListener('change', (e) => {
             const language = e.target.value;
             localStorage.setItem('ttsLanguage', language);
             updateVoiceOptions(language);
+            console.log('Language changed to:', language, 'Voice:', localStorage.getItem('ttsVoice'));
         });
 
         // Voice change handler
         ttsVoiceSelect.addEventListener('change', (e) => {
             const voice = e.target.value;
             localStorage.setItem('ttsVoice', voice);
+            console.log('Voice changed to:', voice);
         });
     }
 
