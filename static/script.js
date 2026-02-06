@@ -3209,6 +3209,8 @@ async function loadTTSStatus() {
 // Global reference for current TTS button (for background playback support)
 let currentTTSButton = null;
 let ttsIsPaused = false;  // Track if TTS is paused (not stopped)
+let ttsAudioQueue = [];  // Queue for progressive playback
+let ttsIsPlayingQueue = false;  // Track if queue is being played
 
 // Safely update TTS button if it still exists in DOM
 function safeUpdateTTSButton(button, callback) {
@@ -3219,6 +3221,126 @@ function safeUpdateTTSButton(button, callback) {
             devLog('TTS button update skipped (element may have been removed):', e);
         }
     }
+}
+
+// Split text into sentences for progressive TTS
+function splitIntoSentences(text) {
+    const sentences = [];
+    const sentenceEndPattern = /[.!?。！？]\s*$|[.!?。！？](?=\s)|다\.\s*$|요\.\s*$|니다\.\s*$|세요\.\s*$/;
+
+    // Split by sentence boundaries
+    const parts = text.split(/([.!?。！？])/);
+    let currentSentence = '';
+
+    for (let i = 0; i < parts.length; i++) {
+        currentSentence += parts[i];
+
+        // Check if this part is a sentence ending
+        if (sentenceEndPattern.test(currentSentence.trim())) {
+            const trimmed = currentSentence.trim();
+            if (trimmed.length > 0) {
+                sentences.push(trimmed);
+            }
+            currentSentence = '';
+        }
+    }
+
+    // Add remaining text
+    if (currentSentence.trim().length > 0) {
+        sentences.push(currentSentence.trim());
+    }
+
+    // If no sentences found, return whole text
+    if (sentences.length === 0) {
+        sentences.push(text.trim());
+    }
+
+    return sentences;
+}
+
+// Generate TTS audio for a sentence
+async function synthesizeSentence(sentence, token, language, voiceId) {
+    try {
+        const response = await fetch('/api/tts/synthesize', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                text: sentence,
+                language: language,
+                voice_id: voiceId,
+                use_cache: true
+            }),
+            signal: ttsAbortController?.signal
+        });
+
+        if (!response.ok) {
+            throw new Error(`TTS request failed: ${response.status}`);
+        }
+
+        const result = await response.json();
+
+        // Create audio element
+        const audio = new Audio(result.audio_url + '?token=' + encodeURIComponent(token));
+
+        // Apply volume and speed settings
+        const savedVolume = localStorage.getItem('ttsVolume') || '100';
+        const savedSpeed = localStorage.getItem('ttsSpeed') || '100';
+        audio.volume = savedVolume / 100;
+        audio.playbackRate = savedSpeed / 100;
+
+        return audio;
+    } catch (error) {
+        console.error('Sentence synthesis error:', error);
+        throw error;
+    }
+}
+
+// Play audio queue progressively
+async function playAudioQueue() {
+    if (ttsIsPlayingQueue || ttsAudioQueue.length === 0) {
+        return;
+    }
+
+    ttsIsPlayingQueue = true;
+
+    while (ttsAudioQueue.length > 0) {
+        const audioPromise = ttsAudioQueue.shift();
+
+        try {
+            const audio = await audioPromise;
+            ttsAudio = audio;
+
+            // Show indicator
+            if (!document.querySelector('.tts-indicator')) {
+                showTTSIndicator();
+            }
+
+            // Play audio and wait for completion
+            await new Promise((resolve, reject) => {
+                audio.addEventListener('ended', resolve);
+                audio.addEventListener('error', reject);
+                audio.play().catch(reject);
+            });
+
+        } catch (error) {
+            console.error('Audio playback error:', error);
+            // Continue with next audio
+        }
+    }
+
+    ttsIsPlayingQueue = false;
+    ttsAudio = null;
+
+    // Update button to stopped state
+    safeUpdateTTSButton(currentTTSButton, (btn) => {
+        btn.classList.remove('tts-playing');
+        resetTTSButton(btn);
+    });
+
+    hideTTSIndicator();
 }
 
 // Play TTS for given text
@@ -3329,83 +3451,40 @@ async function playTTS(text, button) {
         const ttsRequestSession = currentSessionId;
         ttsSessionId = ttsRequestSession;
 
-        // Request TTS synthesis with timeout
-        // Use global controller so stopAllTTS() can abort this in-flight fetch
+        // Get selected voice settings
+        const selectedLanguage = localStorage.getItem('ttsLanguage') || 'ko';
+        const selectedVoice = localStorage.getItem('ttsVoice') || 'ko-KR-SunHiNeural';
+
+        // Split text into sentences for progressive playback
+        const sentences = splitIntoSentences(finalText);
+        devLog(`Split text into ${sentences.length} sentences for progressive playback`);
+
+        // Use abort controller for all requests
         ttsAbortController = new AbortController();
-        const timeoutMs = 180000; // 3 minutes (matches backend max)
-        const timeoutId = setTimeout(() => {
-            if (ttsAbortController) ttsAbortController.abort();
-        }, timeoutMs);
 
-        let response;
-        let ttsStartTime = Date.now();
-        try {
-            // Get selected voice settings
-            const selectedLanguage = localStorage.getItem('ttsLanguage') || 'ko';
-            const selectedVoice = localStorage.getItem('ttsVoice') || 'ko-KR-SunHiNeural';
+        // Clear existing queue
+        ttsAudioQueue = [];
+        ttsIsPlayingQueue = false;
 
-            response = await fetch('/api/tts/synthesize', {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    text: finalText,
-                    language: selectedLanguage,
-                    voice_id: selectedVoice
-                }),
-                signal: ttsAbortController.signal
-            });
-            clearTimeout(timeoutId);
-            devLog(`TTS synthesis completed in ${((Date.now() - ttsStartTime) / 1000).toFixed(1)}s`);
-        } catch (fetchError) {
-            clearTimeout(timeoutId);
-            ttsAbortController = null;
-            // If stopAllTTS() triggered this abort, exit silently
-            if (ttsStopping) {
-                devLog('TTS fetch aborted by stopAllTTS — suppressing error');
-                return;
+        // Start generating all sentences in parallel
+        const ttsStartTime = Date.now();
+        sentences.forEach((sentence, index) => {
+            const audioPromise = synthesizeSentence(sentence, token, selectedLanguage, selectedVoice);
+            ttsAudioQueue.push(audioPromise);
+
+            // Log first sentence generation
+            if (index === 0) {
+                audioPromise.then(() => {
+                    devLog(`First sentence ready in ${((Date.now() - ttsStartTime) / 1000).toFixed(1)}s - starting playback`);
+                }).catch(err => {
+                    console.error('First sentence generation failed:', err);
+                });
             }
-            // Ensure button is reset on timeout/abort
-            safeUpdateTTSButton(button, (btn) => {
-                btn.classList.remove('tts-playing');
-                resetTTSButton(btn);
-            });
-            if (fetchError.name === 'AbortError') {
-                const elapsedTime = ((Date.now() - ttsStartTime) / 1000).toFixed(0);
-                devLog(`TTS timeout after ${elapsedTime}s - server may still be processing`);
-                throw new Error(`TTS 생성 시간이 초과되었습니다 (${elapsedTime}초). 텍스트가 너무 길거나 서버가 바쁠 수 있습니다. 잠시 후 다시 시도하거나 관리자 설정에서 Edge TTS로 변경해보세요.`);
-            }
-            throw fetchError;
-        }
+        });
 
-        // Fetch completed — clear the global abort controller
-        ttsAbortController = null;
+        devLog(`Started generating ${sentences.length} sentences in parallel`);
 
-        // Guard: if user navigated away during synthesis, discard result
-        if (currentSessionId !== ttsRequestSession) {
-            devLog('TTS discarded: session changed during synthesis');
-            return;
-        }
-
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({ detail: 'TTS 생성 실패' }));
-            throw new Error(errorData.detail || errorData.error || 'TTS 생성 실패');
-        }
-
-        const result = await response.json();
-
-        // Create and play audio
-        ttsAudio = new Audio(result.audio_url + '?token=' + encodeURIComponent(token));
-
-        // Apply user settings (volume and speed)
-        const savedVolume = localStorage.getItem('ttsVolume') || '100';
-        const savedSpeed = localStorage.getItem('ttsSpeed') || '100';
-        ttsAudio.volume = savedVolume / 100;
-        ttsAudio.playbackRate = savedSpeed / 100;
-
-        // Update button to playing state (safely)
+        // Update button to playing state
         safeUpdateTTSButton(button, (btn) => {
             btn.innerHTML = `
                 <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor">
@@ -3417,44 +3496,18 @@ async function playTTS(text, button) {
             btn.disabled = false;
         });
 
-        // Play audio
-        ttsAudio.play();
-
-        // Show floating indicator for background playback
-        showTTSIndicator();
-
-        // Handle audio ended - safely update button if it still exists
-        ttsAudio.onended = () => {
+        // Start progressive playback
+        playAudioQueue().catch(error => {
+            console.error('Audio queue playback error:', error);
             safeUpdateTTSButton(currentTTSButton, (btn) => {
                 btn.classList.remove('tts-playing');
                 resetTTSButton(btn);
             });
-            ttsAudio = null;
-            currentTTSButton = null;
-            hideTTSIndicator();
-            devLog('TTS playback completed');
-        };
-
-        // Handle audio error - safely update button if it still exists
-        ttsAudio.onerror = (e) => {
-            devLog('TTS audio error:', e);
-            // Suppress error if stopAllTTS() is running or page is navigating away
-            if (ttsStopping || window.allowNavigation) {
-                devLog('TTS audio error suppressed — stop/navigation in progress');
-                return;
-            }
-            safeUpdateTTSButton(currentTTSButton, (btn) => {
-                btn.classList.remove('tts-playing');
-                resetTTSButton(btn);
-            });
-            // Only show error if user is still on the same page
-            if (document.body.contains(button)) {
+            if (document.body.contains(button) && !ttsStopping) {
                 showError('음성 재생에 실패했습니다.');
             }
-            ttsAudio = null;
-            currentTTSButton = null;
             hideTTSIndicator();
-        };
+        });
 
     } catch (error) {
         devLog('TTS error:', error);
@@ -3502,6 +3555,17 @@ function stopTTS() {
         ttsAudio = null;
     }
     ttsIsPaused = false;  // Reset paused state
+
+    // Clear audio queue
+    ttsAudioQueue = [];
+    ttsIsPlayingQueue = false;
+
+    // Abort any pending TTS requests
+    if (ttsAbortController) {
+        ttsAbortController.abort();
+        ttsAbortController = null;
+    }
+
     safeUpdateTTSButton(currentTTSButton, (btn) => {
         btn.classList.remove('tts-playing');
         resetTTSButton(btn);
