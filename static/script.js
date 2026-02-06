@@ -6903,9 +6903,11 @@ function applySettings() {
             ttsVoicePreview.textContent = '⏳ 생성 중...';
 
             try {
-                const token = getCookie('access_token');
+                const token = localStorage.getItem('access_token');
                 if (!token) {
                     showNotification('로그인이 필요합니다', 'error');
+                    ttsVoicePreview.disabled = false;
+                    ttsVoicePreview.textContent = '▶️ 미리듣기';
                     return;
                 }
 
