@@ -2737,5 +2737,61 @@
     <script src="/static/js/features/history.js"></script>
     <script src="/static/js/main.js"></script>
     -->
+
+    <!-- TTS Playlist Panel -->
+    <div id="ttsPlaylistPanel" class="tts-playlist-panel">
+        <div class="tts-playlist-header">
+            <div class="tts-playlist-title">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M9 18V5l12-2v13"/>
+                    <circle cx="6" cy="18" r="3"/>
+                    <circle cx="18" cy="16" r="3"/>
+                </svg>
+                <span>재생 목록</span>
+                <span class="tts-playlist-count">(0)</span>
+            </div>
+            <div class="tts-playlist-actions">
+                <button id="ttsPlaylistPlayAll" class="tts-playlist-btn" title="전체 재생">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M8 5v14l11-7z"/>
+                    </svg>
+                </button>
+                <button id="ttsPlaylistClearAll" class="tts-playlist-btn" title="전체 삭제">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
+                    </svg>
+                </button>
+                <button id="ttsPlaylistToggle" class="tts-playlist-btn" title="접기/펼치기">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M6 9l6 6 6-6"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
+        <div class="tts-playlist-body">
+            <div id="ttsPlaylistItems" class="tts-playlist-items">
+                <div class="tts-playlist-empty">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <path d="M9 18V5l12-2v13"/>
+                        <circle cx="6" cy="18" r="3"/>
+                        <circle cx="18" cy="16" r="3"/>
+                    </svg>
+                    <p>재생 목록이 비어있습니다</p>
+                    <p class="tts-playlist-hint">메시지의 "목록에 추가" 버튼을 눌러 추가하세요</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- TTS Playlist Toggle Button (floating) -->
+    <button id="ttsPlaylistFloatingBtn" class="tts-playlist-floating-btn" title="재생 목록 열기">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M9 18V5l12-2v13"/>
+            <circle cx="6" cy="18" r="3"/>
+            <circle cx="18" cy="16" r="3"/>
+        </svg>
+        <span class="tts-playlist-floating-badge">0</span>
+    </button>
+
 </body>
 </html>

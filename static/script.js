@@ -2882,14 +2882,34 @@ function addActionButtons(contentDiv, text) {
     checkTTSAvailability().then(available => {
         if (available) {
             ttsBtn.style.display = 'inline-flex';
+            playlistBtn.style.display = 'inline-flex';
         }
     });
+
+    // Add to Playlist button
+    const playlistBtn = document.createElement('button');
+    playlistBtn.className = 'action-btn playlist-add-btn';
+    playlistBtn.setAttribute('title', '재생 목록에 추가');
+    playlistBtn.setAttribute('aria-label', '재생 목록에 추가');
+    playlistBtn.innerHTML = `
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M9 18V5l12-2v13"/>
+            <circle cx="6" cy="18" r="3"/>
+            <circle cx="18" cy="16" r="3"/>
+            <path d="M15 8v6m-3-3h6" stroke-linecap="round"/>
+        </svg>
+    `;
+    playlistBtn.onclick = () => {
+        addToTTSPlaylist(text);
+    };
+    playlistBtn.style.display = 'none'; // Initially hidden, shown when TTS is available
 
     actionsDiv.appendChild(feedbackDiv);
     actionsDiv.appendChild(copyBtn);
     actionsDiv.appendChild(regenerateBtn);
     actionsDiv.appendChild(downloadContainer);
     actionsDiv.appendChild(ttsBtn);
+    actionsDiv.appendChild(playlistBtn);
     contentDiv.appendChild(actionsDiv);
 }
 
@@ -3064,14 +3084,34 @@ function addActionButtonsToWrapper(wrapperDiv, text) {
     checkTTSAvailability().then(available => {
         if (available) {
             ttsBtn.style.display = 'inline-flex';
+            playlistBtn.style.display = 'inline-flex';
         }
     });
+
+    // Add to Playlist button
+    const playlistBtn = document.createElement('button');
+    playlistBtn.className = 'action-btn playlist-add-btn';
+    playlistBtn.setAttribute('title', '재생 목록에 추가');
+    playlistBtn.setAttribute('aria-label', '재생 목록에 추가');
+    playlistBtn.innerHTML = `
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M9 18V5l12-2v13"/>
+            <circle cx="6" cy="18" r="3"/>
+            <circle cx="18" cy="16" r="3"/>
+            <path d="M15 8v6m-3-3h6" stroke-linecap="round"/>
+        </svg>
+    `;
+    playlistBtn.onclick = () => {
+        addToTTSPlaylist(text);
+    };
+    playlistBtn.style.display = 'none'; // Initially hidden, shown when TTS is available
 
     actionsDiv.appendChild(feedbackDiv);
     actionsDiv.appendChild(copyBtn);
     actionsDiv.appendChild(regenerateBtn);
     actionsDiv.appendChild(downloadContainer);
     actionsDiv.appendChild(ttsBtn);
+    actionsDiv.appendChild(playlistBtn);
     wrapperDiv.appendChild(actionsDiv);
 }
 
@@ -10858,5 +10898,379 @@ if (document.readyState === 'loading') {
             await loadUserPreferences();
             setupPreferencesAutoSave();
         }, 1500);
+
+        // Initialize TTS Playlist
+        initializeTTSPlaylist();
     })();
+}
+
+// ========================================
+// TTS Playlist Management
+// ========================================
+
+let ttsPlaylist = [];
+let ttsPlaylistNextId = 1;
+let ttsPlaylistIsPlaying = false;
+
+/**
+ * Initialize TTS Playlist UI and event handlers
+ */
+function initializeTTSPlaylist() {
+    const floatingBtn = document.getElementById('ttsPlaylistFloatingBtn');
+    const panel = document.getElementById('ttsPlaylistPanel');
+    const toggleBtn = document.getElementById('ttsPlaylistToggle');
+    const playAllBtn = document.getElementById('ttsPlaylistPlayAll');
+    const clearAllBtn = document.getElementById('ttsPlaylistClearAll');
+
+    if (!floatingBtn || !panel) {
+        console.warn('TTS Playlist elements not found');
+        return;
+    }
+
+    // Floating button click - toggle panel
+    floatingBtn.addEventListener('click', () => {
+        toggleTTSPlaylistPanel();
+    });
+
+    // Toggle button click - collapse panel
+    if (toggleBtn) {
+        toggleBtn.addEventListener('click', () => {
+            toggleTTSPlaylistPanel();
+        });
+    }
+
+    // Play all button
+    if (playAllBtn) {
+        playAllBtn.addEventListener('click', () => {
+            playAllTTSPlaylist();
+        });
+    }
+
+    // Clear all button
+    if (clearAllBtn) {
+        clearAllBtn.addEventListener('click', () => {
+            clearTTSPlaylist();
+        });
+    }
+
+    // Load playlist from localStorage if available
+    loadTTSPlaylistFromStorage();
+
+    console.log('TTS Playlist initialized');
+}
+
+/**
+ * Toggle TTS Playlist panel visibility
+ */
+function toggleTTSPlaylistPanel() {
+    const panel = document.getElementById('ttsPlaylistPanel');
+    if (panel) {
+        panel.classList.toggle('show');
+    }
+}
+
+/**
+ * Add text to TTS playlist
+ */
+function addToTTSPlaylist(text, messageId = null) {
+    if (!text || text.trim().length === 0) {
+        showNotification('추가할 텍스트가 없습니다', 'error');
+        return;
+    }
+
+    const item = {
+        id: ttsPlaylistNextId++,
+        text: text.trim(),
+        messageId: messageId,
+        addedAt: Date.now()
+    };
+
+    ttsPlaylist.push(item);
+    saveTTSPlaylistToStorage();
+    renderTTSPlaylist();
+    updateTTSPlaylistBadge();
+
+    showNotification('재생 목록에 추가되었습니다', 'success');
+}
+
+/**
+ * Remove item from TTS playlist
+ */
+function removeFromTTSPlaylist(itemId) {
+    const index = ttsPlaylist.findIndex(item => item.id === itemId);
+    if (index !== -1) {
+        ttsPlaylist.splice(index, 1);
+        saveTTSPlaylistToStorage();
+        renderTTSPlaylist();
+        updateTTSPlaylistBadge();
+    }
+}
+
+/**
+ * Clear all items from TTS playlist
+ */
+function clearTTSPlaylist() {
+    if (ttsPlaylist.length === 0) {
+        return;
+    }
+
+    if (confirm('재생 목록의 모든 항목을 삭제하시겠습니까?')) {
+        ttsPlaylist = [];
+        saveTTSPlaylistToStorage();
+        renderTTSPlaylist();
+        updateTTSPlaylistBadge();
+        showNotification('재생 목록이 비워졌습니다', 'info');
+    }
+}
+
+/**
+ * Play all items in TTS playlist sequentially
+ */
+async function playAllTTSPlaylist() {
+    if (ttsPlaylist.length === 0) {
+        showNotification('재생 목록이 비어있습니다', 'error');
+        return;
+    }
+
+    if (ttsPlaylistIsPlaying) {
+        showNotification('이미 재생 중입니다', 'error');
+        return;
+    }
+
+    const token = localStorage.getItem('access_token');
+    if (!token) {
+        showNotification('로그인이 필요합니다', 'error');
+        return;
+    }
+
+    ttsPlaylistIsPlaying = true;
+    const playAllBtn = document.getElementById('ttsPlaylistPlayAll');
+    if (playAllBtn) {
+        playAllBtn.disabled = true;
+        playAllBtn.innerHTML = `
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <rect x="6" y="4" width="4" height="16"/>
+                <rect x="14" y="4" width="4" height="16"/>
+            </svg>
+        `;
+    }
+
+    try {
+        for (let i = 0; i < ttsPlaylist.length; i++) {
+            if (!ttsPlaylistIsPlaying) break;
+
+            const item = ttsPlaylist[i];
+
+            // Mark current item as playing
+            markTTSPlaylistItemPlaying(item.id);
+
+            // Get TTS settings
+            const selectedLanguage = localStorage.getItem('ttsLanguage') || 'ko';
+            const selectedVoice = localStorage.getItem('ttsVoice') || 'ko-KR-SunHiNeural';
+
+            // Split into sentences and play
+            const sentences = splitIntoSentences(item.text);
+            console.log(`Playing playlist item ${i + 1}/${ttsPlaylist.length}: ${sentences.length} sentences`);
+
+            // Play with buffered progressive playback
+            await playAudioQueueProgressive(sentences, token, selectedLanguage, selectedVoice);
+
+            // Unmark playing state
+            unmarkTTSPlaylistItemPlaying(item.id);
+        }
+
+        showNotification('재생 목록 재생 완료', 'success');
+    } catch (error) {
+        console.error('Playlist playback error:', error);
+        showNotification('재생 중 오류가 발생했습니다', 'error');
+    } finally {
+        ttsPlaylistIsPlaying = false;
+        if (playAllBtn) {
+            playAllBtn.disabled = false;
+            playAllBtn.innerHTML = `
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M8 5v14l11-7z"/>
+                </svg>
+            `;
+        }
+    }
+}
+
+/**
+ * Mark playlist item as currently playing
+ */
+function markTTSPlaylistItemPlaying(itemId) {
+    const itemElement = document.querySelector(`[data-playlist-id="${itemId}"]`);
+    if (itemElement) {
+        itemElement.classList.add('playing');
+    }
+}
+
+/**
+ * Unmark playlist item playing state
+ */
+function unmarkTTSPlaylistItemPlaying(itemId) {
+    const itemElement = document.querySelector(`[data-playlist-id="${itemId}"]`);
+    if (itemElement) {
+        itemElement.classList.remove('playing');
+    }
+}
+
+/**
+ * Render TTS playlist items
+ */
+function renderTTSPlaylist() {
+    const container = document.getElementById('ttsPlaylistItems');
+    if (!container) return;
+
+    if (ttsPlaylist.length === 0) {
+        container.innerHTML = `
+            <div class="tts-playlist-empty">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M9 18V5l12-2v13"/>
+                    <circle cx="6" cy="18" r="3"/>
+                    <circle cx="18" cy="16" r="3"/>
+                </svg>
+                <p>재생 목록이 비어있습니다</p>
+                <p class="tts-playlist-hint">메시지의 "목록에 추가" 버튼을 눌러 추가하세요</p>
+            </div>
+        `;
+        return;
+    }
+
+    container.innerHTML = ttsPlaylist.map(item => {
+        const preview = item.text.length > 100 ? item.text.substring(0, 100) + '...' : item.text;
+        const timeAgo = getTimeAgo(item.addedAt);
+
+        return `
+            <div class="tts-playlist-item" data-playlist-id="${item.id}">
+                <div class="tts-playlist-item-icon">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                        <circle cx="12" cy="12" r="10"/>
+                        <path d="M10 8l6 4-6 4V8z" fill="white"/>
+                    </svg>
+                </div>
+                <div class="tts-playlist-item-content">
+                    <div class="tts-playlist-item-text">${escapeHtml(preview)}</div>
+                    <div class="tts-playlist-item-meta">${timeAgo}</div>
+                </div>
+                <div class="tts-playlist-item-actions">
+                    <button class="tts-playlist-item-btn" onclick="playTTSPlaylistItem(${item.id})" title="재생">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M8 5v14l11-7z"/>
+                        </svg>
+                    </button>
+                    <button class="tts-playlist-item-btn" onclick="removeFromTTSPlaylist(${item.id})" title="삭제">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M18 6L6 18M6 6l12 12"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+/**
+ * Play single playlist item
+ */
+async function playTTSPlaylistItem(itemId) {
+    const item = ttsPlaylist.find(i => i.id === itemId);
+    if (!item) return;
+
+    const token = localStorage.getItem('access_token');
+    if (!token) {
+        showNotification('로그인이 필요합니다', 'error');
+        return;
+    }
+
+    try {
+        markTTSPlaylistItemPlaying(itemId);
+
+        const selectedLanguage = localStorage.getItem('ttsLanguage') || 'ko';
+        const selectedVoice = localStorage.getItem('ttsVoice') || 'ko-KR-SunHiNeural';
+        const sentences = splitIntoSentences(item.text);
+
+        await playAudioQueueProgressive(sentences, token, selectedLanguage, selectedVoice);
+    } catch (error) {
+        console.error('Playlist item playback error:', error);
+        showNotification('재생 중 오류가 발생했습니다', 'error');
+    } finally {
+        unmarkTTSPlaylistItemPlaying(itemId);
+    }
+}
+
+/**
+ * Update TTS playlist badge counter
+ */
+function updateTTSPlaylistBadge() {
+    const badge = document.querySelector('.tts-playlist-floating-badge');
+    const headerCount = document.querySelector('.tts-playlist-count');
+
+    if (badge) {
+        badge.textContent = ttsPlaylist.length;
+        badge.style.display = ttsPlaylist.length > 0 ? 'block' : 'none';
+    }
+
+    if (headerCount) {
+        headerCount.textContent = `(${ttsPlaylist.length})`;
+    }
+}
+
+/**
+ * Save playlist to localStorage
+ */
+function saveTTSPlaylistToStorage() {
+    try {
+        localStorage.setItem('ttsPlaylist', JSON.stringify(ttsPlaylist));
+        localStorage.setItem('ttsPlaylistNextId', ttsPlaylistNextId.toString());
+    } catch (error) {
+        console.error('Failed to save playlist to localStorage:', error);
+    }
+}
+
+/**
+ * Load playlist from localStorage
+ */
+function loadTTSPlaylistFromStorage() {
+    try {
+        const saved = localStorage.getItem('ttsPlaylist');
+        const savedNextId = localStorage.getItem('ttsPlaylistNextId');
+
+        if (saved) {
+            ttsPlaylist = JSON.parse(saved);
+            renderTTSPlaylist();
+        }
+
+        if (savedNextId) {
+            ttsPlaylistNextId = parseInt(savedNextId, 10);
+        }
+
+        updateTTSPlaylistBadge();
+    } catch (error) {
+        console.error('Failed to load playlist from localStorage:', error);
+        ttsPlaylist = [];
+        ttsPlaylistNextId = 1;
+    }
+}
+
+/**
+ * Get relative time ago string
+ */
+function getTimeAgo(timestamp) {
+    const seconds = Math.floor((Date.now() - timestamp) / 1000);
+
+    if (seconds < 60) return '방금 전';
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}분 전`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)}시간 전`;
+    return `${Math.floor(seconds / 86400)}일 전`;
+}
+
+/**
+ * Escape HTML to prevent XSS
+ */
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }
