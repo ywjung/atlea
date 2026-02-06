@@ -150,16 +150,25 @@ async def get_csp_violation_stats(request: Request):
                 "recent_violations": []
             }
 
-        # Get all directive counters
-        directive_keys = cache_manager.redis.keys("security:csp_count:*")
+        # Get all directive counters (using SCAN to avoid blocking)
         by_directive = {}
         total = 0
+        cursor = 0
 
-        for key in directive_keys:
-            directive = key.decode().replace("security:csp_count:", "")
-            count = int(cache_manager.redis.get(key) or 0)
-            by_directive[directive] = count
-            total += count
+        while True:
+            cursor, keys = cache_manager.redis.scan(
+                cursor=cursor,
+                match="security:csp_count:*",
+                count=100
+            )
+            for key in keys:
+                directive = key.decode().replace("security:csp_count:", "")
+                count = int(cache_manager.redis.get(key) or 0)
+                by_directive[directive] = count
+                total += count
+
+            if cursor == 0:
+                break
 
         # Get recent violations (last 10)
         recent_raw = cache_manager.redis.lrange("security:csp_violations", 0, 9)

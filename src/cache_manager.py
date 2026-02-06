@@ -268,8 +268,21 @@ class CacheManager:
                     "cached_question": memory_cached["question"]
                 }
 
-            # Get all cached question hashes
-            cached_hashes = self.redis.smembers(self.index_key)
+            # Get all cached question hashes (using SSCAN to avoid blocking)
+            cached_hashes = []
+            cursor = 0
+
+            while True:
+                cursor, hashes = self.redis.sscan(
+                    self.index_key,
+                    cursor=cursor,
+                    count=100
+                )
+                cached_hashes.extend(hashes)
+
+                if cursor == 0:
+                    break
+
             if not cached_hashes:
                 return None
 
@@ -279,7 +292,7 @@ class CacheManager:
             # Limit cache lookup to most recent entries for performance
             # Convert to list and limit to prevent O(N) scaling issues
             MAX_CACHE_CHECK = 100  # Only check last 100 cached questions
-            cached_hashes_list = list(cached_hashes)[:MAX_CACHE_CHECK]
+            cached_hashes_list = cached_hashes[:MAX_CACHE_CHECK]
 
             # Use pipeline to fetch all cache entries at once (performance optimization)
             pipe = self.redis.pipeline()
@@ -444,8 +457,21 @@ class CacheManager:
             Number of entries cleared
         """
         try:
-            # Get all cached hashes
-            cached_hashes = self.redis.smembers(self.index_key)
+            # Get all cached hashes (using SSCAN to avoid blocking)
+            cached_hashes = []
+            cursor = 0
+
+            while True:
+                cursor, hashes = self.redis.sscan(
+                    self.index_key,
+                    cursor=cursor,
+                    count=100
+                )
+                cached_hashes.extend(hashes)
+
+                if cursor == 0:
+                    break
+
             count = 0
 
             # Delete each cache entry
@@ -489,7 +515,20 @@ class CacheManager:
             }
         """
         try:
-            cached_hashes = self.redis.smembers(self.index_key)
+            # Get all cached hashes (using SSCAN to avoid blocking)
+            cached_hashes = []
+            cursor = 0
+
+            while True:
+                cursor, hashes = self.redis.sscan(
+                    self.index_key,
+                    cursor=cursor,
+                    count=100
+                )
+                cached_hashes.extend(hashes)
+
+                if cursor == 0:
+                    break
 
             # Count valid entries using Pipeline (O(N) → O(1) round trips)
             valid_count = 0
@@ -673,4 +712,65 @@ class CacheManager:
             return True
         except Exception as e:
             logger.error(f"Error saving query result cache: {e}")
+            return False
+
+    def get_follow_up_questions_cache(self, question: str, answer: str) -> Optional[List[str]]:
+        """
+        Get cached follow-up questions based on question and answer hash.
+
+        Args:
+            question: Original user question
+            answer: Generated answer
+
+        Returns:
+            Cached follow-up questions list, or None if not found
+        """
+        try:
+            # Create cache key from question + answer hash
+            cache_input = f"{question}|{answer[:500]}"  # Use first 500 chars of answer
+            cache_key = f"followup:{hashlib.md5(cache_input.encode()).hexdigest()}"
+
+            cached = self.redis.get(cache_key)
+            if cached:
+                logger.info(f"💬 Follow-up cache HIT for: '{question[:50]}...'")
+                return json.loads(cached)
+
+            return None
+        except Exception as e:
+            logger.error(f"Error getting follow-up questions cache: {e}")
+            return None
+
+    def set_follow_up_questions_cache(
+        self,
+        question: str,
+        answer: str,
+        questions: List[str],
+        ttl: int = 3600  # 1 hour default
+    ) -> bool:
+        """
+        Save follow-up questions to cache.
+
+        Args:
+            question: Original user question
+            answer: Generated answer
+            questions: List of follow-up questions
+            ttl: Time-to-live in seconds (default: 3600 = 1 hour)
+
+        Returns:
+            True if saved successfully, False otherwise
+        """
+        try:
+            # Create cache key from question + answer hash
+            cache_input = f"{question}|{answer[:500]}"  # Use first 500 chars of answer
+            cache_key = f"followup:{hashlib.md5(cache_input.encode()).hexdigest()}"
+
+            self.redis.setex(
+                cache_key,
+                ttl,
+                json.dumps(questions, ensure_ascii=False)
+            )
+            logger.debug(f"💬 Follow-up cache SAVED for: '{question[:50]}...'")
+            return True
+        except Exception as e:
+            logger.error(f"Error saving follow-up questions cache: {e}")
             return False

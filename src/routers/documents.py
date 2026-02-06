@@ -13,6 +13,7 @@ import time
 import itertools
 import hashlib
 import asyncio
+import json
 from pathlib import Path
 from typing import Optional, List
 from datetime import datetime
@@ -34,6 +35,7 @@ from ..embeddings import EmbeddingModel
 from .admin import invalidate_stats_cache
 from ..utils.pagination import calculate_total_pages
 from ..utils.error_handling import get_safe_error_message
+from ..utils.file_security import validate_file_security, ALLOWED_EXTENSIONS
 
 # Create router
 router = APIRouter(prefix="/api", tags=["Documents"])
@@ -45,6 +47,7 @@ document_version: DocumentVersion = None
 group_manager: GroupManager = None
 cache_manager: CacheManager = None
 embedding_model: EmbeddingModel = None
+audit_logger = None
 DATA_DIR: str = None
 CHUNK_SIZE: int = None
 CHUNK_OVERLAP: int = None
@@ -71,6 +74,7 @@ def inject_dependencies(
     grp_manager: GroupManager,
     cache_mgr: CacheManager,
     emb_model: EmbeddingModel,
+    audit_log,
     data_dir: str,
     chunk_size: int,
     chunk_overlap: int,
@@ -80,7 +84,7 @@ def inject_dependencies(
 ):
     """Inject dependencies from main app"""
     global vector_db, document_processor, document_version, group_manager, cache_manager
-    global embedding_model, DATA_DIR, CHUNK_SIZE, CHUNK_OVERLAP, MAX_FILE_SIZE, MAX_FILE_SIZE_MB, reindex_event
+    global embedding_model, audit_logger, DATA_DIR, CHUNK_SIZE, CHUNK_OVERLAP, MAX_FILE_SIZE, MAX_FILE_SIZE_MB, reindex_event
 
     vector_db = vdb
     document_processor = doc_processor
@@ -88,6 +92,7 @@ def inject_dependencies(
     group_manager = grp_manager
     cache_manager = cache_mgr
     embedding_model = emb_model
+    audit_logger = audit_log
     DATA_DIR = data_dir
     CHUNK_SIZE = chunk_size
     CHUNK_OVERLAP = chunk_overlap
@@ -147,7 +152,57 @@ def validate_filename(filename: str) -> str:
             detail="파일명에 허용되지 않는 문자가 포함되어 있습니다."
         )
 
+    # Block hidden files and special names
+    if safe_name.startswith('.') or safe_name in ('', '.', '..'):
+        raise HTTPException(
+            status_code=400,
+            detail="파일명이 올바르지 않습니다."
+        )
+
     return safe_name
+
+
+def validate_file_path(file_path: Path, allowed_directory: Path) -> Path:
+    """
+    Validate that resolved file path is within allowed directory
+
+    Args:
+        file_path: File path to validate
+        allowed_directory: Directory that must contain the file
+
+    Returns:
+        Resolved file path if valid
+
+    Raises:
+        HTTPException: If path escapes allowed directory
+    """
+    try:
+        # Resolve to absolute path (follows symlinks)
+        resolved_file = file_path.resolve()
+        resolved_dir = allowed_directory.resolve()
+
+        # Check if resolved file is within allowed directory
+        # Use is_relative_to() for secure path containment check
+        try:
+            resolved_file.relative_to(resolved_dir)
+        except ValueError:
+            # Path is outside allowed directory
+            logger.error(f"Path traversal attempt blocked: {file_path} -> {resolved_file}")
+            raise HTTPException(
+                status_code=400,
+                detail="파일 경로가 올바르지 않습니다."
+            )
+
+        return resolved_file
+
+    except Exception as e:
+        if isinstance(e, HTTPException):
+            raise
+        logger.error(f"File path validation failed: {e}")
+        raise HTTPException(
+            status_code=400,
+            detail="파일 경로 검증에 실패했습니다."
+        )
 
 
 def invalidate_status_cache():
@@ -509,6 +564,11 @@ async def index_pdfs(doc_tracker: DocumentTracker, target_index: Optional[str] =
 
             # Find the source file
             source_path = data_path / filename
+            try:
+                source_path = validate_file_path(source_path, data_path)
+            except HTTPException:
+                logger.warning(f"Skipping invalid path during migration: {filename}")
+                continue
             if not source_path.exists():
                 logger.debug(f"Source file not found for version creation: {filename}")
                 continue
@@ -776,6 +836,8 @@ async def list_documents(
             org_group_ids = {g['id'] for g in org_groups}
 
         # Get all supported document files
+        import unicodedata
+
         all_files = list(itertools.chain(
             data_path.glob("*.pdf"),
             data_path.glob("*.hwp"),
@@ -793,7 +855,8 @@ async def list_documents(
             return {"documents": [], "total_count": 0}
 
         # Batch count chunks for all files at once (avoids N+1 queries)
-        filenames = [f.name for f in all_files]
+        # Normalize filenames to NFC for consistent unicode handling (Korean compatibility)
+        filenames = [unicodedata.normalize('NFC', f.name) for f in all_files]
         chunk_counts = {}
         if vector_db:
             try:
@@ -825,11 +888,45 @@ async def list_documents(
                 if group_id:
                     doc_group_map[filename] = group_id.decode('utf-8') if isinstance(group_id, bytes) else group_id
 
+        # Batch fetch virus scan status for all files
+        import unicodedata
+        virus_scan_map = {}
+        if filenames:
+            pipe = cache_manager.redis.pipeline()
+            for filename in filenames:
+                # Try both NFC and NFD forms for Korean compatibility
+                nfc_filename = unicodedata.normalize('NFC', filename)
+                pipe.get(f'doc:virus_scan:{nfc_filename}')
+
+            scan_results = pipe.execute()
+
+            for filename, scan_data in zip(filenames, scan_results):
+                if scan_data:
+                    try:
+                        virus_scan_map[filename] = json.loads(scan_data.decode('utf-8') if isinstance(scan_data, bytes) else scan_data)
+                    except Exception as e:
+                        logger.warning(f"⚠️ Failed to parse virus scan data for '{filename}': {e}")
+                        virus_scan_map[filename] = None
+                else:
+                    # If NFC didn't work, try NFD
+                    nfd_filename = unicodedata.normalize('NFD', filename)
+                    if nfd_filename != filename:
+                        try:
+                            nfd_data = cache_manager.redis.get(f'doc:virus_scan:{nfd_filename}')
+                            if nfd_data:
+                                virus_scan_map[filename] = json.loads(nfd_data.decode('utf-8') if isinstance(nfd_data, bytes) else nfd_data)
+                                logger.info(f"✅ Found virus scan data using NFD normalization: {filename}")
+                        except:
+                            pass
+
         # Build document list with pre-fetched chunk counts
         documents = []
         for pdf_file in all_files:
+            # Normalize filename for consistent lookups across all maps
+            normalized_name = unicodedata.normalize('NFC', pdf_file.name)
+
             # Filter by organization: check if document's group belongs to user's org
-            doc_group_id = doc_group_map.get(pdf_file.name)
+            doc_group_id = doc_group_map.get(normalized_name)
 
             if unassigned:
                 # 미할당 문서만 반환: 그룹이 있는 문서는 건너뛰기
@@ -840,33 +937,43 @@ async def list_documents(
                     # Skip documents not in user's organization groups
                     if doc_group_id not in org_group_ids:
                         continue
-                # If document has no group, skip it (documents without groups are not accessible)
+                # 그룹이 없는 문서: 관리자는 볼 수 있음, 일반 사용자는 건너뛰기
                 else:
-                    continue
+                    if not is_admin:
+                        continue
 
             # Get file stats
             stat = pdf_file.stat()
 
             # Get chunk count from pre-fetched version metadata (N+1 쿼리 제거)
             chunk_count = 0
-            version_meta = version_metadata_map.get(pdf_file.name)
+            version_meta = version_metadata_map.get(normalized_name)
             if version_meta and version_meta.get('chunk_count', 0) > 0:
                 chunk_count = version_meta['chunk_count']
             else:
                 # Fallback to batch count if no version metadata or chunk_count is 0
-                chunk_count = chunk_counts.get(pdf_file.name, 0)
+                chunk_count = chunk_counts.get(normalized_name, 0)
+
+            # Get virus scan status using normalized name
+            virus_scan = virus_scan_map.get(normalized_name, {})
 
             documents.append({
-                "id": pdf_file.name,  # Use filename as ID for filtering
-                "name": pdf_file.name,  # Display name
-                "filename": pdf_file.name,  # Keep for backward compatibility
+                "id": normalized_name,  # Use filename as ID for filtering
+                "name": normalized_name,  # Display name
+                "filename": normalized_name,  # Keep for backward compatibility
                 "size": stat.st_size,
                 "size_mb": round(stat.st_size / (1024 * 1024), 2),
                 "created_at": datetime.fromtimestamp(stat.st_mtime).isoformat(),  # For JavaScript formatDate
                 "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),  # Keep for backward compatibility
                 "chunk_count": chunk_count,
                 "indexed": chunk_count > 0,
-                "group_id": doc_group_id  # Add group_id for reference
+                "group_id": doc_group_id,  # Add group_id for reference
+                "virus_scan": {
+                    "scanned": virus_scan.get("scanned", False),
+                    "clean": virus_scan.get("clean"),
+                    "scanned_at": virus_scan.get("scanned_at"),
+                    "scanner": virus_scan.get("scanner", "ClamAV")
+                } if virus_scan else None
             })
 
         # Sort by modified date (newest first)
@@ -911,6 +1018,7 @@ async def download_document(
 
         data_path = Path(DATA_DIR)
         file_path = data_path / safe_filename
+        file_path = validate_file_path(file_path, data_path)
 
         # Check if file exists
         if not file_path.exists():
@@ -1151,14 +1259,25 @@ async def upload_document(
         safe_filename = validate_filename(file.filename)
 
         # Validate file type (extension check)
-        allowed_extensions = ['.pdf', '.hwp', '.hwpx', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.txt']
-        if not any(safe_filename.endswith(ext) for ext in allowed_extensions):
+        if not any(safe_filename.endswith(ext) for ext in ALLOWED_EXTENSIONS):
             raise HTTPException(
                 status_code=400,
                 detail="지원되지 않는 파일 형식입니다. 지원 형식: PDF, HWP, HWPX, DOC, DOCX, XLS, XLSX, PPT, PPTX, TXT"
             )
 
-        # Security: Validate file content (magic bytes check)
+        # Security: Enhanced file validation (Phase 2-3)
+        # - MIME type validation
+        # - Malicious pattern detection
+        # - Magic bytes verification
+        await validate_file_security(
+            file=file,
+            filename=safe_filename,
+            enable_mime_check=True,
+            enable_pattern_scan=True,
+            enable_magic_check=False  # Optional, requires python-magic
+        )
+
+        # Security: Validate file content (magic bytes check) - Legacy check
         await validate_file_content(file)
 
         # Create data directory if it doesn't exist
@@ -1167,6 +1286,9 @@ async def upload_document(
 
         # Save uploaded file path (using validated filename)
         file_path = data_path / safe_filename
+
+        # Security: Validate that resolved path is within allowed directory
+        file_path = validate_file_path(file_path, data_path)
 
         # v2.3.0: Check if file already exists (will create new version)
         is_update = file_path.exists()
@@ -1222,6 +1344,160 @@ async def upload_document(
 
         # Get final hash
         file_hash_hex = file_hash.hexdigest()
+
+        # Security: Virus scan with ClamAV (Phase 2-4)
+        try:
+            from ..utils.file_security import scan_with_antivirus
+            import time
+
+            # Get client IP address (supports proxies)
+            client_ip = request.client.host if request.client else "unknown"
+            if "x-forwarded-for" in request.headers:
+                client_ip = request.headers["x-forwarded-for"].split(",")[0].strip()
+            elif "x-real-ip" in request.headers:
+                client_ip = request.headers["x-real-ip"]
+
+            # Start time for response time measurement
+            scan_start_time = time.time()
+
+            # Get ClamAV configuration from environment
+            import os
+            clamd_host = os.getenv("CLAMAV_HOST", "localhost")
+            clamd_port = int(os.getenv("CLAMAV_PORT", "3310"))
+
+            virus_detected = await scan_with_antivirus(
+                file_path=str(file_path),
+                clamd_host=clamd_host,
+                clamd_port=clamd_port
+            )
+
+            # Calculate response time
+            scan_duration_ms = int((time.time() - scan_start_time) * 1000)
+
+            if virus_detected:
+                # Virus found - delete file immediately
+                file_path.unlink(missing_ok=True)
+                logger.error(f"🚨 VIRUS DETECTED in '{safe_filename}': {virus_detected}")
+
+                # Log to audit log
+                from ..audit import AuditAction
+                audit_logger.log(
+                    action=AuditAction.VIRUS_SCAN_AUTO,
+                    user_id=current_user.get("user_id"),
+                    username=username,
+                    ip_address=client_ip,  # 🆕 IP 주소 추가
+                    resource=safe_filename,
+                    details={
+                        "filename": safe_filename,
+                        "scan_result": "virus_detected",
+                        "virus_name": virus_detected,
+                        "file_hash": file_hash_hex,
+                        "scan_type": "auto_on_upload",
+                        "scanner": "ClamAV",
+                        "action": "file_deleted",
+                        "duration_ms": scan_duration_ms  # 🆕 응답 시간 추가 (duration_ms로 통일)
+                    },
+                    success=True
+                )
+
+                # Also log to security log (critical event)
+                from ..auth.security_logger import SecurityLogger
+                SecurityLogger.log_event(
+                    event_type="문서 바이러스 검사 - 위협 발견",
+                    level="critical",
+                    user_id=current_user.get("user_id"),
+                    username=username,
+                    details={
+                        "filename": safe_filename,
+                        "virus_name": virus_detected,
+                        "file_hash": file_hash_hex,
+                        "action": "파일 삭제됨",
+                        "scan_type": "업로드 시 자동 검사"
+                    }
+                )
+
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"보안 위협이 감지되었습니다. 파일 업로드가 차단되었습니다. (위협: {virus_detected})"
+                )
+
+            logger.info(f"✅ Virus scan completed - file is clean: {safe_filename}")
+
+            # Log to audit log
+            from ..audit import AuditAction
+            audit_logger.log(
+                action=AuditAction.VIRUS_SCAN_AUTO,
+                user_id=current_user.get("user_id"),
+                username=username,
+                ip_address=client_ip,  # 🆕 IP 주소 추가
+                resource=safe_filename,
+                details={
+                    "filename": safe_filename,
+                    "scan_result": "clean",
+                    "file_hash": file_hash_hex,
+                    "scan_type": "auto_on_upload",
+                    "scanner": "ClamAV",
+                    "duration_ms": scan_duration_ms  # 🆕 응답 시간 추가 (duration_ms로 통일)
+                },
+                success=True
+            )
+
+            # Store virus scan result in Redis
+            scan_status = {
+                "scanned": True,
+                "clean": True,
+                "scanned_at": datetime.now().isoformat(),
+                "scanner": "ClamAV"
+            }
+            cache_manager.redis.set(
+                f"doc:virus_scan:{safe_filename}",
+                json.dumps(scan_status),
+                ex=90 * 24 * 3600  # 90 days retention
+            )
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.warning(f"⚠️ Virus scan failed, but continuing with upload: {e}")
+            # Don't block upload if virus scan fails
+            # Security team should be notified to check ClamAV status
+
+            # Calculate error response time
+            scan_duration_ms = int((time.time() - scan_start_time) * 1000)
+
+            # Log to audit log
+            from ..audit import AuditAction
+            audit_logger.log(
+                action=AuditAction.VIRUS_SCAN_AUTO,
+                user_id=current_user.get("user_id"),
+                username=username,
+                ip_address=client_ip,  # 🆕 IP 주소 추가
+                resource=safe_filename,
+                details={
+                    "filename": safe_filename,
+                    "scan_result": "error",
+                    "file_hash": file_hash_hex,
+                    "scan_type": "auto_on_upload",
+                    "duration_ms": scan_duration_ms,  # 🆕 응답 시간 추가 (duration_ms로 통일)
+                    "error": str(e),
+                    "action": "upload_continued"
+                },
+                success=False,
+                error_message=str(e)
+            )
+
+            # Store scan failure status
+            scan_status = {
+                "scanned": False,
+                "clean": None,
+                "error": str(e),
+                "scanned_at": datetime.now().isoformat()
+            }
+            cache_manager.redis.set(
+                f"doc:virus_scan:{safe_filename}",
+                json.dumps(scan_status),
+                ex=90 * 24 * 3600  # 90 days retention
+            )
 
         # v2.3.0: Check for duplicate content
         # If updating existing file with same content, skip version creation
@@ -1434,6 +1710,216 @@ async def upload_document(
 
 
 
+# POST /api/documents/{filename}/scan-virus - Manual virus scan
+@router.post("/documents/{filename}/scan-virus", tags=["Documents"])
+async def scan_document_virus(
+    filename: str,
+    request: Request,
+    current_user: dict = Depends(get_current_active_user)
+):
+    """
+    Manually trigger virus scan for a document (Admin only)
+    """
+    try:
+        import time
+
+        # Get client IP address (supports proxies)
+        client_ip = request.client.host if request.client else "unknown"
+        if "x-forwarded-for" in request.headers:
+            client_ip = request.headers["x-forwarded-for"].split(",")[0].strip()
+        elif "x-real-ip" in request.headers:
+            client_ip = request.headers["x-real-ip"]
+
+        # Start time for response time measurement
+        scan_start_time = time.time()
+
+        # Admin only
+        require_admin(current_user)
+        # Security: Validate and sanitize filename
+        safe_filename = validate_filename(filename)
+
+        data_path = Path(DATA_DIR)
+        file_path = data_path / safe_filename
+        file_path = validate_file_path(file_path, data_path)
+
+        # Check if file exists
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail=f"File '{safe_filename}' not found")
+
+        # Perform virus scan
+        from ..utils.file_security import scan_with_antivirus
+        import os
+
+        clamd_host = os.getenv("CLAMAV_HOST", "localhost")
+        clamd_port = int(os.getenv("CLAMAV_PORT", "3310"))
+
+        logger.info(f"🔍 Manual virus scan requested for: {safe_filename}")
+
+        try:
+            virus_detected = await scan_with_antivirus(
+                file_path=str(file_path),
+                clamd_host=clamd_host,
+                clamd_port=clamd_port
+            )
+
+            # Calculate response time
+            scan_duration_ms = int((time.time() - scan_start_time) * 1000)
+
+            if virus_detected:
+                # Virus found - store result
+                scan_status = {
+                    "scanned": True,
+                    "clean": False,
+                    "virus_name": virus_detected,
+                    "scanned_at": datetime.now().isoformat(),
+                    "scanner": "ClamAV"
+                }
+                cache_manager.redis.set(
+                    f"doc:virus_scan:{safe_filename}",
+                    json.dumps(scan_status),
+                    ex=90 * 24 * 3600
+                )
+
+                logger.error(f"🚨 Virus detected in '{safe_filename}': {virus_detected}")
+
+                # Log to audit log
+                from ..audit import AuditAction
+                audit_logger.log(
+                    action=AuditAction.VIRUS_SCAN,
+                    user_id=current_user.get("user_id"),
+                    username=current_user.get("username"),
+                    ip_address=client_ip,  # 🆕 IP 주소 추가
+                    resource=safe_filename,
+                    details={
+                        "filename": safe_filename,
+                        "scan_result": "virus_detected",
+                        "virus_name": virus_detected,
+                        "scan_type": "manual",
+                        "scanner": "ClamAV",
+                        "action": "detected_not_deleted",
+                        "duration_ms": scan_duration_ms  # 🆕 응답 시간 추가
+                    },
+                    success=True
+                )
+
+                # Also log to security log (critical event)
+                from ..auth.security_logger import SecurityLogger
+                SecurityLogger.log_event(
+                    event_type="문서 바이러스 검사 - 위협 발견 (수동)",
+                    level="critical",
+                    user_id=current_user.get("user_id"),
+                    username=current_user.get("username"),
+                    details={
+                        "filename": safe_filename,
+                        "virus_name": virus_detected,
+                        "scan_type": "관리자 수동 검사",
+                        "action": "감지됨 (파일 유지)"
+                    }
+                )
+
+                return {
+                    "success": True,
+                    "scanned": True,
+                    "clean": False,
+                    "virus_name": virus_detected,
+                    "message": f"바이러스가 발견되었습니다: {virus_detected}",
+                    "recommendation": "이 파일을 즉시 삭제하는 것을 권장합니다."
+                }
+
+            # File is clean
+            scan_status = {
+                "scanned": True,
+                "clean": True,
+                "scanned_at": datetime.now().isoformat(),
+                "scanner": "ClamAV"
+            }
+            cache_manager.redis.set(
+                f"doc:virus_scan:{safe_filename}",
+                json.dumps(scan_status),
+                ex=90 * 24 * 3600
+            )
+
+            logger.info(f"✅ Manual virus scan completed - file is clean: {safe_filename}")
+
+            # Log to audit log
+            from ..audit import AuditAction
+            audit_logger.log(
+                action=AuditAction.VIRUS_SCAN,
+                user_id=current_user.get("user_id"),
+                username=current_user.get("username"),
+                ip_address=client_ip,  # 🆕 IP 주소 추가
+                resource=safe_filename,
+                details={
+                    "filename": safe_filename,
+                    "scan_result": "clean",
+                    "scan_type": "manual",
+                    "scanner": "ClamAV",
+                    "duration_ms": scan_duration_ms  # 🆕 응답 시간 추가
+                },
+                success=True
+            )
+
+            return {
+                "success": True,
+                "scanned": True,
+                "clean": True,
+                "message": "바이러스 검사 완료 - 파일이 안전합니다."
+            }
+
+        except Exception as e:
+            logger.warning(f"⚠️ Virus scan failed for {safe_filename}: {e}")
+
+            # Calculate error response time
+            scan_duration_ms = int((time.time() - scan_start_time) * 1000)
+
+            # Log to audit log
+            from ..audit import AuditAction
+            audit_logger.log(
+                action=AuditAction.VIRUS_SCAN,
+                user_id=current_user.get("user_id"),
+                username=current_user.get("username"),
+                ip_address=client_ip,  # 🆕 IP 주소 추가
+                resource=safe_filename,
+                details={
+                    "filename": safe_filename,
+                    "scan_result": "error",
+                    "scan_type": "manual",
+                    "error": str(e),
+                    "duration_ms": scan_duration_ms  # 🆕 응답 시간 추가
+                },
+                success=False,
+                error_message=str(e)
+            )
+
+            # Store scan failure status
+            scan_status = {
+                "scanned": False,
+                "clean": None,
+                "error": str(e),
+                "scanned_at": datetime.now().isoformat()
+            }
+            cache_manager.redis.set(
+                f"doc:virus_scan:{safe_filename}",
+                json.dumps(scan_status),
+                ex=90 * 24 * 3600
+            )
+
+            return {
+                "success": False,
+                "scanned": False,
+                "clean": None,
+                "error": str(e),
+                "message": "바이러스 검사에 실패했습니다. ClamAV 상태를 확인해주세요."
+            }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to scan document: {e}")
+        safe_message = get_safe_error_message(e, "virus scan endpoint")
+        raise HTTPException(status_code=500, detail=safe_message)
+
+
 # DELETE /api/documents/{filename}
 @router.delete("/documents/{filename}", tags=["Documents"])
 async def delete_document(
@@ -1449,6 +1935,7 @@ async def delete_document(
 
         data_path = Path(DATA_DIR)
         file_path = data_path / safe_filename
+        file_path = validate_file_path(file_path, data_path)
 
         # Check if file exists
         if not file_path.exists():
@@ -1560,6 +2047,7 @@ async def download_document_as_pdf(
 
         data_path = Path(DATA_DIR)
         file_path = data_path / safe_filename
+        file_path = validate_file_path(file_path, data_path)
 
         # Check if file exists
         if not file_path.exists():
@@ -1900,6 +2388,7 @@ async def restore_document_version(
         # Target path in data directory
         data_path = Path(DATA_DIR)
         target_path = data_path / safe_filename
+        target_path = validate_file_path(target_path, data_path)
 
         # Restore the file
         success = document_version.restore_version(safe_filename, version, target_path)
@@ -2266,3 +2755,127 @@ async def batch_assign_documents(
         logger.error(f"Failed to batch assign documents: {e}")
         safe_message = get_safe_error_message(e, "batch assign documents endpoint")
         raise HTTPException(status_code=500, detail=safe_message)
+
+
+@router.post("/documents/check-pii", tags=["Documents"])
+async def check_pii_in_document(
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """
+    문서 업로드 전 개인정보 검사
+    Check for Personal Identifiable Information (PII) in document before upload
+    
+    Returns:
+        has_pii: 개인정보 포함 여부
+        pii_summary: 검출된 개인정보 타입별 개수
+        confidence: 평균 신뢰도
+    """
+    try:
+        # 관리자만 파일 업로드 가능
+        if current_user.get("role") != "admin":
+            raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다")
+        
+        # Security: Validate filename
+        safe_filename = validate_filename(file.filename)
+        
+        # Check file type
+        if not any(safe_filename.endswith(ext) for ext in ALLOWED_EXTENSIONS):
+            raise HTTPException(
+                status_code=400,
+                detail="지원되지 않는 파일 형식입니다"
+            )
+        
+        # Read file content into memory (for PII check only, not saved yet)
+        content = await file.read()
+        file_size = len(content)
+        
+        # Check file size limit
+        if file_size > MAX_FILE_SIZE:
+            raise HTTPException(
+                status_code=400,
+                detail=f"파일 크기는 {MAX_FILE_SIZE_MB}MB를 초과할 수 없습니다"
+            )
+        
+        # Extract text from document
+        import tempfile
+        from ..document_service import DocumentService
+
+        try:
+            # Save to temporary file for text extraction
+            with tempfile.NamedTemporaryFile(delete=False, suffix=Path(safe_filename).suffix) as tmp_file:
+                tmp_file.write(content)
+                tmp_path = tmp_file.name
+
+            try:
+                # Extract text using document service
+                doc_service = DocumentService()
+                result = doc_service.extract_text_from_file(tmp_path)
+
+                if not result or 'text' not in result:
+                    return {
+                        "has_pii": False,
+                        "pii_summary": {},
+                        "confidence": 0.0,
+                        "message": "텍스트 추출 실패 또는 빈 문서"
+                    }
+
+                text = result['text']
+
+                if not text or not text.strip():
+                    return {
+                        "has_pii": False,
+                        "pii_summary": {},
+                        "confidence": 0.0,
+                        "message": "빈 문서"
+                    }
+            finally:
+                # Clean up temporary file
+                import os
+                try:
+                    os.unlink(tmp_path)
+                except:
+                    pass
+
+        except Exception as e:
+            logger.warning(f"Failed to extract text for PII check: {e}")
+            return {
+                "has_pii": False,
+                "pii_summary": {},
+                "confidence": 0.0,
+                "message": "텍스트 추출 실패",
+                "error": str(e)
+            }
+        
+        # Detect PII
+        from ..utils.pii_detector import detect_pii, summarize_pii
+        
+        matches = detect_pii(text)
+        
+        if not matches:
+            return {
+                "has_pii": False,
+                "pii_summary": {},
+                "confidence": 0.0,
+                "message": "개인정보가 검출되지 않았습니다"
+            }
+        
+        # Calculate average confidence
+        avg_confidence = sum(m.confidence for m in matches) / len(matches)
+        
+        # Get summary
+        summary = summarize_pii(text)
+        
+        return {
+            "has_pii": True,
+            "pii_summary": summary,
+            "confidence": round(avg_confidence, 2),
+            "total_matches": len(matches),
+            "message": "개인정보가 검출되었습니다"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"PII check failed: {e}")
+        raise HTTPException(status_code=500, detail=f"개인정보 검사 실패: {str(e)}")

@@ -893,7 +893,21 @@ async def reset_user_password(
         redis.hset(f"user:{user_id_str}", "password_hash", hashed_password)
 
         # 모든 세션 무효화 (보안: 비밀번호 변경 시 모든 기존 세션 종료)
-        session_ids = redis.smembers(f"user:sessions:{user_id_str}")
+        # Get all session IDs using SSCAN to avoid blocking
+        session_ids = []
+        cursor = 0
+
+        while True:
+            cursor, ids = redis.sscan(
+                f"user:sessions:{user_id_str}",
+                cursor=cursor,
+                count=100
+            )
+            session_ids.extend(ids)
+
+            if cursor == 0:
+                break
+
         invalidated_sessions = len(session_ids) if session_ids else 0
 
         # Pipeline으로 모든 세션을 배치 삭제 (N+1 방지)
@@ -1504,7 +1518,21 @@ async def revoke_user_sessions(
         target_email = decoded_user.get("email", "unknown")
 
         # 사용자의 모든 세션 가져오기
-        session_ids = redis.smembers(f"user:sessions:{user_id}")
+        # Get all session IDs using SSCAN to avoid blocking
+        session_ids = []
+        cursor = 0
+
+        while True:
+            cursor, ids = redis.sscan(
+                f"user:sessions:{user_id}",
+                cursor=cursor,
+                count=100
+            )
+            session_ids.extend(ids)
+
+            if cursor == 0:
+                break
+
         revoked_count = len(session_ids) if session_ids else 0
 
         # Pipeline으로 모든 세션을 배치 삭제 (N+1 방지)

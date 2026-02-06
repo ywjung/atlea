@@ -174,8 +174,8 @@ if [ "$BACKGROUND" = true ]; then
     echo "💡 로그 확인: tail -f $LOG_FILE"
     echo ""
 
-    # Run in background with nohup
-    nohup python -m uvicorn src.web_server:app --host $HOST --port $PORT --reload > "$LOG_FILE" 2>&1 &
+    # Run in background with nohup (use venv python explicitly)
+    nohup ./venv/bin/python3 -m uvicorn src.web_server:app --host $HOST --port $PORT --reload > "$LOG_FILE" 2>&1 &
 
     # Save PID
     echo $! > "$PID_FILE"
@@ -192,6 +192,6 @@ else
     echo "💡 Ctrl+C를 눌러 서버를 종료할 수 있습니다"
     echo ""
 
-    # Run in foreground
-    python -m uvicorn src.web_server:app --host $HOST --port $PORT --reload
+    # Run in foreground (use venv python explicitly)
+    ./venv/bin/python3 -m uvicorn src.web_server:app --host $HOST --port $PORT --reload
 fi

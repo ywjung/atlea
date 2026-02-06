@@ -19,7 +19,7 @@ from .utils import (
     create_access_token, create_refresh_token, verify_token
 )
 from .brute_force_protection import BruteForceProtection
-from .security_logger import SecurityLogger
+from .security_logger import SecurityLogger, SecurityEventType
 from .password_reset import PasswordResetService
 from src.redis_helpers import decode_bytes, decode_redis_hash
 from src.utils.pagination import calculate_total_pages
@@ -98,7 +98,7 @@ class AuthService:
 
         # 보안 로그 기록
         SecurityLogger.log_event(
-            event_type="user_created",
+            event_type=SecurityEventType.USER_CREATED,
             level="info",
             user_id=user_id,
             email=user_data.email,
@@ -452,7 +452,7 @@ class AuthService:
 
         # 보안 로그 기록
         SecurityLogger.log_event(
-            event_type="login_success",
+            event_type=SecurityEventType.LOGIN_SUCCESS,
             level="info",
             user_id=user_id,
             email=user.email,
@@ -495,7 +495,7 @@ class AuthService:
 
             # 보안 로그 기록
             SecurityLogger.log_event(
-                event_type="logout",
+                event_type=SecurityEventType.LOGOUT,
                 level="info",
                 user_id=user_id,
                 username=username,
@@ -596,7 +596,7 @@ class AuthService:
 
         # 보안 로그 기록
         SecurityLogger.log_event(
-            event_type="password_reset_requested",
+            event_type=SecurityEventType.PASSWORD_RESET_REQUESTED,
             level="info",
             user_id=user_id,
             email=email,
@@ -624,14 +624,43 @@ class AuthService:
         self.redis.hset(f"user:{user_id}", "password_hash", password_hash)
 
         # 모든 세션 무효화 (Pipeline으로 배치 삭제)
-        session_ids = self.redis.smembers(f"user:sessions:{user_id}")
+        # Get all session IDs using SSCAN to avoid blocking
+        session_ids = []
+        cursor = 0
+
+        while True:
+            cursor, ids = self.redis.sscan(
+                f"user:sessions:{user_id}",
+                cursor=cursor,
+                count=100
+            )
+            session_ids.extend(ids)
+
+            if cursor == 0:
+                break
+
         if session_ids:
             pipe = self.redis.pipeline()
-            for session_id in session_ids:
-                session_id_str = decode_bytes(session_id)
-                pipe.delete(f"session:{session_id_str}")
-            pipe.delete(f"user:sessions:{user_id}")
-            pipe.execute()
+            try:
+                for session_id in session_ids:
+                    session_id_str = decode_bytes(session_id)
+                    pipe.delete(f"session:{session_id_str}")
+                pipe.delete(f"user:sessions:{user_id}")
+                pipe.execute()
+            except Exception as e:
+                logger.error(f"Pipeline execution failed during session deletion: {e}")
+                # Cleanup: delete sessions individually as fallback
+                for session_id in session_ids:
+                    session_id_str = decode_bytes(session_id)
+                    try:
+                        self.redis.delete(f"session:{session_id_str}")
+                    except Exception as cleanup_err:
+                        logger.error(f"Failed to delete session {session_id_str}: {cleanup_err}")
+                # Finally delete the session set
+                try:
+                    self.redis.delete(f"user:sessions:{user_id}")
+                except Exception as set_err:
+                    logger.error(f"Failed to delete session set: {set_err}")
         else:
             self.redis.delete(f"user:sessions:{user_id}")
 
@@ -643,7 +672,7 @@ class AuthService:
         email = decode_bytes(email)
 
         SecurityLogger.log_event(
-            event_type="password_reset_completed",
+            event_type=SecurityEventType.PASSWORD_RESET_COMPLETED,
             level="info",
             user_id=user_id,
             email=email,
@@ -722,14 +751,43 @@ class AuthService:
         self.redis.hset(f"user:{user_id}", "password_hash", new_password_hash)
 
         # 모든 세션 무효화 (Pipeline으로 배치 삭제)
-        session_ids = self.redis.smembers(f"user:sessions:{user_id}")
+        # Get all session IDs using SSCAN to avoid blocking
+        session_ids = []
+        cursor = 0
+
+        while True:
+            cursor, ids = self.redis.sscan(
+                f"user:sessions:{user_id}",
+                cursor=cursor,
+                count=100
+            )
+            session_ids.extend(ids)
+
+            if cursor == 0:
+                break
+
         if session_ids:
             pipe = self.redis.pipeline()
-            for session_id in session_ids:
-                session_id_str = decode_bytes(session_id)
-                pipe.delete(f"session:{session_id_str}")
-            pipe.delete(f"user:sessions:{user_id}")
-            pipe.execute()
+            try:
+                for session_id in session_ids:
+                    session_id_str = decode_bytes(session_id)
+                    pipe.delete(f"session:{session_id_str}")
+                pipe.delete(f"user:sessions:{user_id}")
+                pipe.execute()
+            except Exception as e:
+                logger.error(f"Pipeline execution failed during session deletion: {e}")
+                # Cleanup: delete sessions individually as fallback
+                for session_id in session_ids:
+                    session_id_str = decode_bytes(session_id)
+                    try:
+                        self.redis.delete(f"session:{session_id_str}")
+                    except Exception as cleanup_err:
+                        logger.error(f"Failed to delete session {session_id_str}: {cleanup_err}")
+                # Finally delete the session set
+                try:
+                    self.redis.delete(f"user:sessions:{user_id}")
+                except Exception as set_err:
+                    logger.error(f"Failed to delete session set: {set_err}")
         else:
             self.redis.delete(f"user:sessions:{user_id}")
 
@@ -740,7 +798,7 @@ class AuthService:
         email = decode_bytes(email)
 
         SecurityLogger.log_event(
-            event_type="password_changed",
+            event_type=SecurityEventType.PASSWORD_CHANGED,
             level="info",
             user_id=user_id,
             email=email,
@@ -1111,7 +1169,7 @@ class AuthService:
 
         # 보안 로그 기록
         SecurityLogger.log_event(
-            event_type="user_status_changed",
+            event_type=SecurityEventType.USER_STATUS_CHANGED,
             level="info",
             user_id=admin_user_id,
             details={
@@ -1171,7 +1229,7 @@ class AuthService:
 
         # 보안 로그 기록
         SecurityLogger.log_event(
-            event_type="user_role_changed",
+            event_type=SecurityEventType.USER_ROLE_CHANGED,
             level="info",
             user_id=admin_user_id,
             details={
@@ -1218,7 +1276,7 @@ class AuthService:
 
         # 보안 로그 기록
         SecurityLogger.log_event(
-            event_type="user_deleted",
+            event_type=SecurityEventType.USER_DELETED,
             level="warning",
             user_id=admin_user_id,
             details={
@@ -1227,6 +1285,40 @@ class AuthService:
                 "action": "delete_user"
             }
         )
+
+    def _match_event_type(self, log_event_type: str, filter_event_type: str) -> bool:
+        """이벤트 타입 매칭 (이전 형식 호환)
+
+        Args:
+            log_event_type: 로그에 저장된 이벤트 타입
+            filter_event_type: 필터링할 이벤트 타입
+
+        Returns:
+            매칭 여부
+        """
+        # 정확히 일치하면 True
+        if log_event_type == filter_event_type:
+            return True
+
+        # 이전 형식(소문자) 호환을 위한 매핑
+        legacy_to_new = {
+            "login_success": "AUTH_LOGIN_SUCCESS",
+            "login_failed": "AUTH_LOGIN_FAILED",
+            "logout": "AUTH_LOGOUT",
+            "user_created": "ACCOUNT_CREATED",
+            "user_deleted": "ACCOUNT_DELETED",
+            "user_status_changed": "ACCOUNT_STATUS_CHANGED",
+            "user_role_changed": "ACCOUNT_ROLE_CHANGED",
+            "password_reset_requested": "PASSWORD_RESET_REQUESTED",
+            "password_reset_completed": "PASSWORD_RESET_COMPLETED",
+            "password_changed": "PASSWORD_CHANGED",
+        }
+
+        # 이전 형식 로그가 새 형식 필터와 매칭되는지 확인
+        if log_event_type in legacy_to_new:
+            return legacy_to_new[log_event_type] == filter_event_type
+
+        return False
 
     async def get_security_logs(
         self,
@@ -1292,9 +1384,19 @@ class AuthService:
                     log_str = decode_bytes(log_data)
                     log_dict = json.loads(log_str)
 
-                    # 이벤트 타입 필터
-                    if event_type and log_dict.get('event_type') != event_type:
-                        continue
+                    # 이벤트 타입 필터 (대소문자 구분 없이 비교)
+                    if event_type:
+                        log_event_type = log_dict.get('event_type', '')
+                        # 디버깅을 위한 로그
+                        if parsed_logs == []:  # 첫 번째 로그만 출력
+                            logger.debug(f"Filter event_type: {event_type}, Log event_type: {log_event_type}")
+
+                        # 정확히 일치하는지 확인 (대소문자 구분)
+                        if log_event_type != event_type:
+                            # 이전 형식(소문자)과의 호환성을 위한 추가 체크
+                            # 예: "login_success" == "AUTH_LOGIN_SUCCESS"의 변환 비교
+                            if not self._match_event_type(log_event_type, event_type):
+                                continue
 
                     parsed_logs.append(log_dict)
                 except json.JSONDecodeError as e:

@@ -175,7 +175,21 @@ class TokenBlacklist:
         """
         try:
             user_tokens_key = self._get_user_tokens_key(user_id)
-            tokens = self.redis.smembers(user_tokens_key)
+
+            # Get all tokens using SSCAN to avoid blocking
+            tokens = []
+            cursor = 0
+
+            while True:
+                cursor, toks = self.redis.sscan(
+                    user_tokens_key,
+                    cursor=cursor,
+                    count=100
+                )
+                tokens.extend(toks)
+
+                if cursor == 0:
+                    break
 
             count = 0
             for token in tokens:

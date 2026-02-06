@@ -59,6 +59,7 @@ Pillow>=10.4.0  # CAPTCHA image generation - Updated for security
 pyotp>=2.9.0  # TOTP (Google Authenticator) support
 qrcode>=7.4.0  # QR code generation for 2FA setup
 ecdsa>=0.19.0  # Explicit version for python-jose dependency - CVE-2024-23342 mitigation
+clamd>=1.0.2  # ClamAV antivirus integration for file scanning
 
 # Audio Processing (for TTS mixed-language support)
 pydub>=0.25.0

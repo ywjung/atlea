@@ -58,7 +58,9 @@ def register_exception_handlers(app: FastAPI):
         error_messages = []
 
         for error in errors:
-            field = error.get('loc', [])[-1] if error.get('loc') else 'unknown'
+            # Safely extract field name from location tuple
+            loc = error.get('loc', [])
+            field = loc[-1] if loc else 'unknown'
             msg = error.get('msg', '')
 
             # Extract custom error message from ValueError context
