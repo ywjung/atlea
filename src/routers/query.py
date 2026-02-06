@@ -1089,6 +1089,13 @@ async def query_stream(
             # 한국어: ~2자당 1토큰, 영어/기타: ~4자당 1토큰
             return max(1, int(korean / 2 + non_space / 4))
 
+        def _strip_reference_section(text: str) -> str:
+            """LLM 응답에서 '📚 참고 문서' 섹션을 제거 (UI에서 별도 카드로 표시하므로 중복 방지)"""
+            # 패턴: "📚 참고 문서:" 또는 "📚 참고:" 로 시작하는 섹션을 끝까지 제거
+            pattern = r'\n*(?:#{1,3}\s*)?📚\s*참고(?:\s*문서)?\s*[:：].*'
+            stripped = re.sub(pattern, '', text, flags=re.DOTALL).rstrip()
+            return stripped
+
         async def generate_stream():
             nonlocal query_start_time
 
@@ -1106,7 +1113,7 @@ async def query_stream(
 
             if not is_generator:
                 # Hybrid RAG: answer is a complete string, split into chunks for streaming
-                answer_text = result["answer"]
+                answer_text = _strip_reference_section(result["answer"])
                 chunk_size = 8  # Characters per chunk
                 generation_start_time = time.time()
 
@@ -1143,6 +1150,13 @@ async def query_stream(
                 yield f"data: {json.dumps({'type': 'chunk', 'data': fallback_message})}\n\n"
                 complete_response = fallback_message
 
+            # 📚 참고 문서 섹션 제거 (UI에서 별도 카드로 표시)
+            stripped_response = _strip_reference_section(complete_response)
+            response_was_stripped = stripped_response != complete_response
+            if response_was_stripped:
+                logger.info("📚 LLM 응답에서 '참고 문서' 섹션 제거됨")
+                complete_response = stripped_response
+
             # 🔍 응답 품질 검증 및 자동 수정 (스트리밍)
             context_filenames = [doc.get("filename", "") for doc in result["context"]]
             is_valid, violations = response_validator.validate_response(
@@ -1151,6 +1165,7 @@ async def query_stream(
             )
 
             # 검증 실패 시 자동 수정 (캐시 저장 전에 수정)
+            fixes = []
             if not is_valid:
                 logger.warning(f"⚠️ 스트리밍 응답 검증 실패 - 자동 수정 시도: {violations}")
                 fixed_response, fixes = response_validator.auto_fix_response(
@@ -1169,7 +1184,9 @@ async def query_stream(
             if garbled_fixes:
                 logger.success(f"✅ 스트리밍 깨진 인용 수정: {garbled_fixes}")
                 complete_response = garbled_fixed
-                # 수정된 전체 응답을 프론트엔드에 전송하여 깨진 텍스트 교체
+
+            # 수정된 전체 응답을 프론트엔드에 전송하여 교체 (참고문서 제거, 검증 수정, 깨진 인용 수정)
+            if response_was_stripped or garbled_fixes or (not is_valid and fixes):
                 yield f"data: {json.dumps({'type': 'replace', 'data': complete_response})}\n\n"
 
             # 📊 신뢰도 점수 계산 (스트리밍)
