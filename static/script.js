@@ -24,11 +24,20 @@ function sanitizeHTML(dirty, config = {}) {
             'dl', 'dt', 'em', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr', 'i',
             'img', 'ins', 'kbd', 'li', 'mark', 'ol', 'p', 'pre', 's', 'span',
             'strong', 'sub', 'sup', 'table', 'tbody', 'td', 'tfoot', 'th',
-            'thead', 'tr', 'u', 'ul'
+            'thead', 'tr', 'u', 'ul',
+            // SVG tags for icons
+            'svg', 'path', 'circle', 'rect', 'line', 'polyline', 'polygon',
+            'ellipse', 'g', 'text', 'tspan', 'defs', 'clipPath', 'mask', 'use', 'animate'
         ],
         ALLOWED_ATTR: [
             'class', 'id', 'href', 'title', 'alt', 'src', 'width', 'height',
-            'data-*', 'aria-*', 'role', 'target', 'rel'
+            'data-*', 'aria-*', 'role', 'target', 'rel',
+            // SVG attributes for icons
+            'viewBox', 'fill', 'stroke', 'stroke-width', 'stroke-linecap',
+            'stroke-linejoin', 'stroke-dasharray', 'stroke-dashoffset', 'd',
+            'x', 'y', 'x1', 'y1', 'x2', 'y2', 'cx', 'cy', 'r', 'rx', 'ry',
+            'points', 'transform', 'font-size', 'font-weight', 'text-anchor',
+            'attributeName', 'dur', 'repeatCount', 'values'
         ],
         ALLOW_DATA_ATTR: true,
         ALLOW_ARIA_ATTR: true,
@@ -457,6 +466,9 @@ function showNotification(message, type = 'info') {
         setTimeout(() => notification.remove(), 300);
     }, 3000);
 }
+
+// Alias for compatibility
+const showToast = showNotification;
 
 // DOM elements
 const chatContainer = document.getElementById('chatContainer');
@@ -1926,7 +1938,7 @@ async function sendMessage(regenerate = false) {
 
                             // Server already filters <think> tags, so just render
                             try {
-                                contentDiv.innerHTML = sanitizeHTML(marked.parse(fullText);
+                                contentDiv.innerHTML = sanitizeHTML(marked.parse(fullText));
 
                                 // Highlight code blocks first
                                 contentDiv.querySelectorAll('pre code').forEach((block) => {
@@ -1978,7 +1990,7 @@ async function sendMessage(regenerate = false) {
                             devLog('🔧 [REPLACE] Received corrected response (garbled citation fix)');
                             fullText = data.data;
                             try {
-                                contentDiv.innerHTML = sanitizeHTML(marked.parse(fullText);
+                                contentDiv.innerHTML = sanitizeHTML(marked.parse(fullText));
                                 contentDiv.querySelectorAll('pre code').forEach((block) => {
                                     if (!block.dataset.highlighted) {
                                         normalizeLanguageClass(block);
@@ -2003,7 +2015,7 @@ async function sendMessage(regenerate = false) {
                             if (!fullText || fullText.trim().length === 0) {
                                 logger.warn('⚠️ Empty response received from server');
                                 fullText = '죄송합니다. 응답을 생성하지 못했습니다. 다시 시도해 주세요.\n\n**가능한 원인:**\n- 모델이 응답을 생성하지 못함\n- 요청 시간 초과\n- 서버 부하로 인한 응답 실패';
-                                contentDiv.innerHTML = sanitizeHTML(marked.parse(fullText);
+                                contentDiv.innerHTML = sanitizeHTML(marked.parse(fullText));
                             }
 
                             // Show completion (StreamingVisualizer)
@@ -2212,7 +2224,7 @@ function addMessage(text, type, sources = null) {
 
     if (type === 'bot') {
         // Render markdown
-        contentDiv.innerHTML = sanitizeHTML(marked.parse(text);
+        contentDiv.innerHTML = sanitizeHTML(marked.parse(text));
 
         // Highlight code blocks
         contentDiv.querySelectorAll('pre code').forEach((block) => {
@@ -3216,7 +3228,14 @@ async function playTTS(text, button) {
         return;
     }
 
-    // Stop any currently playing audio
+    // Check if this button is already playing (toggle off)
+    if (button && button.classList.contains('tts-playing')) {
+        // Stop all TTS (both regular and streaming)
+        stopTTS();
+        return;
+    }
+
+    // Stop any other currently playing audio
     if (ttsAudio) {
         ttsAudio.pause();
         ttsAudio.currentTime = 0;
@@ -3227,15 +3246,6 @@ async function playTTS(text, button) {
             resetTTSButton(btn);
         });
         hideTTSIndicator();
-    }
-
-    // Check if already playing (toggle off)
-    if (button && button.classList.contains('tts-playing')) {
-        button.classList.remove('tts-playing');
-        resetTTSButton(button);
-        currentTTSButton = null;
-        hideTTSIndicator();
-        return;
     }
 
     // Store current button reference
@@ -3356,9 +3366,8 @@ async function playTTS(text, button) {
         // Update button to playing state (safely)
         safeUpdateTTSButton(button, (btn) => {
             btn.innerHTML = `
-                <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor">
-                    <rect x="4" y="3" width="3" height="10" rx="1" fill="currentColor"/>
-                    <rect x="9" y="3" width="3" height="10" rx="1" fill="currentColor"/>
+                <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor">
+                    <rect x="3" y="3" width="10" height="10" rx="2" fill="currentColor"/>
                 </svg>
             `;
             btn.setAttribute('title', '재생 중지');
@@ -3444,6 +3453,7 @@ function resetTTSButton(button) {
 
 // Global TTS stop function - can be called from anywhere
 function stopTTS() {
+    // Stop regular TTS
     if (ttsAudio) {
         ttsAudio.pause();
         ttsAudio.currentTime = 0;
@@ -3454,6 +3464,12 @@ function stopTTS() {
         resetTTSButton(btn);
     });
     currentTTSButton = null;
+
+    // Stop streaming TTS
+    if (streamingTTS && streamingTTS.isActive) {
+        streamingTTS.stop();
+    }
+
     hideTTSIndicator();
     devLog('TTS stopped globally');
 }
@@ -3466,14 +3482,13 @@ function showTTSIndicator() {
         indicator.id = 'tts-floating-indicator';
         indicator.innerHTML = `
             <div class="tts-indicator-content">
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" class="tts-indicator-icon">
-                    <path d="M8 3L4 6H2v4h2l4 3V3z" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                    <path d="M11 5c1.2 1.2 1.2 4.6 0 6" stroke-width="1.5" stroke-linecap="round"/>
+                <svg class="tts-indicator-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/>
                 </svg>
                 <span>재생 중</span>
                 <button class="tts-indicator-stop" onclick="stopTTS()" title="중지">
-                    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-                        <rect x="3" y="3" width="10" height="10" rx="1"/>
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+                        <rect x="3" y="3" width="10" height="10" rx="2" fill="currentColor"/>
                     </svg>
                 </button>
             </div>
@@ -4243,6 +4258,8 @@ const streamingTTS = {
     audioQueue: [],
     currentAudio: null,
     currentAudioUrl: null,      // Track URL for proper cleanup
+    currentButton: null,        // Track the TTS button being updated
+    originalOnClick: null,      // Store original onclick handler to restore later
     processedText: '',
     pendingText: '',
     isProcessing: false,
@@ -4255,7 +4272,7 @@ const streamingTTS = {
     // Limits
     MAX_QUEUE_SIZE: 30,         // Max queued audio blobs to prevent memory bloat
     MAX_CONSECUTIVE_ERRORS: 3,  // Stop after this many consecutive failures
-    FETCH_TIMEOUT_MS: 60000,    // Per-sentence fetch timeout (60s)
+    FETCH_TIMEOUT_MS: 185000,   // Per-sentence fetch timeout (185s for local TTS models)
 
     // Sentence-ending patterns for Korean and English
     sentenceEndPattern: /[.!?。！？]\s*$|[.!?。！？](?=\s)|다\.\s*$|요\.\s*$|니다\.\s*$|세요\.\s*$/,
@@ -4269,6 +4286,7 @@ const streamingTTS = {
 
         this.isActive = true;
         this.audioQueue = [];
+        this.currentButton = null;  // Reset button reference
         this.processedText = '';
         this.pendingText = '';
         this.isProcessing = false;
@@ -4278,7 +4296,6 @@ const streamingTTS = {
         this.abortController = new AbortController();
         this.sessionId = currentSessionId;
 
-        devLog('🔊 Streaming TTS started');
         showNotification('실시간 음성 읽기가 시작됩니다', 'info');
     },
 
@@ -4292,8 +4309,34 @@ const streamingTTS = {
             return;
         }
 
+        // Try to find and store the TTS button (may not exist yet on first chunk)
+        if (!this.currentButton) {
+            this._tryFindButton();
+        }
+
         this.pendingText += text;
         this.processPendingText();
+    },
+
+    // Helper to find and store TTS button
+    _tryFindButton() {
+        const chatContainer = document.getElementById('chatContainer');
+
+        if (chatContainer) {
+            const botMessages = chatContainer.querySelectorAll('.message.bot');
+
+            if (botMessages.length > 0) {
+                const latestBotMessage = botMessages[botMessages.length - 1];
+
+                const ttsBtn = latestBotMessage.querySelector('.tts-btn');
+
+                if (ttsBtn) {
+                    this.currentButton = ttsBtn;
+                    return true;
+                }
+            }
+        }
+        return false;
     },
 
     // Process pending text and extract complete sentences
@@ -4354,13 +4397,11 @@ const streamingTTS = {
 
         // Guard: queue size limit to prevent memory bloat
         if (this.audioQueue.length >= this.MAX_QUEUE_SIZE) {
-            devLog('🔊 Streaming TTS queue full, skipping sentence');
             return;
         }
 
         // Guard: stop after too many consecutive errors
         if (this.consecutiveErrors >= this.MAX_CONSECUTIVE_ERRORS) {
-            devLog('🔊 Streaming TTS stopped: too many consecutive errors');
             if (this.consecutiveErrors === this.MAX_CONSECUTIVE_ERRORS) {
                 showNotification('실시간 음성 생성이 반복적으로 실패하여 중단되었습니다.', 'warning');
                 this.consecutiveErrors++; // Prevent repeated notifications
@@ -4375,8 +4416,6 @@ const streamingTTS = {
             const cleanText = stripMarkdownForTTS(sentence);
             if (!cleanText || cleanText.length < 2) return;
 
-            devLog('🔊 Queueing TTS sentence:', cleanText.substring(0, 50) + '...');
-
             // Fetch audio
             this.pendingFetches++;
             const audioBlob = await this.fetchTTSAudio(cleanText);
@@ -4389,7 +4428,6 @@ const streamingTTS = {
             }
         } catch (error) {
             this.pendingFetches = Math.max(0, this.pendingFetches - 1);
-            devLog('Streaming TTS error:', error);
         }
     },
 
@@ -4432,13 +4470,26 @@ const streamingTTS = {
             // Guard: check if still active after async operation
             if (!this.isActive) return null;
 
-            return await response.blob();
+            // Parse JSON response to get audio URL
+            const result = await response.json();
+            if (!result.audio_url) {
+                throw new Error('No audio URL in response');
+            }
+
+            // Fetch the actual audio file
+            const token = localStorage.getItem('access_token');
+            const audioResponse = await fetch(result.audio_url + '?token=' + encodeURIComponent(token), {
+                signal: fetchController.signal
+            });
+
+            if (!audioResponse.ok) {
+                throw new Error(`Failed to fetch audio: ${audioResponse.status}`);
+            }
+
+            return await audioResponse.blob();
         } catch (error) {
-            if (error.name === 'AbortError') {
-                devLog('Streaming TTS request aborted');
-            } else {
+            if (error.name !== 'AbortError') {
                 this.consecutiveErrors++;
-                devLog('Streaming TTS fetch error:', error);
             }
             return null;
         }
@@ -4457,22 +4508,69 @@ const streamingTTS = {
 
         this.currentAudio = new Audio(audioUrl);
 
+        // Show floating indicator for background playback
+        showTTSIndicator();
+
+        // Update TTS button to playing state (try to find if not cached)
+        if (!this.currentButton) {
+            // Try to find button with delay to ensure DOM is ready
+            setTimeout(() => {
+                if (this._tryFindButton()) {
+                    this._updateButtonToStop();
+                }
+            }, 100);
+        } else {
+            this._updateButtonToStop();
+        }
+
+        // Set up audio event handlers
         this.currentAudio.onended = () => {
             this._cleanupCurrentAudio();
+            // Check if there are more audio clips to play
+            if (this.audioQueue.length === 0 && this.pendingFetches === 0 && !this.isActive) {
+                // All done, hide indicator
+                hideTTSIndicator();
+            }
             this.playNext();
         };
 
         this.currentAudio.onerror = (e) => {
-            devLog('Streaming TTS playback error:', e);
             this._cleanupCurrentAudio();
+            // Check if there are more audio clips to play
+            if (this.audioQueue.length === 0 && this.pendingFetches === 0) {
+                hideTTSIndicator();
+            }
             this.playNext();
         };
 
         this.currentAudio.play().catch(error => {
-            devLog('Streaming TTS play() rejected:', error);
             this._cleanupCurrentAudio();
+            // Check if there are more audio clips to play
+            if (this.audioQueue.length === 0 && this.pendingFetches === 0) {
+                hideTTSIndicator();
+            }
             this.playNext();
         });
+    },
+
+    // Helper to update button to stop icon
+    _updateButtonToStop() {
+        if (this.currentButton) {
+            // Store original onclick handler before changing it
+            if (!this.originalOnClick) {
+                this.originalOnClick = this.currentButton.onclick;
+            }
+
+            this.currentButton.innerHTML = `
+                <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor">
+                    <rect x="3" y="3" width="10" height="10" rx="2" fill="currentColor"/>
+                </svg>
+            `;
+            this.currentButton.setAttribute('title', '재생 중지');
+            this.currentButton.classList.add('tts-playing');
+            // Change onclick to stop streaming TTS
+            this.currentButton.onclick = () => stopTTS();
+        }
     },
 
     // Clean up current audio element and revoke blob URL
@@ -4496,8 +4594,6 @@ const streamingTTS = {
                 this.queueSentence(this.pendingText.trim());
             }
         }
-
-        devLog('🔊 Streaming TTS finishing, remaining queue:', this.audioQueue.length, 'pending fetches:', this.pendingFetches);
     },
 
     // Stop streaming TTS and clean up all resources
@@ -4529,8 +4625,19 @@ const streamingTTS = {
         this.pendingFetches = 0;
         this.sessionId = null;
 
-        if (wasActive) {
-            devLog('🔊 Streaming TTS stopped and cleaned up');
+        // Hide floating indicator
+        hideTTSIndicator();
+
+        // Reset stored TTS button back to default state
+        if (this.currentButton) {
+            this.currentButton.classList.remove('tts-playing');
+            resetTTSButton(this.currentButton);
+            // Restore original onclick handler
+            if (this.originalOnClick) {
+                this.currentButton.onclick = this.originalOnClick;
+                this.originalOnClick = null;
+            }
+            this.currentButton = null;  // Clear reference
         }
     },
 
@@ -7220,7 +7327,7 @@ function restoreChatUI() {
             const contentDiv = messageDiv.querySelector('.message-content');
 
             // Render markdown
-            contentDiv.innerHTML = sanitizeHTML(marked.parse(msg.content);
+            contentDiv.innerHTML = sanitizeHTML(marked.parse(msg.content));
 
             // Apply syntax highlighting
             contentDiv.querySelectorAll('pre code').forEach((block) => {
@@ -7879,38 +7986,7 @@ function parseMarkdownHistory(text) {
 }
 
 // Copy to clipboard function
-async function copyToClipboard(text, button) {
-    try {
-        await navigator.clipboard.writeText(text);
-
-        // Show feedback
-        const originalHTML = button.innerHTML;
-        button.innerHTML = `
-            <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor">
-                <path d="M3 8L6 11L13 4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-        `;
-        button.classList.add('copied');
-
-        setTimeout(() => {
-            button.innerHTML = originalHTML;
-            button.classList.remove('copied');
-        }, 2000);
-    } catch (err) {
-        logger.error('Failed to copy:', err);
-        alert('복사에 실패했습니다');
-    }
-}
-
 // Stop generation function
-function stopGeneration() {
-    if (currentAbortController) {
-        currentAbortController.abort();
-        // Note: The cancelled message will be added by the catch block in sendMessage()
-        // We only need to clean up UI elements here
-    }
-}
-
 // Scroll to bottom function
 function scrollToBottom() {
     chatContainer.scrollTo({
