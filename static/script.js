@@ -3317,27 +3317,54 @@ async function playAudioQueueProgressive(sentences, token, language, voiceId) {
     }
 
     ttsIsPlayingQueue = true;
-    let currentIndex = 0;
+    const BUFFER_SIZE = 3; // Generate 3 sentences ahead to prevent gaps
+    let buffer = [];
+    let generateIndex = 0;
+    let playIndex = 0;
 
-    while (currentIndex < sentences.length && ttsIsPlayingQueue) {
-        try {
-            const sentence = sentences[currentIndex];
-            currentIndex++;
+    try {
+        // Generate initial buffer
+        console.log(`Generating initial buffer of ${BUFFER_SIZE} sentences...`);
+        while (generateIndex < sentences.length && generateIndex < BUFFER_SIZE) {
+            const idx = generateIndex;
+            generateIndex++;
+            const audioPromise = synthesizeSentence(sentences[idx], token, language, voiceId);
+            buffer.push({ index: idx, promise: audioPromise });
+        }
 
-            // Check if stopped
-            if (!ttsIsPlayingQueue) break;
+        // Play loop with continuous buffering
+        while (playIndex < sentences.length && ttsIsPlayingQueue) {
+            // Find audio for current index in buffer
+            const bufferItem = buffer.find(item => item.index === playIndex);
 
-            // Generate current sentence
-            const audio = await synthesizeSentence(sentence, token, language, voiceId);
+            if (!bufferItem) {
+                console.error('Buffer miss at index', playIndex);
+                break;
+            }
 
-            // Check if stopped during generation
-            if (!ttsIsPlayingQueue) break;
+            // Wait for audio to be ready
+            const audio = await bufferItem.promise;
+
+            // Remove from buffer
+            buffer = buffer.filter(item => item.index !== playIndex);
+            playIndex++;
+
+            // Generate next sentence to maintain buffer
+            if (generateIndex < sentences.length && ttsIsPlayingQueue) {
+                const idx = generateIndex;
+                generateIndex++;
+                const audioPromise = synthesizeSentence(sentences[idx], token, language, voiceId);
+                buffer.push({ index: idx, promise: audioPromise });
+            }
 
             // Skip if synthesis failed
             if (!audio) {
                 console.log('Skipping failed sentence, continuing with next...');
                 continue;
             }
+
+            // Check if stopped
+            if (!ttsIsPlayingQueue) break;
 
             ttsAudio = audio;
 
@@ -3352,12 +3379,9 @@ async function playAudioQueueProgressive(sentences, token, language, voiceId) {
                 audio.addEventListener('error', reject);
                 audio.play().catch(reject);
             });
-
-        } catch (error) {
-            console.error('Audio playback error:', error);
-            // Continue with next sentence if not stopped
-            if (!ttsIsPlayingQueue) break;
         }
+    } catch (error) {
+        console.error('Buffered playback error:', error);
     }
 
     ttsIsPlayingQueue = false;
