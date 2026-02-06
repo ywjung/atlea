@@ -6669,6 +6669,150 @@ function applySettings() {
             }
         });
     }
+
+    // TTS Keyboard Shortcuts
+    setupTTSKeyboardShortcuts();
+}
+
+// Helper function to update TTS sliders programmatically
+function updateTTSVolume(delta) {
+    const slider = document.getElementById('ttsVolumeSlider');
+    const valueDisplay = document.getElementById('ttsVolumeValue');
+    if (!slider || !valueDisplay) return;
+
+    let newVolume = parseInt(slider.value) + delta;
+    newVolume = Math.max(0, Math.min(100, newVolume)); // Clamp 0-100
+
+    slider.value = newVolume;
+    valueDisplay.textContent = newVolume + '%';
+    localStorage.setItem('ttsVolume', newVolume);
+
+    // Apply to currently playing audio
+    if (ttsAudio) {
+        ttsAudio.volume = newVolume / 100;
+    }
+    if (streamingTTS.currentAudio) {
+        streamingTTS.currentAudio.volume = newVolume / 100;
+    }
+
+    // Show feedback
+    showNotification(`볼륨: ${newVolume}%`, 'info');
+}
+
+function updateTTSSpeed(delta) {
+    const slider = document.getElementById('ttsSpeedSlider');
+    const valueDisplay = document.getElementById('ttsSpeedValue');
+    if (!slider || !valueDisplay) return;
+
+    let newSpeed = parseInt(slider.value) + delta;
+    newSpeed = Math.max(50, Math.min(200, newSpeed)); // Clamp 50-200
+
+    slider.value = newSpeed;
+    const speedMultiplier = (newSpeed / 100).toFixed(1);
+    valueDisplay.textContent = speedMultiplier + 'x';
+    localStorage.setItem('ttsSpeed', newSpeed);
+
+    // Apply to currently playing audio
+    if (ttsAudio) {
+        ttsAudio.playbackRate = speedMultiplier;
+    }
+    if (streamingTTS.currentAudio) {
+        streamingTTS.currentAudio.playbackRate = speedMultiplier;
+    }
+
+    // Show feedback
+    showNotification(`재생 속도: ${speedMultiplier}x`, 'info');
+}
+
+// Setup TTS keyboard shortcuts
+function setupTTSKeyboardShortcuts() {
+    document.addEventListener('keydown', (e) => {
+        // Don't trigger shortcuts if user is typing in an input field
+        const activeElement = document.activeElement;
+        const isInputFocused = activeElement && (
+            activeElement.tagName === 'INPUT' ||
+            activeElement.tagName === 'TEXTAREA' ||
+            activeElement.isContentEditable
+        );
+
+        if (isInputFocused) return;
+
+        // Space: Play/Pause toggle
+        if (e.code === 'Space' && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+            e.preventDefault();
+
+            // Toggle current TTS button if available
+            if (currentTTSButton && document.body.contains(currentTTSButton)) {
+                currentTTSButton.click();
+            } else if (streamingTTS.currentButton && document.body.contains(streamingTTS.currentButton)) {
+                streamingTTS._togglePause();
+            } else {
+                // No TTS playing, try to play the last bot message
+                const chatContainer = document.getElementById('chatContainer');
+                if (chatContainer) {
+                    const botMessages = chatContainer.querySelectorAll('.message.bot');
+                    if (botMessages.length > 0) {
+                        const lastBotMessage = botMessages[botMessages.length - 1];
+                        const ttsBtn = lastBotMessage.querySelector('.tts-btn');
+                        if (ttsBtn) {
+                            ttsBtn.click();
+                        }
+                    }
+                }
+            }
+            return;
+        }
+
+        // Shift + Space: Stop TTS
+        if (e.code === 'Space' && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+            e.preventDefault();
+            stopTTS();
+            showNotification('TTS 중지됨', 'info');
+            return;
+        }
+
+        // Arrow Up: Increase speed by 25%
+        if (e.code === 'ArrowUp' && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+            // Only if TTS is playing
+            if ((ttsAudio && !ttsAudio.paused) || (streamingTTS.currentAudio && !streamingTTS.currentAudio.paused)) {
+                e.preventDefault();
+                updateTTSSpeed(25);
+            }
+            return;
+        }
+
+        // Arrow Down: Decrease speed by 25%
+        if (e.code === 'ArrowDown' && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+            // Only if TTS is playing
+            if ((ttsAudio && !ttsAudio.paused) || (streamingTTS.currentAudio && !streamingTTS.currentAudio.paused)) {
+                e.preventDefault();
+                updateTTSSpeed(-25);
+            }
+            return;
+        }
+
+        // Arrow Right: Increase volume by 10%
+        if (e.code === 'ArrowRight' && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+            // Only if TTS is playing
+            if ((ttsAudio && !ttsAudio.paused) || (streamingTTS.currentAudio && !streamingTTS.currentAudio.paused)) {
+                e.preventDefault();
+                updateTTSVolume(10);
+            }
+            return;
+        }
+
+        // Arrow Left: Decrease volume by 10%
+        if (e.code === 'ArrowLeft' && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+            // Only if TTS is playing
+            if ((ttsAudio && !ttsAudio.paused) || (streamingTTS.currentAudio && !streamingTTS.currentAudio.paused)) {
+                e.preventDefault();
+                updateTTSVolume(-10);
+            }
+            return;
+        }
+    });
+
+    devLog('TTS keyboard shortcuts initialized');
 }
 
 // Display current LLM, Embedding, and Reranker models
