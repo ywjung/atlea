@@ -137,7 +137,6 @@
 
     <!-- DOMPurify for XSS protection - v3.0.8 (2024) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.8/purify.min.js"
-            integrity="sha512-5FqjUWIe/SfeE29uz8d3Hx3nzP3MBKlqDrqjHlbvEy3wEmKdYy/++SB73TXFdGBCaAlqUiFUJ2WCP7Kxo4x2+A=="
             crossorigin="anonymous"
             referrerpolicy="no-referrer"></script>
 
@@ -822,6 +821,19 @@
                         <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                     </svg>
                 </button>
+                <button id="ttsControlBtn" class="tts-control-btn" title="TTS 중지" style="display: none;">
+                    <!-- Microphone icon (default state) -->
+                    <svg class="tts-icon-mic" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M19 10v2a7 7 0 0 1-14 0v-2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        <line x1="12" y1="19" x2="12" y2="23" stroke-width="2" stroke-linecap="round"/>
+                        <line x1="8" y1="23" x2="16" y2="23" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                    <!-- Stop icon (playing state) -->
+                    <svg class="tts-icon-stop" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="display: none;">
+                        <rect x="6" y="6" width="12" height="12" rx="2" stroke-width="2" fill="currentColor"/>
+                    </svg>
+                </button>
                 <span id="status" class="status">연결 중...</span>
                 <span id="doc-count" class="doc-count"></span>
                 <div class="settings-menu" id="settingsMenu">
@@ -1381,6 +1393,30 @@
                         로딩 중...
                     </div>
                     <p class="setting-hint">현재 적용된 TTS 모델 (TTS 설정 변경은 관리자 페이지에서 가능)</p>
+                </div>
+
+                <div class="setting-item">
+                    <label>
+                        <span class="setting-label">🔊 볼륨</span>
+                    </label>
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                        <input type="range" id="ttsVolumeSlider" min="0" max="100" value="100"
+                               style="flex: 1; height: 6px; border-radius: 3px; background: linear-gradient(90deg, #e5e7eb 0%, #667eea 100%); cursor: pointer;">
+                        <span id="ttsVolumeValue" style="min-width: 45px; font-weight: 600; color: #667eea;">100%</span>
+                    </div>
+                    <p class="setting-hint">TTS 음성 재생 볼륨 조절</p>
+                </div>
+
+                <div class="setting-item">
+                    <label>
+                        <span class="setting-label">⚡ 재생 속도</span>
+                    </label>
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                        <input type="range" id="ttsSpeedSlider" min="50" max="200" value="100" step="25"
+                               style="flex: 1; height: 6px; border-radius: 3px; background: linear-gradient(90deg, #e5e7eb 0%, #764ba2 100%); cursor: pointer;">
+                        <span id="ttsSpeedValue" style="min-width: 50px; font-weight: 600; color: #764ba2;">1.0x</span>
+                    </div>
+                    <p class="setting-hint">TTS 음성 재생 속도 조절 (0.5x ~ 2.0x)</p>
                 </div>
 
                 <div class="setting-item">

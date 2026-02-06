@@ -3208,6 +3208,7 @@ async function loadTTSStatus() {
 
 // Global reference for current TTS button (for background playback support)
 let currentTTSButton = null;
+let ttsIsPaused = false;  // Track if TTS is paused (not stopped)
 
 // Safely update TTS button if it still exists in DOM
 function safeUpdateTTSButton(button, callback) {
@@ -3228,9 +3229,39 @@ async function playTTS(text, button) {
         return;
     }
 
-    // Check if this button is already playing (toggle off)
+    // Check if this button is currently playing
     if (button && button.classList.contains('tts-playing')) {
-        // Stop all TTS (both regular and streaming)
+        // Check if paused - if so, resume
+        if (ttsIsPaused && ttsAudio) {
+            ttsAudio.play();
+            ttsIsPaused = false;
+            // Update button to playing state
+            safeUpdateTTSButton(button, (btn) => {
+                btn.innerHTML = `
+                    <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor">
+                        <rect x="3" y="3" width="10" height="10" rx="2" fill="currentColor"/>
+                    </svg>
+                `;
+                btn.setAttribute('title', '재생 중지');
+            });
+            return;
+        }
+        // Otherwise pause
+        if (ttsAudio && !ttsAudio.paused) {
+            ttsAudio.pause();
+            ttsIsPaused = true;
+            // Update button to paused state
+            safeUpdateTTSButton(button, (btn) => {
+                btn.innerHTML = `
+                    <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor">
+                        <path d="M5 3h2v10H5V3zm4 0h2v10H9V3z"/>
+                    </svg>
+                `;
+                btn.setAttribute('title', '재생 재개');
+            });
+            return;
+        }
+        // If stopped or error, stop all
         stopTTS();
         return;
     }
@@ -3363,6 +3394,12 @@ async function playTTS(text, button) {
         // Create and play audio
         ttsAudio = new Audio(result.audio_url + '?token=' + encodeURIComponent(token));
 
+        // Apply user settings (volume and speed)
+        const savedVolume = localStorage.getItem('ttsVolume') || '100';
+        const savedSpeed = localStorage.getItem('ttsSpeed') || '100';
+        ttsAudio.volume = savedVolume / 100;
+        ttsAudio.playbackRate = savedSpeed / 100;
+
         // Update button to playing state (safely)
         safeUpdateTTSButton(button, (btn) => {
             btn.innerHTML = `
@@ -3459,6 +3496,7 @@ function stopTTS() {
         ttsAudio.currentTime = 0;
         ttsAudio = null;
     }
+    ttsIsPaused = false;  // Reset paused state
     safeUpdateTTSButton(currentTTSButton, (btn) => {
         btn.classList.remove('tts-playing');
         resetTTSButton(btn);
@@ -4260,6 +4298,7 @@ const streamingTTS = {
     currentAudioUrl: null,      // Track URL for proper cleanup
     currentButton: null,        // Track the TTS button being updated
     originalOnClick: null,      // Store original onclick handler to restore later
+    isPaused: false,            // Track if streaming TTS is paused
     processedText: '',
     pendingText: '',
     isProcessing: false,
@@ -4508,6 +4547,12 @@ const streamingTTS = {
 
         this.currentAudio = new Audio(audioUrl);
 
+        // Apply user settings (volume and speed)
+        const savedVolume = localStorage.getItem('ttsVolume') || '100';
+        const savedSpeed = localStorage.getItem('ttsSpeed') || '100';
+        this.currentAudio.volume = savedVolume / 100;
+        this.currentAudio.playbackRate = savedSpeed / 100;
+
         // Show floating indicator for background playback
         showTTSIndicator();
 
@@ -4553,7 +4598,7 @@ const streamingTTS = {
         });
     },
 
-    // Helper to update button to stop icon
+    // Helper to update button to stop/pause icon
     _updateButtonToStop() {
         if (this.currentButton) {
             // Store original onclick handler before changing it
@@ -4563,13 +4608,42 @@ const streamingTTS = {
 
             this.currentButton.innerHTML = `
                 <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M5 3h2v10H5V3zm4 0h2v10H9V3z"/>
+                </svg>
+            `;
+            this.currentButton.setAttribute('title', '일시정지');
+            this.currentButton.classList.add('tts-playing');
+            // Change onclick to toggle pause/resume
+            this.currentButton.onclick = () => this._togglePause();
+        }
+    },
+
+    // Toggle pause/resume for streaming TTS
+    _togglePause() {
+        if (!this.currentAudio) return;
+
+        if (this.isPaused) {
+            // Resume
+            this.currentAudio.play();
+            this.isPaused = false;
+            this._updateButtonToStop();
+        } else {
+            // Pause
+            this.currentAudio.pause();
+            this.isPaused = true;
+            this._updateButtonToPlay();
+        }
+    },
+
+    // Helper to update button to play/resume icon
+    _updateButtonToPlay() {
+        if (this.currentButton) {
+            this.currentButton.innerHTML = `
+                <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor">
                     <rect x="3" y="3" width="10" height="10" rx="2" fill="currentColor"/>
                 </svg>
             `;
-            this.currentButton.setAttribute('title', '재생 중지');
-            this.currentButton.classList.add('tts-playing');
-            // Change onclick to stop streaming TTS
-            this.currentButton.onclick = () => stopTTS();
+            this.currentButton.setAttribute('title', '재개');
         }
     },
 
@@ -4600,6 +4674,7 @@ const streamingTTS = {
     stop() {
         const wasActive = this.isActive;
         this.isActive = false;
+        this.isPaused = false;  // Reset paused state
 
         // Abort all in-flight fetch requests
         if (this.abortController) {
@@ -6540,6 +6615,57 @@ function applySettings() {
             } else {
                 streamingTTS.stop();
                 showNotification('실시간 음성 읽기가 비활성화되었습니다', 'info');
+            }
+        });
+    }
+
+    // TTS Volume Control
+    const ttsVolumeSlider = document.getElementById('ttsVolumeSlider');
+    const ttsVolumeValue = document.getElementById('ttsVolumeValue');
+    if (ttsVolumeSlider && ttsVolumeValue) {
+        // Load saved volume (default: 100%)
+        const savedVolume = localStorage.getItem('ttsVolume') || '100';
+        ttsVolumeSlider.value = savedVolume;
+        ttsVolumeValue.textContent = savedVolume + '%';
+
+        // Update volume value display and save
+        ttsVolumeSlider.addEventListener('input', (e) => {
+            const volume = e.target.value;
+            ttsVolumeValue.textContent = volume + '%';
+            localStorage.setItem('ttsVolume', volume);
+
+            // Apply to currently playing audio
+            if (ttsAudio) {
+                ttsAudio.volume = volume / 100;
+            }
+            if (streamingTTS.currentAudio) {
+                streamingTTS.currentAudio.volume = volume / 100;
+            }
+        });
+    }
+
+    // TTS Speed Control
+    const ttsSpeedSlider = document.getElementById('ttsSpeedSlider');
+    const ttsSpeedValue = document.getElementById('ttsSpeedValue');
+    if (ttsSpeedSlider && ttsSpeedValue) {
+        // Load saved speed (default: 100 = 1.0x)
+        const savedSpeed = localStorage.getItem('ttsSpeed') || '100';
+        ttsSpeedSlider.value = savedSpeed;
+        ttsSpeedValue.textContent = (savedSpeed / 100).toFixed(1) + 'x';
+
+        // Update speed value display and save
+        ttsSpeedSlider.addEventListener('input', (e) => {
+            const speed = e.target.value;
+            const speedMultiplier = (speed / 100).toFixed(1);
+            ttsSpeedValue.textContent = speedMultiplier + 'x';
+            localStorage.setItem('ttsSpeed', speed);
+
+            // Apply to currently playing audio
+            if (ttsAudio) {
+                ttsAudio.playbackRate = speedMultiplier;
+            }
+            if (streamingTTS.currentAudio) {
+                streamingTTS.currentAudio.playbackRate = speedMultiplier;
             }
         });
     }
