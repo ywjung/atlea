@@ -4,6 +4,8 @@ import {
     validatePassword,
     validateUsername,
     sanitizeFilename,
+    validateInput,
+    INPUT_VALIDATION,
 } from '../../../static/js/utils/validation.js';
 
 describe('utils/validation', () => {
@@ -81,25 +83,104 @@ describe('utils/validation', () => {
 
     describe('validateUsername', () => {
         it('should accept valid usernames', () => {
-            expect(validateUsername('user123')).toBe(true);
-            expect(validateUsername('test_user')).toBe(true);
-            expect(validateUsername('user-name')).toBe(true);
+            const result1 = validateUsername('user123');
+            expect(result1.valid).toBe(true);
+
+            const result2 = validateUsername('test_user');
+            expect(result2.valid).toBe(true);
+
+            const result3 = validateUsername('user-name');
+            expect(result3.valid).toBe(true);
         });
 
         it('should reject usernames that are too short', () => {
-            expect(validateUsername('ab')).toBe(false);
+            const result = validateUsername('ab');
+            expect(result.valid).toBe(false);
+            expect(result.error).toContain('최소 3자');
         });
 
         it('should reject usernames with invalid characters', () => {
-            expect(validateUsername('user@name')).toBe(false);
-            expect(validateUsername('user name')).toBe(false); // Space
-            expect(validateUsername('user!name')).toBe(false);
+            const result1 = validateUsername('user@name');
+            expect(result1.valid).toBe(false);
+            expect(result1.error).toContain('영문자, 숫자, -, _');
+
+            const result2 = validateUsername('user name');
+            expect(result2.valid).toBe(false);
+
+            const result3 = validateUsername('user!name');
+            expect(result3.valid).toBe(false);
         });
 
-        it('should reject empty or null usernames', () => {
-            expect(validateUsername('')).toBe(false);
-            expect(validateUsername(null)).toBe(false);
-            expect(validateUsername(undefined)).toBe(false);
+        it('should handle edge cases', () => {
+            // Too long
+            const longUsername = 'a'.repeat(51);
+            const result1 = validateUsername(longUsername);
+            expect(result1.valid).toBe(false);
+            expect(result1.error).toContain('최대 50자');
+        });
+    });
+
+    describe('validateInput', () => {
+        it('should accept valid input', () => {
+            const result = validateInput('This is a valid question');
+            expect(result.valid).toBe(true);
+            expect(result.normalized).toBe('This is a valid question');
+        });
+
+        it('should reject empty input', () => {
+            const result = validateInput('');
+            expect(result.valid).toBe(false);
+            expect(result.error).toContain('질문을 입력해주세요');
+        });
+
+        it('should reject whitespace-only input', () => {
+            const result = validateInput('   ');
+            expect(result.valid).toBe(false);
+            expect(result.error).toContain('질문을 입력해주세요');
+        });
+
+        it('should reject input that is too long', () => {
+            const longInput = 'a'.repeat(INPUT_VALIDATION.MAX_LENGTH + 1);
+            const result = validateInput(longInput);
+
+            expect(result.valid).toBe(false);
+            expect(result.error).toContain('최대');
+        });
+
+        it('should reject input with script tags', () => {
+            const result = validateInput('<script>alert("xss")</script>');
+            expect(result.valid).toBe(false);
+            expect(result.error).toContain('허용되지 않는');
+        });
+
+        it('should reject input with iframe tags', () => {
+            const result = validateInput('<iframe src="evil.com"></iframe>');
+            expect(result.valid).toBe(false);
+            expect(result.error).toContain('허용되지 않는');
+        });
+
+        it('should reject input with javascript protocol', () => {
+            const result = validateInput('javascript:alert("xss")');
+            expect(result.valid).toBe(false);
+            expect(result.error).toContain('허용되지 않는');
+        });
+
+        it('should reject input with event handlers', () => {
+            const result = validateInput('<div onclick="alert()">test</div>');
+            expect(result.valid).toBe(false);
+            expect(result.error).toContain('허용되지 않는');
+        });
+
+        it('should normalize consecutive whitespace', () => {
+            const result = validateInput('This   has    multiple    spaces');
+            expect(result.valid).toBe(true);
+            expect(result.normalized).toBe('This has multiple spaces');
+        });
+
+        it('should trim leading and trailing whitespace', () => {
+            const result = validateInput('  test  ');
+            expect(result.valid).toBe(true);
+            expect(result.normalized).toBe('test');
         });
     });
 

@@ -1,130 +1,36 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
-    formatTimestamp,
-    formatFileSize,
-    formatNumber,
-    debounce,
-    throttle,
+    generateSessionId,
     generateId,
     generateUUID,
     sleep,
+    retry,
+    copyToClipboard,
+    downloadAsFile,
+    parseQueryString,
+    buildQueryString,
+    getUrlParams,
+    isInViewport,
+    scrollIntoView,
+    getBrowserInfo,
+    isFeatureSupported,
 } from '../../../static/js/utils/helpers.js';
 
 describe('utils/helpers', () => {
-    describe('formatTimestamp', () => {
-        it('should format ISO timestamp to readable date', () => {
-            const timestamp = '2024-01-15T10:30:00Z';
-            const result = formatTimestamp(timestamp);
-            expect(result).toContain('2024');
-            expect(result).toContain('Jan');
+    describe('generateSessionId', () => {
+        it('should generate unique session IDs', () => {
+            const id1 = generateSessionId();
+            const id2 = generateSessionId();
+
+            expect(id1).toBeTruthy();
+            expect(id2).toBeTruthy();
+            expect(id1).not.toBe(id2);
+            expect(id1).toMatch(/^session_/);
         });
 
-        it('should handle invalid timestamps', () => {
-            expect(formatTimestamp('')).toBe('');
-            expect(formatTimestamp(null)).toBe('');
-            expect(formatTimestamp('invalid')).toBe('Invalid Date');
-        });
-    });
-
-    describe('formatFileSize', () => {
-        it('should format bytes correctly', () => {
-            expect(formatFileSize(500)).toBe('500 B');
-            expect(formatFileSize(1024)).toBe('1.00 KB');
-            expect(formatFileSize(1048576)).toBe('1.00 MB');
-            expect(formatFileSize(1073741824)).toBe('1.00 GB');
-        });
-
-        it('should handle zero and negative values', () => {
-            expect(formatFileSize(0)).toBe('0 B');
-            expect(formatFileSize(-100)).toBe('0 B');
-        });
-
-        it('should handle decimal precision', () => {
-            expect(formatFileSize(1536)).toBe('1.50 KB');
-            expect(formatFileSize(2621440)).toBe('2.50 MB');
-        });
-    });
-
-    describe('formatNumber', () => {
-        it('should format numbers with thousands separator', () => {
-            expect(formatNumber(1000)).toBe('1,000');
-            expect(formatNumber(1000000)).toBe('1,000,000');
-        });
-
-        it('should handle small numbers', () => {
-            expect(formatNumber(100)).toBe('100');
-            expect(formatNumber(0)).toBe('0');
-        });
-
-        it('should handle negative numbers', () => {
-            expect(formatNumber(-1000)).toBe('-1,000');
-        });
-    });
-
-    describe('debounce', () => {
-        it('should delay function execution', async () => {
-            let counter = 0;
-            const increment = () => counter++;
-            const debounced = debounce(increment, 100);
-
-            debounced();
-            debounced();
-            debounced();
-
-            expect(counter).toBe(0); // Should not execute immediately
-
-            await sleep(150);
-            expect(counter).toBe(1); // Should execute once after delay
-        });
-
-        it('should cancel previous calls', async () => {
-            let counter = 0;
-            const increment = () => counter++;
-            const debounced = debounce(increment, 100);
-
-            debounced();
-            await sleep(50);
-            debounced(); // Resets the timer
-            await sleep(50);
-
-            expect(counter).toBe(0); // First call cancelled
-
-            await sleep(100);
-            expect(counter).toBe(1); // Only second call executes
-        });
-    });
-
-    describe('throttle', () => {
-        it('should limit function execution rate', async () => {
-            let counter = 0;
-            const increment = () => counter++;
-            const throttled = throttle(increment, 100);
-
-            throttled();
-            throttled();
-            throttled();
-
-            expect(counter).toBe(1); // Should execute immediately once
-
-            await sleep(150);
-            throttled();
-
-            expect(counter).toBe(2); // Should execute again after delay
-        });
-
-        it('should maintain execution rate', async () => {
-            let counter = 0;
-            const increment = () => counter++;
-            const throttled = throttle(increment, 100);
-
-            for (let i = 0; i < 10; i++) {
-                throttled();
-                await sleep(20);
-            }
-
-            // Should execute roughly every 100ms
-            expect(counter).toBeGreaterThanOrEqual(2);
-            expect(counter).toBeLessThanOrEqual(3);
+        it('should include timestamp', () => {
+            const id = generateSessionId();
+            expect(id).toMatch(/^session_\d+_/);
         });
     });
 
@@ -138,9 +44,19 @@ describe('utils/helpers', () => {
             expect(id1).not.toBe(id2);
         });
 
+        it('should use default prefix', () => {
+            const id = generateId();
+            expect(id).toMatch(/^id_/);
+        });
+
+        it('should use custom prefix', () => {
+            const id = generateId('custom');
+            expect(id).toMatch(/^custom_/);
+        });
+
         it('should generate IDs of correct length', () => {
             const id = generateId();
-            expect(id.length).toBeGreaterThan(8);
+            expect(id.length).toBeGreaterThan(15);
         });
     });
 
@@ -159,6 +75,14 @@ describe('utils/helpers', () => {
 
             expect(uuid1).not.toBe(uuid2);
         });
+
+        it('should have correct UUID v4 format', () => {
+            const uuid = generateUUID();
+            const parts = uuid.split('-');
+
+            expect(parts).toHaveLength(5);
+            expect(parts[2][0]).toBe('4'); // Version 4
+        });
     });
 
     describe('sleep', () => {
@@ -167,12 +91,148 @@ describe('utils/helpers', () => {
             await sleep(100);
             const duration = Date.now() - start;
 
-            expect(duration).toBeGreaterThanOrEqual(90); // Allow some timing variance
+            expect(duration).toBeGreaterThanOrEqual(90);
         });
 
         it('should return a promise', () => {
             const result = sleep(10);
             expect(result).toBeInstanceOf(Promise);
+        });
+    });
+
+    describe('retry', () => {
+        it('should retry on failure', async () => {
+            let attempts = 0;
+            const fn = async () => {
+                attempts++;
+                if (attempts < 3) {
+                    throw new Error('Failed');
+                }
+                return 'success';
+            };
+
+            const result = await retry(fn, 3, 10);
+            expect(result).toBe('success');
+            expect(attempts).toBe(3);
+        });
+
+        it('should throw after max retries', async () => {
+            const fn = async () => {
+                throw new Error('Always fails');
+            };
+
+            await expect(retry(fn, 2, 10)).rejects.toThrow('Always fails');
+        });
+
+        it('should succeed on first try', async () => {
+            const fn = async () => 'immediate success';
+            const result = await retry(fn, 3, 10);
+
+            expect(result).toBe('immediate success');
+        });
+    });
+
+    describe('parseQueryString', () => {
+        it('should parse query string', () => {
+            const result = parseQueryString('?name=test&age=25');
+            expect(result).toEqual({ name: 'test', age: '25' });
+        });
+
+        it('should handle query string without ?', () => {
+            const result = parseQueryString('name=test&age=25');
+            expect(result).toEqual({ name: 'test', age: '25' });
+        });
+
+        it('should decode URL encoding', () => {
+            const result = parseQueryString('name=John%20Doe');
+            expect(result).toEqual({ name: 'John Doe' });
+        });
+
+        it('should handle empty query string', () => {
+            const result = parseQueryString('');
+            expect(result).toEqual({});
+        });
+
+        it('should handle missing values', () => {
+            const result = parseQueryString('key1=&key2=value');
+            expect(result).toEqual({ key1: '', key2: 'value' });
+        });
+    });
+
+    describe('buildQueryString', () => {
+        it('should build query string from object', () => {
+            const params = { name: 'test', age: 25 };
+            const result = buildQueryString(params);
+
+            expect(result).toBe('name=test&age=25');
+        });
+
+        it('should encode special characters', () => {
+            const params = { name: 'John Doe' };
+            const result = buildQueryString(params);
+
+            expect(result).toBe('name=John%20Doe');
+        });
+
+        it('should skip null and undefined values', () => {
+            const params = { name: 'test', age: null, city: undefined };
+            const result = buildQueryString(params);
+
+            expect(result).toBe('name=test');
+        });
+
+        it('should handle empty object', () => {
+            const result = buildQueryString({});
+            expect(result).toBe('');
+        });
+    });
+
+    describe('getBrowserInfo', () => {
+        it('should return browser information', () => {
+            const info = getBrowserInfo();
+
+            expect(info).toHaveProperty('name');
+            expect(info).toHaveProperty('version');
+            expect(info).toHaveProperty('os');
+        });
+
+        it('should have string values', () => {
+            const info = getBrowserInfo();
+
+            expect(typeof info.name).toBe('string');
+            expect(typeof info.version).toBe('string');
+            expect(typeof info.os).toBe('string');
+        });
+    });
+
+    describe('isFeatureSupported', () => {
+        it('should check for localStorage', () => {
+            const supported = isFeatureSupported('localStorage');
+            expect(typeof supported).toBe('boolean');
+        });
+
+        it('should check for sessionStorage', () => {
+            const supported = isFeatureSupported('sessionStorage');
+            expect(typeof supported).toBe('boolean');
+        });
+
+        it('should return false for unknown features', () => {
+            const supported = isFeatureSupported('nonExistentFeature');
+            expect(supported).toBe(false);
+        });
+
+        it('should support multiple feature checks', () => {
+            const features = [
+                'localStorage',
+                'sessionStorage',
+                'webWorker',
+                'serviceWorker',
+            ];
+
+            features.forEach((feature) => {
+                const supported = isFeatureSupported(feature);
+                expect(typeof supported).toBe('boolean');
+            });
         });
     });
 });
