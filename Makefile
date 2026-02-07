@@ -31,7 +31,8 @@ APP_PORT ?= 8000
         status logs logs-app health \
         backup restore build clean \
         test test-unit test-e2e lint \
-        searxng-up searxng-down
+        searxng-up searxng-down \
+        install dist
 
 # ==============================================================================
 # 도움말
@@ -150,3 +151,13 @@ searxng-up: ## SearXNG + Crawl4AI 시작
 
 searxng-down: ## SearXNG 중지
 	$(COMPOSE_SRXNG) down
+
+# ==============================================================================
+# 패키지
+# ==============================================================================
+
+install: ## pip editable 설치
+	pip install -e .
+
+dist: ## 배포용 패키지 빌드
+	python -m build

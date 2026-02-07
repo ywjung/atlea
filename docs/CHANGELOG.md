@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added (2026-02-07)
+- **pip 설치 가능 패키지 구조 추가**: `pip install .` / `pip install -e .` 지원
+  - `pyproject.toml`: 빌드 시스템 설정 (setuptools, 의존성, optional-dependencies)
+  - `MANIFEST.in`: sdist 빌드 시 static/searxng 파일 포함
+  - `src/cli.py`: `atlea` CLI 엔트리포인트 (`atlea --port 9000` 등)
+  - `src/__init__.py`: 버전 2.5.1로 업데이트
+  - `Makefile`: `make install`, `make dist` 타겟 추가
+  - 배포 패키지명: `atlea-chatbot`, import 패키지: `src` (기존 코드 변경 없음)
+  - torch는 플랫폼별 설치 필요로 dependencies에서 제외
+
 - **Makefile 추가**: 배포/운영 명령 간소화
   - `make dev`, `make up`, `make down` 등 26개 타겟
   - 기존 `deploy.sh`, `run.sh`, `setup.sh` 스크립트 래핑
