@@ -1,0 +1,715 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ATLEA - AI 기반 기업용 RAG 챗봇</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <style>
+        :root {
+            --primary: #2563eb;
+            --primary-dark: #1d4ed8;
+            --accent: #10b981;
+            --accent-dark: #059669;
+            --bg: #0f172a;
+            --bg-light: #1e293b;
+            --bg-card: #1e293b;
+            --text: #f1f5f9;
+            --text-muted: #94a3b8;
+            --border: #334155;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        html { scroll-behavior: smooth; }
+
+        body {
+            font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.7;
+            overflow-x: hidden;
+        }
+
+        /* ── Navigation ── */
+        nav {
+            position: fixed;
+            top: 0;
+            width: 100%;
+            z-index: 100;
+            padding: 1rem 2rem;
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .nav-logo {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            font-size: 1.4rem;
+            font-weight: 800;
+            color: var(--text);
+            text-decoration: none;
+        }
+        .nav-logo svg { width: 36px; height: 36px; }
+        .nav-links { display: flex; gap: 2rem; align-items: center; }
+        .nav-links a {
+            color: var(--text-muted);
+            text-decoration: none;
+            font-size: 0.9rem;
+            font-weight: 500;
+            transition: color 0.2s;
+        }
+        .nav-links a:hover { color: var(--text); }
+        .btn-start {
+            background: var(--primary);
+            color: #fff;
+            padding: 0.6rem 1.5rem;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 0.9rem;
+            transition: background 0.2s, transform 0.1s;
+        }
+        .btn-start:hover { background: var(--primary-dark); transform: translateY(-1px); }
+
+        /* ── Hero ── */
+        .hero {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 8rem 2rem 4rem;
+            position: relative;
+            overflow: hidden;
+        }
+        .hero::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(ellipse at 30% 50%, rgba(37, 99, 235, 0.15) 0%, transparent 60%),
+                        radial-gradient(ellipse at 70% 50%, rgba(16, 185, 129, 0.1) 0%, transparent 60%);
+            animation: glow 8s ease-in-out infinite alternate;
+        }
+        @keyframes glow {
+            0% { transform: translate(0, 0); }
+            100% { transform: translate(-3%, 2%); }
+        }
+        .hero-content { position: relative; max-width: 800px; }
+        .hero-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            background: rgba(37, 99, 235, 0.15);
+            border: 1px solid rgba(37, 99, 235, 0.3);
+            padding: 0.4rem 1rem;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            color: #60a5fa;
+            margin-bottom: 2rem;
+        }
+        .hero h1 {
+            font-size: clamp(2.5rem, 6vw, 4.5rem);
+            font-weight: 900;
+            line-height: 1.15;
+            margin-bottom: 1.5rem;
+            letter-spacing: -0.02em;
+        }
+        .hero h1 .gradient {
+            background: linear-gradient(135deg, #60a5fa, #34d399);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+        }
+        .hero p {
+            font-size: 1.2rem;
+            color: var(--text-muted);
+            max-width: 600px;
+            margin: 0 auto 2.5rem;
+        }
+        .hero-actions { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; }
+        .btn-primary {
+            background: var(--primary);
+            color: #fff;
+            padding: 0.9rem 2.2rem;
+            border-radius: 10px;
+            text-decoration: none;
+            font-weight: 700;
+            font-size: 1.05rem;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .btn-primary:hover { background: var(--primary-dark); transform: translateY(-2px); box-shadow: 0 8px 30px rgba(37, 99, 235, 0.3); }
+        .btn-secondary {
+            background: transparent;
+            color: var(--text);
+            padding: 0.9rem 2.2rem;
+            border-radius: 10px;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 1.05rem;
+            border: 1px solid var(--border);
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .btn-secondary:hover { border-color: var(--text-muted); background: var(--bg-light); }
+
+        .hero-stats {
+            display: flex;
+            justify-content: center;
+            gap: 3rem;
+            margin-top: 4rem;
+            padding-top: 2rem;
+            border-top: 1px solid var(--border);
+        }
+        .stat { text-align: center; }
+        .stat-value {
+            font-size: 2rem;
+            font-weight: 800;
+            background: linear-gradient(135deg, #60a5fa, #34d399);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+        }
+        .stat-label { font-size: 0.85rem; color: var(--text-muted); margin-top: 0.2rem; }
+
+        /* ── Sections ── */
+        section { padding: 6rem 2rem; }
+        .section-header {
+            text-align: center;
+            max-width: 700px;
+            margin: 0 auto 4rem;
+        }
+        .section-header h2 {
+            font-size: 2.2rem;
+            font-weight: 800;
+            margin-bottom: 1rem;
+            letter-spacing: -0.01em;
+        }
+        .section-header p { color: var(--text-muted); font-size: 1.1rem; }
+
+        /* ── Features Grid ── */
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 1.5rem;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .feature-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 2rem;
+            transition: all 0.3s;
+            position: relative;
+            overflow: hidden;
+        }
+        .feature-card:hover {
+            border-color: rgba(37, 99, 235, 0.4);
+            transform: translateY(-4px);
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+        }
+        .feature-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: linear-gradient(90deg, var(--primary), var(--accent));
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        .feature-card:hover::before { opacity: 1; }
+        .feature-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            margin-bottom: 1.2rem;
+        }
+        .feature-icon.blue { background: rgba(37, 99, 235, 0.15); }
+        .feature-icon.green { background: rgba(16, 185, 129, 0.15); }
+        .feature-icon.purple { background: rgba(139, 92, 246, 0.15); }
+        .feature-icon.orange { background: rgba(249, 115, 22, 0.15); }
+        .feature-icon.pink { background: rgba(236, 72, 153, 0.15); }
+        .feature-icon.cyan { background: rgba(6, 182, 212, 0.15); }
+        .feature-card h3 { font-size: 1.15rem; font-weight: 700; margin-bottom: 0.6rem; }
+        .feature-card p { color: var(--text-muted); font-size: 0.92rem; line-height: 1.6; }
+        .feature-tags { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 1rem; }
+        .feature-tag {
+            font-size: 0.75rem;
+            padding: 0.2rem 0.6rem;
+            border-radius: 6px;
+            background: rgba(37, 99, 235, 0.1);
+            color: #60a5fa;
+            border: 1px solid rgba(37, 99, 235, 0.2);
+        }
+
+        /* ── Architecture ── */
+        .arch-section { background: var(--bg-light); }
+        .arch-flow {
+            max-width: 1100px;
+            margin: 0 auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.6rem;
+            flex-wrap: nowrap;
+        }
+        .arch-node {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 1.2rem 1.4rem;
+            text-align: center;
+            min-width: 130px;
+            flex: 1;
+            transition: all 0.3s;
+        }
+        .arch-node:hover { border-color: var(--primary); transform: scale(1.05); }
+        .arch-node .icon { font-size: 2rem; margin-bottom: 0.5rem; }
+        .arch-node .label { font-weight: 700; font-size: 0.95rem; }
+        .arch-node .sub { font-size: 0.8rem; color: var(--text-muted); margin-top: 0.3rem; }
+        .arch-arrow {
+            font-size: 1.5rem;
+            color: var(--primary);
+            flex-shrink: 0;
+        }
+
+        /* ── Tech Stack ── */
+        .tech-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+        .tech-item {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.2rem 1.5rem;
+            transition: all 0.2s;
+        }
+        .tech-item:hover { border-color: var(--primary); }
+        .tech-item .icon { font-size: 1.8rem; flex-shrink: 0; }
+        .tech-item .name { font-weight: 600; font-size: 0.95rem; }
+        .tech-item .desc { font-size: 0.8rem; color: var(--text-muted); }
+
+        /* ── Security ── */
+        .security-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1.2rem;
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+        .security-item {
+            display: flex;
+            gap: 1rem;
+            align-items: flex-start;
+            padding: 1.2rem;
+            border-radius: 12px;
+            background: rgba(16, 185, 129, 0.05);
+            border: 1px solid rgba(16, 185, 129, 0.15);
+        }
+        .security-item .check { color: var(--accent); font-size: 1.3rem; flex-shrink: 0; margin-top: 0.1rem; }
+        .security-item .info h4 { font-size: 0.95rem; font-weight: 600; margin-bottom: 0.2rem; }
+        .security-item .info p { font-size: 0.85rem; color: var(--text-muted); }
+
+        /* ── CTA ── */
+        .cta {
+            text-align: center;
+            padding: 6rem 2rem;
+            position: relative;
+        }
+        .cta::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(ellipse at center, rgba(37, 99, 235, 0.12) 0%, transparent 70%);
+        }
+        .cta-content { position: relative; }
+        .cta h2 { font-size: 2.5rem; font-weight: 800; margin-bottom: 1rem; }
+        .cta p { color: var(--text-muted); font-size: 1.1rem; margin-bottom: 2rem; }
+
+        /* ── Footer ── */
+        footer {
+            border-top: 1px solid var(--border);
+            padding: 2rem;
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 0.85rem;
+        }
+        footer a { color: #60a5fa; text-decoration: none; }
+
+        /* ── Responsive ── */
+        @media (max-width: 768px) {
+            nav { padding: 0.8rem 1rem; }
+            .nav-links { display: none; }
+            .hero { padding: 6rem 1.5rem 3rem; }
+            .hero-stats { gap: 1.5rem; flex-wrap: wrap; }
+            .stat-value { font-size: 1.5rem; }
+            section { padding: 4rem 1.5rem; }
+            .arch-flow { flex-direction: column; flex-wrap: wrap; }
+            .arch-node { min-width: auto; width: 100%; }
+            .arch-arrow { transform: rotate(90deg); }
+            .features-grid { grid-template-columns: 1fr; }
+        }
+
+        /* ── Scroll Animation ── */
+        .fade-in {
+            opacity: 0;
+            transform: translateY(30px);
+            transition: opacity 0.6s ease, transform 0.6s ease;
+        }
+        .fade-in.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    </style>
+</head>
+<body>
+
+<!-- Navigation -->
+<nav>
+    <a href="#" class="nav-logo">
+        <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="50" cy="50" r="45" fill="#2563eb"/>
+            <rect x="30" y="25" width="30" height="40" fill="white" rx="2"/>
+            <line x1="35" y1="32" x2="55" y2="32" stroke="#2563eb" stroke-width="2"/>
+            <line x1="35" y1="40" x2="55" y2="40" stroke="#2563eb" stroke-width="2"/>
+            <line x1="35" y1="48" x2="50" y2="48" stroke="#2563eb" stroke-width="2"/>
+            <circle cx="65" cy="55" r="12" fill="#10b981"/>
+            <path d="M65 62 L62 67 L65 65 L68 67Z" fill="#10b981"/>
+            <text x="65" y="60" font-family="Arial" font-size="14" fill="white" text-anchor="middle" font-weight="bold">?</text>
+        </svg>
+        ATLEA
+    </a>
+    <div class="nav-links">
+        <a href="#features">주요 기능</a>
+        <a href="#architecture">아키텍처</a>
+        <a href="#security">보안</a>
+        <a href="#tech">기술 스택</a>
+        <a href="/static/login.html" class="btn-start">시작하기 &rarr;</a>
+    </div>
+</nav>
+
+<!-- Hero -->
+<section class="hero">
+    <div class="hero-content">
+        <div class="hero-badge">
+            <span>&#x1f680;</span> Enterprise-Grade AI RAG Chatbot
+        </div>
+        <h1>
+            기업 문서를<br>
+            <span class="gradient">AI로 대화</span>하다
+        </h1>
+        <p>
+            ATLEA는 내부 문서, 웹 검색, 공식 문서를 통합 검색하는 Hybrid RAG 엔진 기반의 기업용 AI 챗봇입니다. 업로드된 문서에서 정확한 답변을 실시간 스트리밍으로 제공합니다.
+        </p>
+        <div class="hero-actions">
+            <a href="/static/login.html" class="btn-primary">무료로 시작하기 &rarr;</a>
+            <a href="#features" class="btn-secondary">기능 둘러보기</a>
+        </div>
+        <div class="hero-stats">
+            <div class="stat">
+                <div class="stat-value">10+</div>
+                <div class="stat-label">지원 문서 포맷</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value">3종</div>
+                <div class="stat-label">검색 소스 통합</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value">100+</div>
+                <div class="stat-label">API 엔드포인트</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value">10개</div>
+                <div class="stat-label">TTS 지원 언어</div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- Features -->
+<section id="features">
+    <div class="section-header fade-in">
+        <h2>왜 ATLEA인가?</h2>
+        <p>기업 환경에 필요한 모든 기능을 하나의 플랫폼에서 제공합니다</p>
+    </div>
+    <div class="features-grid">
+        <div class="feature-card fade-in">
+            <div class="feature-icon blue">&#x1f50d;</div>
+            <h3>Hybrid RAG 엔진</h3>
+            <p>로컬 문서 + 웹 검색(SearXNG/Tavily) + 공식 문서(Context7)를 동시에 검색하여 가장 정확한 답변을 생성합니다.</p>
+            <div class="feature-tags">
+                <span class="feature-tag">벡터 검색</span>
+                <span class="feature-tag">BM25</span>
+                <span class="feature-tag">RRF 병합</span>
+                <span class="feature-tag">리랭킹</span>
+            </div>
+        </div>
+        <div class="feature-card fade-in">
+            <div class="feature-icon green">&#x1f4c4;</div>
+            <h3>10+ 문서 포맷 지원</h3>
+            <p>PDF, DOCX, PPTX, XLSX, CSV, TXT, HTML, Markdown, JSON, YAML은 물론 한글(HWP/HWPX)까지 지원합니다.</p>
+            <div class="feature-tags">
+                <span class="feature-tag">PDF</span>
+                <span class="feature-tag">DOCX</span>
+                <span class="feature-tag">HWP</span>
+                <span class="feature-tag">XLSX</span>
+                <span class="feature-tag">PPTX</span>
+            </div>
+        </div>
+        <div class="feature-card fade-in">
+            <div class="feature-icon purple">&#x1f3a4;</div>
+            <h3>TTS 음성 답변</h3>
+            <p>AI 답변을 10개 언어로 음성 변환합니다. Edge TTS와 Qwen3 TTS 모델을 지원하며, 플레이리스트로 연속 재생이 가능합니다.</p>
+            <div class="feature-tags">
+                <span class="feature-tag">한국어</span>
+                <span class="feature-tag">영어</span>
+                <span class="feature-tag">일본어</span>
+                <span class="feature-tag">+7개 언어</span>
+            </div>
+        </div>
+        <div class="feature-card fade-in">
+            <div class="feature-icon orange">&#x1f3e2;</div>
+            <h3>멀티테넌트</h3>
+            <p>조직 &gt; 그룹 계층 구조로 문서를 체계적으로 관리합니다. 조직별 독립된 문서 공간과 접근 권한을 제공합니다.</p>
+            <div class="feature-tags">
+                <span class="feature-tag">조직 관리</span>
+                <span class="feature-tag">그룹 계층</span>
+                <span class="feature-tag">접근 제어</span>
+            </div>
+        </div>
+        <div class="feature-card fade-in">
+            <div class="feature-icon pink">&#x1f4ac;</div>
+            <h3>실시간 스트리밍</h3>
+            <p>SSE 기반 실시간 응답 스트리밍으로 첫 토큰부터 바로 확인할 수 있습니다. 후속 질문 자동 생성과 신뢰도 점수를 함께 제공합니다.</p>
+            <div class="feature-tags">
+                <span class="feature-tag">SSE 스트리밍</span>
+                <span class="feature-tag">후속 질문</span>
+                <span class="feature-tag">신뢰도 점수</span>
+            </div>
+        </div>
+        <div class="feature-card fade-in">
+            <div class="feature-icon cyan">&#x1f4ca;</div>
+            <h3>관리자 대시보드</h3>
+            <p>문서 관리, 사용자 관리, 보안 로그, 프롬프트 편집, 시스템 설정, 피드백 분석 등 운영에 필요한 모든 도구를 제공합니다.</p>
+            <div class="feature-tags">
+                <span class="feature-tag">사용자 관리</span>
+                <span class="feature-tag">보안 로그</span>
+                <span class="feature-tag">프롬프트 편집</span>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- Architecture -->
+<section id="architecture" class="arch-section">
+    <div class="section-header fade-in">
+        <h2>Hybrid RAG 아키텍처</h2>
+        <p>3종 소스를 병렬 검색하고 지능적으로 병합하여 최적의 답변을 생성합니다</p>
+    </div>
+    <div class="arch-flow fade-in">
+        <div class="arch-node">
+            <div class="icon">&#x1f4dd;</div>
+            <div class="label">사용자 질문</div>
+            <div class="sub">쿼리 분석 &amp; 리라이팅</div>
+        </div>
+        <div class="arch-arrow">&rarr;</div>
+        <div class="arch-node">
+            <div class="icon">&#x1f50e;</div>
+            <div class="label">병렬 검색</div>
+            <div class="sub">로컬 | 웹 | 공식문서</div>
+        </div>
+        <div class="arch-arrow">&rarr;</div>
+        <div class="arch-node">
+            <div class="icon">&#x2696;&#xfe0f;</div>
+            <div class="label">RRF 병합</div>
+            <div class="sub">스코어링 &amp; 리랭킹</div>
+        </div>
+        <div class="arch-arrow">&rarr;</div>
+        <div class="arch-node">
+            <div class="icon">&#x1f916;</div>
+            <div class="label">LLM 생성</div>
+            <div class="sub">실시간 스트리밍</div>
+        </div>
+        <div class="arch-arrow">&rarr;</div>
+        <div class="arch-node">
+            <div class="icon">&#x2705;</div>
+            <div class="label">품질 검증</div>
+            <div class="sub">인용 확인 &amp; 신뢰도</div>
+        </div>
+    </div>
+</section>
+
+<!-- Security -->
+<section id="security">
+    <div class="section-header fade-in">
+        <h2>엔터프라이즈급 보안</h2>
+        <p>기업 환경에 요구되는 보안 기준을 충족합니다</p>
+    </div>
+    <div class="security-grid fade-in">
+        <div class="security-item">
+            <div class="check">&#x2705;</div>
+            <div class="info">
+                <h4>JWT + TOTP 2단계 인증</h4>
+                <p>시간 기반 OTP와 JWT 토큰으로 이중 보안 제공</p>
+            </div>
+        </div>
+        <div class="security-item">
+            <div class="check">&#x2705;</div>
+            <div class="info">
+                <h4>무차별 대입 방어</h4>
+                <p>연속 로그인 실패 시 자동 계정 잠금 및 CAPTCHA 적용</p>
+            </div>
+        </div>
+        <div class="security-item">
+            <div class="check">&#x2705;</div>
+            <div class="info">
+                <h4>PII 개인정보 탐지</h4>
+                <p>업로드 문서의 주민번호, 전화번호 등 개인정보 자동 탐지</p>
+            </div>
+        </div>
+        <div class="security-item">
+            <div class="check">&#x2705;</div>
+            <div class="info">
+                <h4>ClamAV 바이러스 검사</h4>
+                <p>업로드 파일의 악성코드 자동 검사</p>
+            </div>
+        </div>
+        <div class="security-item">
+            <div class="check">&#x2705;</div>
+            <div class="info">
+                <h4>CSP + CSRF 보호</h4>
+                <p>Content Security Policy와 CSRF 토큰으로 웹 공격 방어</p>
+            </div>
+        </div>
+        <div class="security-item">
+            <div class="check">&#x2705;</div>
+            <div class="info">
+                <h4>감사 로그</h4>
+                <p>모든 관리 활동과 보안 이벤트를 기록 및 추적</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- Tech Stack -->
+<section id="tech" class="arch-section">
+    <div class="section-header fade-in">
+        <h2>기술 스택</h2>
+        <p>검증된 오픈소스 기술로 구축되었습니다</p>
+    </div>
+    <div class="tech-grid fade-in">
+        <div class="tech-item">
+            <div class="icon">&#x26a1;</div>
+            <div>
+                <div class="name">FastAPI</div>
+                <div class="desc">고성능 비동기 백엔드</div>
+            </div>
+        </div>
+        <div class="tech-item">
+            <div class="icon">&#x1f9e0;</div>
+            <div>
+                <div class="name">Redis Stack</div>
+                <div class="desc">벡터 DB + 캐시 + 세션</div>
+            </div>
+        </div>
+        <div class="tech-item">
+            <div class="icon">&#x1f916;</div>
+            <div>
+                <div class="name">Ollama / OpenAI</div>
+                <div class="desc">로컬 또는 클라우드 LLM</div>
+            </div>
+        </div>
+        <div class="tech-item">
+            <div class="icon">&#x1f50d;</div>
+            <div>
+                <div class="name">SearXNG / Tavily</div>
+                <div class="desc">웹 검색 엔진 통합</div>
+            </div>
+        </div>
+        <div class="tech-item">
+            <div class="icon">&#x1f4da;</div>
+            <div>
+                <div class="name">BGE-M3</div>
+                <div class="desc">다국어 임베딩 모델</div>
+            </div>
+        </div>
+        <div class="tech-item">
+            <div class="icon">&#x1f433;</div>
+            <div>
+                <div class="name">Docker</div>
+                <div class="desc">컨테이너 배포 (GPU 지원)</div>
+            </div>
+        </div>
+        <div class="tech-item">
+            <div class="icon">&#x1f310;</div>
+            <div>
+                <div class="name">Context7</div>
+                <div class="desc">공식 문서 검색 API</div>
+            </div>
+        </div>
+        <div class="tech-item">
+            <div class="icon">&#x1f50a;</div>
+            <div>
+                <div class="name">Edge TTS / Qwen3</div>
+                <div class="desc">다국어 음성 합성</div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- CTA -->
+<section class="cta">
+    <div class="cta-content fade-in">
+        <h2>지금 시작하세요</h2>
+        <p>기업 문서를 업로드하고 AI와 대화를 시작하세요</p>
+        <div class="hero-actions">
+            <a href="/static/login.html" class="btn-primary">로그인 &rarr;</a>
+            <a href="/static/register.html" class="btn-secondary">회원가입</a>
+        </div>
+    </div>
+</section>
+
+<!-- Footer -->
+<footer>
+    <p>&copy; 2026 <strong>ATLEA</strong> &mdash; AI-Powered Enterprise RAG Chatbot</p>
+</footer>
+
+<!-- Scroll Animation -->
+<script>
+    const observer = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            if (entry.isIntersecting) {
+                entry.target.classList.add('visible');
+            }
+        });
+    }, { threshold: 0.1 });
+    document.querySelectorAll('.fade-in').forEach(el => observer.observe(el));
+</script>
+</body>
+</html>

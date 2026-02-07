@@ -1,343 +1,452 @@
-# Multi-Platform Deployment Guide
-
-이 문서는 Mac (Apple Silicon), Linux (NVIDIA GPU), Linux (CPU) 환경에서 ATLEA를 배포하는 방법을 설명합니다.
+# ATLEA 배포 가이드
 
 ## 목차
-1. [Mac (Apple Silicon) 배포](#mac-apple-silicon-배포)
-2. [Linux (NVIDIA GPU) 배포](#linux-nvidia-gpu-배포)
-3. [Linux (CPU) 배포](#linux-cpu-배포)
-4. [Docker 배포](#docker-배포)
-5. [플랫폼 자동 감지](#플랫폼-자동-감지)
+
+1. [시스템 요구사항](#1-시스템-요구사항)
+2. [배포 방식 비교](#2-배포-방식-비교)
+3. [방법 1: 로컬 개발 환경](#3-방법-1-로컬-개발-환경)
+4. [방법 2: Docker 올인원 배포](#4-방법-2-docker-올인원-배포)
+5. [방법 3: 프로덕션 배포 (SSL + Nginx)](#5-방법-3-프로덕션-배포-ssl--nginx)
+6. [방법 4: GPU 서버 배포 (NVIDIA)](#6-방법-4-gpu-서버-배포-nvidia)
+7. [Ollama 설정](#7-ollama-설정)
+8. [선택 구성요소](#8-선택-구성요소)
+9. [환경 변수 설정](#9-환경-변수-설정)
+10. [SSL 인증서 설정](#10-ssl-인증서-설정)
+11. [백업 및 복원](#11-백업-및-복원)
+12. [모니터링](#12-모니터링)
+13. [업데이트 및 롤백](#13-업데이트-및-롤백)
+14. [플랫폼별 특성](#14-플랫폼별-특성)
+15. [문제 해결](#15-문제-해결)
 
 ---
 
-## Mac (Apple Silicon) 배포
+## 1. 시스템 요구사항
 
-### 시스템 요구사항
-- macOS 12.0 이상
-- Apple Silicon (M1/M2/M3 시리즈)
-- Python 3.10 이상
-- 최소 16GB RAM 권장
+### 최소 사양
 
-### 설치 방법
+| 항목 | 로컬 개발 | Docker 배포 | 프로덕션 |
+|------|----------|------------|---------|
+| CPU | 4코어 | 4코어 | 8코어 |
+| RAM | 16GB | 16GB | 32GB |
+| 디스크 | 30GB | 50GB | 100GB |
+| OS | macOS 12+ / Linux | macOS / Linux | Linux |
 
-1. **저장소 클론**
+### 필수 소프트웨어
+
+| 소프트웨어 | 로컬 개발 | Docker 배포 | 버전 |
+|-----------|----------|------------|------|
+| Python 3.11+ | 필수 | - | 3.11 이상 |
+| Docker | - | 필수 | 24.0 이상 |
+| Docker Compose | - | 필수 | v2.20 이상 |
+| Redis Stack | 필수 | 자동 설치 | 7.x |
+| Git | 필수 | 필수 | 2.x |
+| Ollama | 필수 | 선택 | 최신 |
+
+---
+
+## 2. 배포 방식 비교
+
+| 방식 | 난이도 | 용도 | 소요 시간 | 대상 |
+|------|-------|------|----------|------|
+| **로컬 개발** | 쉬움 | 개발/테스트 | 15분 | 개발자 |
+| **Docker 올인원** | 쉬움 | 소규모 운영 | 20분 | 소규모 팀 |
+| **프로덕션 (SSL)** | 보통 | 실제 서비스 | 30분 | 운영 서버 |
+| **GPU 서버** | 보통 | 고성능 운영 | 30분 | NVIDIA GPU 보유 |
+
+### Docker Compose 파일 용도
+
+| 파일 | 용도 | 포함 서비스 |
+|------|------|------------|
+| `docker-compose.yml` | 부가 서비스 (로컬 개발용) | Redis + Document Service + ClamAV |
+| `docker-compose.full.yml` | 올인원 배포 | Redis + Document Service + 챗봇 앱 |
+| `docker-compose.production.yml` | 프로덕션 배포 | 전체 + Nginx SSL + 모니터링 |
+| `docker-compose.gpu.yml` | GPU 서버 배포 | 전체 + NVIDIA GPU + 모니터링 |
+| `docker-compose.searxng.yml` | 웹 검색 확장 | SearXNG + Crawl4AI |
+
+---
+
+## 3. 방법 1: 로컬 개발 환경
+
+Docker 없이 직접 실행합니다. 개발 및 테스트에 적합합니다.
+
+### 3-1. 소스 코드 받기
+
 ```bash
-git clone <repository-url>
-cd chatbot_redis
+git clone <repository-url> atlea-chatbot
+cd atlea-chatbot
 ```
 
-2. **가상 환경 생성**
+### 3-2. Python 가상환경 설정
+
 ```bash
 python3 -m venv venv
 source venv/bin/activate
-```
-
-3. **의존성 설치**
-```bash
 pip install --upgrade pip
-pip install -r requirements-mac.txt
+pip install -r requirements.txt
 ```
 
-4. **Redis 설치 및 실행**
+### 3-3. 환경 설정
+
 ```bash
+cp .env.example .env
+```
+
+`.env` 파일을 편집합니다:
+
+```env
+# 필수: JWT 보안 키 생성
+# 아래 명령어 결과를 JWT_SECRET_KEY에 입력
+# python3 -c 'import secrets; print(secrets.token_urlsafe(32))'
+JWT_SECRET_KEY=여기에_생성된_키_입력
+
+# Redis (로컬 실행 시)
+REDIS_HOST=localhost
+REDIS_PORT=6379
+
+# 서버 포트
+PORT=8000
+
+# 모델 설정 (RAM에 따라 선택)
+# 20GB+ RAM → mlx-community/Qwen3-30B-A3B-4bit
+# 4GB RAM   → mlx-community/Qwen2.5-3B-Instruct-4bit
+LLM_MODEL=mlx-community/Qwen3-30B-A3B-4bit
+```
+
+### 3-4. Ollama 설치 및 모델 다운로드
+
+```bash
+# macOS
+brew install ollama
+
+# Linux
+curl -fsSL https://ollama.com/install.sh | sh
+
+# Ollama 서버 시작
+ollama serve
+
+# LLM 모델 다운로드 (별도 터미널에서)
+ollama pull alibayram/Qwen3-30B-A3B-Instruct-2507:latest
+```
+
+### 3-5. Redis 및 부가 서비스 시작
+
+```bash
+docker-compose up -d
+```
+
+이 명령은 `docker-compose.yml`에 정의된 Redis, Document Service, ClamAV를 시작합니다.
+
+Docker 없이 Redis만 사용하려면:
+
+```bash
+# macOS
 brew install redis
 brew services start redis
-```
 
-5. **환경 변수 설정**
-```bash
-cp .env.example .env
-# .env 파일 편집
-```
-
-6. **서버 실행**
-```bash
-python -m src.web_server
-```
-
-### Mac에서의 특징
-- **MLX 백엔드**: Apple GPU 최적화를 위해 MLX 사용
-- **MPS 가속**: PyTorch도 Apple Metal Performance Shaders 사용
-- **빠른 추론**: Apple Silicon에 최적화된 모델 실행
-
----
-
-## Linux (NVIDIA GPU) 배포
-
-### 시스템 요구사항
-- Ubuntu 20.04 이상 (또는 호환 Linux 배포판)
-- NVIDIA GPU (CUDA Compute Capability 7.0+)
-- NVIDIA Driver 525.x 이상
-- CUDA 12.1 이상
-- Python 3.10 이상
-- 최소 16GB RAM, GPU 메모리 8GB 이상 권장
-
-### 설치 방법
-
-1. **NVIDIA Driver 설치**
-```bash
-# Ubuntu 예시
-sudo ubuntu-drivers devices
-sudo ubuntu-drivers autoinstall
-sudo reboot
-```
-
-2. **CUDA Toolkit 설치**
-```bash
-# CUDA 12.1 설치 예시
-wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb
-sudo dpkg -i cuda-keyring_1.1-1_all.deb
-sudo apt-get update
-sudo apt-get -y install cuda-12-1
-```
-
-3. **저장소 클론 및 가상 환경**
-```bash
-git clone <repository-url>
-cd chatbot_redis
-python3 -m venv venv
-source venv/bin/activate
-```
-
-4. **의존성 설치**
-```bash
-pip install --upgrade pip
-
-# 먼저 PyTorch를 CUDA 지원과 함께 설치
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
-
-# 나머지 의존성 설치
-pip install -r requirements-linux.txt
-```
-
-5. **Redis 설치 및 실행**
-```bash
-sudo apt-get update
+# Linux
 sudo apt-get install redis-server
 sudo systemctl start redis-server
-sudo systemctl enable redis-server
 ```
 
-6. **환경 변수 설정**
+### 3-6. 서버 실행
+
+```bash
+# 포그라운드 (로그가 터미널에 출력)
+./run.sh
+
+# 백그라운드 실행
+./run.sh -b
+
+# 서버 상태 확인
+./run.sh status
+
+# 서버 중지
+./run.sh stop
+```
+
+### 3-7. 접속 확인
+
+| 서비스 | URL | 설명 |
+|--------|-----|------|
+| 웹 UI | http://localhost:8000 | 챗봇 메인 화면 |
+| 소개 페이지 | http://localhost:8000/landing.html | 제품 소개 |
+| API 문서 | http://localhost:8000/docs | Swagger UI |
+| 건강 상태 | http://localhost:8000/health | 서버 상태 |
+| RedisInsight | http://localhost:8001 | Redis 관리 도구 |
+
+---
+
+## 4. 방법 2: Docker 올인원 배포
+
+모든 서비스를 Docker로 한번에 실행합니다. 가장 쉬운 방법입니다.
+
+### 4-1. 원클릭 설치
+
+```bash
+git clone <repository-url> atlea-chatbot
+cd atlea-chatbot
+chmod +x install.sh
+./install.sh
+```
+
+`install.sh`가 자동으로 처리하는 항목:
+- 시스템 요구사항 확인 (Docker, 디스크 공간)
+- `.env` 파일 생성 및 JWT 키 자동 생성
+- AI 모델 다운로드 (선택)
+- Docker 이미지 빌드
+- 전체 서비스 시작
+
+### 4-2. 수동 설치
+
+원클릭 설치 대신 단계별로 실행할 수 있습니다:
+
+```bash
+# 1. 환경 설정
+cp .env.example .env
+
+# JWT 시크릿 키 생성 후 .env에 입력
+python3 -c 'import secrets; print(secrets.token_urlsafe(32))'
+
+# 2. 디렉토리 생성
+mkdir -p data model logs
+
+# 3. Ollama 설치 및 모델 다운로드 (호스트에서)
+# macOS: brew install ollama
+# Linux: curl -fsSL https://ollama.com/install.sh | sh
+ollama serve &
+ollama pull alibayram/Qwen3-30B-A3B-Instruct-2507:latest
+
+# 4. Docker 이미지 빌드 및 실행
+docker-compose -f docker-compose.full.yml up -d
+
+# 5. 상태 확인
+docker-compose -f docker-compose.full.yml ps
+```
+
+### 4-3. 서비스 관리 명령어
+
+```bash
+# 전체 서비스 상태 확인
+docker-compose -f docker-compose.full.yml ps
+
+# 로그 확인 (실시간)
+docker-compose -f docker-compose.full.yml logs -f
+
+# 특정 서비스 로그
+docker-compose -f docker-compose.full.yml logs -f chatbot-app
+
+# 전체 서비스 중지
+docker-compose -f docker-compose.full.yml down
+
+# 전체 서비스 재시작
+docker-compose -f docker-compose.full.yml restart
+
+# 특정 서비스만 재시작
+docker-compose -f docker-compose.full.yml restart chatbot-app
+```
+
+---
+
+## 5. 방법 3: 프로덕션 배포 (SSL + Nginx)
+
+실제 서비스 운영을 위한 배포입니다. SSL/TLS 암호화, 리버스 프록시, 리소스 제한, 모니터링이 포함됩니다.
+
+### 5-1. 사전 준비
+
+- 도메인 이름이 서버 IP를 가리키도록 DNS 설정
+- SSL 인증서 준비 ([10. SSL 인증서 설정](#10-ssl-인증서-설정) 참조)
+
+```bash
+mkdir -p nginx/ssl
+# 인증서 파일 배치:
+# nginx/ssl/fullchain.pem  (인증서 + 체인)
+# nginx/ssl/privkey.pem    (개인 키)
+```
+
+### 5-2. 환경 설정
+
 ```bash
 cp .env.example .env
-# .env 파일 편집
 ```
 
-7. **GPU 확인**
+프로덕션용 `.env` 설정:
+
+```env
+# 보안 키 (반드시 변경!)
+JWT_SECRET_KEY=여기에_python3으로_생성한_키
+
+# Redis 비밀번호 설정
+REDIS_PASSWORD=강력한_랜덤_비밀번호
+
+# CORS 설정 (실제 도메인으로 변경)
+CORS_ORIGINS=https://chatbot.example.com
+
+# 로그 레벨
+LOG_LEVEL=warning
+
+# Ollama 연결 (호스트에서 실행 중인 경우)
+OLLAMA_BASE_URL=http://host.docker.internal:11434
+```
+
+### 5-3. Nginx 도메인 설정
+
+`nginx/nginx.conf`에서 도메인 이름을 변경합니다:
+
+```nginx
+server_name chatbot.example.com;   # 실제 도메인으로 변경
+```
+
+### 5-4. 서비스 시작
+
 ```bash
-python -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}'); print(f'GPU: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else \"None\"}')"
+# 기본 실행
+docker-compose -f docker-compose.production.yml up -d
+
+# 모니터링 포함 실행 (Prometheus + Grafana + RedisInsight)
+docker-compose -f docker-compose.production.yml --profile monitoring up -d
 ```
 
-8. **서버 실행**
+### 5-5. 접속 확인
+
 ```bash
-python -m src.web_server
+# HTTPS 접속 확인
+curl -I https://chatbot.example.com
+
+# 건강 상태 확인
+curl https://chatbot.example.com/api/status
 ```
 
-### Linux NVIDIA GPU에서의 특징
-- **Transformers + CUDA**: NVIDIA GPU 최적화
-- **Float16 연산**: GPU 메모리 절약 및 속도 향상
-- **자동 device_map**: 큰 모델도 GPU 메모리에 효율적으로 로드
-- **병렬 처리**: CUDA를 활용한 빠른 임베딩 및 추론
+### 5-6. 방화벽 설정
+
+```bash
+# Ubuntu/Debian
+sudo ufw allow 80/tcp     # HTTP → HTTPS 리다이렉트
+sudo ufw allow 443/tcp    # HTTPS
+sudo ufw deny 6379/tcp    # Redis 외부 접근 차단
+sudo ufw deny 8081/tcp    # Document Service 외부 접근 차단
+```
+
+### 5-7. 프로덕션 보안 체크리스트
+
+- [ ] `JWT_SECRET_KEY`를 강력한 랜덤 값으로 변경
+- [ ] `REDIS_PASSWORD` 설정
+- [ ] `CORS_ORIGINS`에 실제 도메인만 명시 (`*` 사용 금지)
+- [ ] SSL 인증서 설치 및 자동 갱신 설정
+- [ ] 방화벽으로 내부 포트 차단 (6379, 8081)
+- [ ] `ADMIN_DEFAULT_PASSWORD` 강력한 비밀번호 설정
+- [ ] `RATE_LIMIT_ENABLED=true` 확인
+- [ ] Docker 메모리 제한 설정 확인
 
 ---
 
-## Linux (CPU) 배포
+## 6. 방법 4: GPU 서버 배포 (NVIDIA)
 
-CPU만 사용하는 환경에서도 실행 가능하지만, 성능이 제한됩니다.
+NVIDIA GPU가 있는 서버에서 빠른 LLM 추론을 위한 배포입니다.
 
-### 설치 방법
+### 6-1. NVIDIA Container Toolkit 설치
 
-1-5단계는 NVIDIA GPU 배포와 동일
-
-6. **CPU용 PyTorch 설치**
 ```bash
-pip install torch torchvision torchaudio
-pip install -r requirements-linux.txt
-```
+# NVIDIA 드라이버 확인
+nvidia-smi
 
-7. **서버 실행**
-```bash
-python -m src.web_server
-```
+# NVIDIA Container Toolkit 설치 (Ubuntu/Debian)
+curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | \
+  sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
 
-### 성능 최적화
-- 더 작은 모델 사용 권장 (예: 3B 모델)
-- 배치 크기 줄이기
-- max_tokens 제한
-
----
-
-## Docker 배포
-
-### Mac (Apple Silicon) Docker
-
-**주의**: Docker Desktop for Mac은 MLX를 지원하지 않으므로 네이티브 설치 권장
-
-### Linux (NVIDIA GPU) Docker
-
-1. **NVIDIA Container Toolkit 설치**
-```bash
-distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
-curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
-curl -s -L https://nvidia.github.io/nvidia-docker/$distribution/nvidia-docker.list | sudo tee /etc/apt/sources.list.d/nvidia-docker.list
+curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | \
+  sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | \
+  sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
 
 sudo apt-get update
 sudo apt-get install -y nvidia-container-toolkit
+sudo nvidia-ctk runtime configure --runtime=docker
 sudo systemctl restart docker
 ```
 
-2. **Docker Compose로 실행**
+### 6-2. 환경 설정
+
 ```bash
-docker-compose -f docker-compose.production.yml up -d
+cp .env.example .env
 ```
 
-3. **GPU 확인**
-```bash
-docker exec chatbot-app nvidia-smi
+GPU 전용 `.env` 설정:
+
+```env
+# GPU용 LLM 모델
+LLM_MODEL=Qwen/Qwen2.5-7B-Instruct
+
+# Redis 비밀번호
+REDIS_PASSWORD=강력한_비밀번호
+
+# JWT 키
+JWT_SECRET_KEY=자동_생성_키
 ```
+
+### 6-3. 서비스 시작
+
+```bash
+# 기본 실행
+docker-compose -f docker-compose.gpu.yml up -d
+
+# GPU 모니터링 포함 실행
+docker-compose -f docker-compose.gpu.yml --profile monitoring up -d
+```
+
+### 6-4. GPU 모니터링
+
+| 서비스 | URL | 설명 |
+|--------|-----|------|
+| NVIDIA Exporter | http://localhost:9400 | GPU 메트릭 |
+| Prometheus | http://localhost:9090 | 메트릭 수집 |
+| Grafana | http://localhost:3000 | 대시보드 |
 
 ---
 
-## SearXNG + Crawl4AI 배포
+## 7. Ollama 설정
 
-SearXNG는 자체 호스팅 메타 검색 엔진으로, Tavily의 대안으로 사용할 수 있습니다.
+Ollama는 LLM을 로컬에서 실행하기 위한 서버로, 모든 플랫폼에서 사용할 수 있습니다.
 
-### 시작 방법
-
-```bash
-# SearXNG + Crawl4AI 시작
-docker compose -f docker-compose.searxng.yml up -d
-
-# 상태 확인
-docker ps | grep -E "searxng|crawl4ai"
-```
-
-### 서비스 정보
-
-| 서비스 | 포트 | 설명 |
-|--------|------|------|
-| SearXNG | 8888 | 메타 검색 엔진 (Google, Bing, DuckDuckGo 등) |
-| Crawl4AI | 11235 | 웹 페이지 콘텐츠 추출 |
-
-### 설정 방법
-
-1. **관리자 페이지 접속**: `http://localhost:8000/admin.html`
-
-2. **Hybrid RAG 설정**에서:
-   - 웹 검색 프로바이더: `SearXNG (자체 호스팅)` 선택
-   - SearXNG URL: `http://localhost:8888` 입력
-
-3. **설정 저장**
-
-### SearXNG 엔진 설정
-
-`searxng/settings.yml`에서 검색 엔진 활성화/비활성화:
-
-```yaml
-engines:
-  - name: google
-    disabled: false
-  - name: bing
-    disabled: false
-  - name: duckduckgo
-    disabled: false
-  - name: stackoverflow
-    engine: stackexchange
-    site: stackoverflow
-    categories: [general, it]
-    disabled: false
-```
-
-### 헬스 체크
+### 7-1. 설치
 
 ```bash
-# SearXNG 상태
-curl http://localhost:8888/healthz
-
-# Crawl4AI 상태
-curl http://localhost:11235/health
-```
-
-### 문제 해결
-
-**SearXNG 검색 에러**:
-```bash
-# 로그 확인
-docker logs searxng --tail 50
-
-# 특정 엔진 에러 시 settings.yml에서 비활성화
-# 예: startpage 에러 → disabled: true 설정
-```
-
-**Crawl4AI 메모리 부족**:
-```yaml
-# docker-compose.searxng.yml
-deploy:
-  resources:
-    limits:
-      memory: 4G  # 필요시 증가
-```
-
----
-
-## Ollama 배포
-
-Ollama는 로컬에서 LLM을 실행할 수 있는 범용 서버로, MLX(Apple Silicon 전용)의 대안으로 모든 플랫폼에서 사용할 수 있습니다.
-
-### Ollama 설치
-
-#### macOS
-```bash
-# Homebrew로 설치
+# macOS
 brew install ollama
 
-# 또는 공식 설치 스크립트
+# Linux
 curl -fsSL https://ollama.com/install.sh | sh
-```
 
-#### Linux
-```bash
-curl -fsSL https://ollama.com/install.sh | sh
-```
-
-#### Docker
-```bash
+# Docker
 docker run -d --name ollama -p 11434:11434 -v ollama:/root/.ollama ollama/ollama
 ```
 
-### 모델 다운로드
+### 7-2. 모델 다운로드
 
 ```bash
-# Ollama 서버 시작 (설치 후 자동 시작되지 않은 경우)
+# Ollama 서버 시작
 ollama serve
 
-# 기본 LLM 모델 다운로드
+# 기본 LLM 모델 (~20GB)
 ollama pull alibayram/Qwen3-30B-A3B-Instruct-2507:latest
 
-# 경량 모델 (메모리 부족 시)
+# 경량 모델 (~2GB, 메모리 부족 시)
 ollama pull qwen2.5:3b
 
 # 설치된 모델 확인
 ollama list
 ```
 
-### 환경변수 설정
+### 7-3. 환경 변수
 
-```bash
-# .env 파일에 추가
+```env
 OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_LLM_MODEL=alibayram/Qwen3-30B-A3B-Instruct-2507:latest
-
-# 임베딩 모델 (선택사항 - 기본적으로 Sentence Transformers 사용)
-# OLLAMA_EMBEDDING_MODEL=nomic-embed-text
 ```
 
-### Ollama를 systemd 서비스로 실행 (Linux)
+### 7-4. Linux systemd 서비스 등록
 
-```ini
+```bash
 # /etc/systemd/system/ollama.service
+sudo tee /etc/systemd/system/ollama.service << 'EOF'
 [Unit]
 Description=Ollama LLM Server
 After=network.target
@@ -352,9 +461,8 @@ Environment=OLLAMA_HOST=0.0.0.0
 
 [Install]
 WantedBy=multi-user.target
-```
+EOF
 
-```bash
 sudo systemctl enable ollama
 sudo systemctl start ollama
 
@@ -362,204 +470,380 @@ sudo systemctl start ollama
 curl http://localhost:11434/api/version
 ```
 
-### 헬스 체크
+---
+
+## 8. 선택 구성요소
+
+### 8-1. 웹 검색 (SearXNG + Crawl4AI)
+
+Hybrid RAG에서 웹 검색을 활성화하려면:
+
+**옵션 A: SearXNG (자체 호스팅, 무료)**
 
 ```bash
-# Ollama 서버 상태
-curl http://localhost:11434/api/version
-
-# 모델 목록
-curl http://localhost:11434/api/tags
-
-# 간단한 추론 테스트
-curl http://localhost:11434/api/generate -d '{"model":"alibayram/Qwen3-30B-A3B-Instruct-2507:latest","prompt":"안녕하세요","stream":false}'
+docker-compose -f docker-compose.searxng.yml up -d
 ```
 
-### 문제 해결
+관리자 페이지(`/admin.html`) → Hybrid RAG 설정에서:
+- 웹 검색 프로바이더: `SearXNG (자체 호스팅)` 선택
+- SearXNG URL: `http://localhost:8888` 입력
 
-**Ollama 서버 연결 실패**:
-```bash
-# 서버 실행 여부 확인
-curl http://localhost:11434/api/version
+**옵션 B: Tavily API (클라우드)**
 
-# 포트 사용 확인
-lsof -i :11434
-
-# 서버 재시작
-ollama serve
+```env
+# .env에 추가 (https://tavily.com 에서 무료 키 발급)
+TAVILY_API_KEY=tvly-xxxxxxxxxxxxx
 ```
 
-**모델 다운로드 실패**:
-```bash
-# 디스크 공간 확인 (30B 모델은 약 20GB 필요)
-df -h
+### 8-2. ClamAV 바이러스 검사
 
-# 다운로드 재시도
+`docker-compose.yml`에 포함되어 있으며 파일 업로드 시 자동으로 검사합니다.
+
+```env
+CLAMAV_HOST=localhost
+CLAMAV_PORT=3310
+```
+
+> ClamAV는 시작 시 바이러스 정의 파일을 로드하므로 초기 구동에 3~5분이 소요됩니다.
+
+---
+
+## 9. 환경 변수 설정
+
+### 필수 설정
+
+| 변수 | 설명 | 기본값 |
+|------|------|--------|
+| `JWT_SECRET_KEY` | JWT 토큰 서명 키 (32자 이상) | 없음 (반드시 설정) |
+| `REDIS_HOST` | Redis 호스트 | localhost |
+| `PORT` | 서버 포트 | 8000 |
+| `LLM_MODEL` | LLM 모델 경로 | Qwen3-30B-A3B-4bit |
+| `EMBEDDING_MODEL` | 임베딩 모델 경로 | nlpai-lab/KURE-v1 |
+
+### 보안 설정
+
+| 변수 | 설명 | 프로덕션 권장값 |
+|------|------|----------------|
+| `JWT_SECRET_KEY` | JWT 서명 키 | `python3 -c 'import secrets; print(secrets.token_urlsafe(32))'` |
+| `REDIS_PASSWORD` | Redis 인증 | 반드시 설정 |
+| `CORS_ORIGINS` | 허용 도메인 | 실제 도메인만 명시 |
+| `RATE_LIMIT_ENABLED` | API 속도 제한 | true |
+| `ADMIN_DEFAULT_PASSWORD` | 관리자 비밀번호 | 미설정 시 자동 생성 |
+
+### 성능 설정
+
+| 변수 | 설명 | 기본값 |
+|------|------|--------|
+| `CHUNK_SIZE` | 문서 청크 크기 | 512 |
+| `CHUNK_OVERLAP` | 청크 겹침 크기 | 50 |
+| `MAX_FILE_SIZE_MB` | 최대 업로드 크기(MB) | 100 |
+| `ENABLE_QUESTION_GENERATION` | 자동 질문 생성 | false |
+
+---
+
+## 10. SSL 인증서 설정
+
+### 방법 A: Let's Encrypt (무료, 권장)
+
+```bash
+# 1. Certbot 설치
+sudo apt install certbot
+
+# 2. 인증서 발급 (서버가 중지된 상태에서)
+sudo certbot certonly --standalone -d chatbot.example.com
+
+# 3. 인증서 복사
+mkdir -p nginx/ssl
+sudo cp /etc/letsencrypt/live/chatbot.example.com/fullchain.pem nginx/ssl/
+sudo cp /etc/letsencrypt/live/chatbot.example.com/privkey.pem nginx/ssl/
+sudo chmod 644 nginx/ssl/fullchain.pem
+sudo chmod 600 nginx/ssl/privkey.pem
+```
+
+자동 갱신 crontab:
+
+```bash
+sudo crontab -e
+# 매월 1일 새벽 3시에 갱신
+0 3 1 * * certbot renew --quiet && \
+  cp /etc/letsencrypt/live/chatbot.example.com/fullchain.pem /path/to/atlea-chatbot/nginx/ssl/ && \
+  cp /etc/letsencrypt/live/chatbot.example.com/privkey.pem /path/to/atlea-chatbot/nginx/ssl/ && \
+  docker-compose -f docker-compose.production.yml restart nginx
+```
+
+### 방법 B: 자체 서명 인증서 (테스트용)
+
+```bash
+mkdir -p nginx/ssl
+openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+  -keyout nginx/ssl/privkey.pem \
+  -out nginx/ssl/fullchain.pem \
+  -subj "/CN=localhost"
+```
+
+> 자체 서명 인증서는 브라우저에서 보안 경고가 표시됩니다. 테스트 목적으로만 사용하세요.
+
+---
+
+## 11. 백업 및 복원
+
+### 수동 백업
+
+```bash
+# 백업 디렉토리 생성
+BACKUP_DIR="./backups/$(date +%Y%m%d_%H%M%S)"
+mkdir -p "$BACKUP_DIR"
+
+# 1. Redis 데이터 백업
+docker exec chatbot_redis redis-cli BGSAVE
+sleep 5
+docker cp chatbot_redis:/data/dump.rdb "$BACKUP_DIR/redis_dump.rdb"
+
+# 2. 업로드된 문서 백업
+cp -r ./data "$BACKUP_DIR/data"
+
+# 3. 환경 설정 백업
+cp .env "$BACKUP_DIR/.env"
+
+# 4. 압축
+tar czf "$BACKUP_DIR.tar.gz" -C "$(dirname $BACKUP_DIR)" "$(basename $BACKUP_DIR)"
+rm -rf "$BACKUP_DIR"
+echo "백업 완료: $BACKUP_DIR.tar.gz"
+```
+
+### 복원
+
+```bash
+# 1. 압축 해제
+RESTORE_DIR="./restore_tmp"
+mkdir -p "$RESTORE_DIR"
+tar xzf <백업파일.tar.gz> -C "$RESTORE_DIR"
+
+# 2. 서비스 중지
+docker-compose -f docker-compose.full.yml stop
+
+# 3. 데이터 복원
+cp -r "$RESTORE_DIR"/*/data/* ./data/
+cp "$RESTORE_DIR"/*/.env ./.env
+
+# 4. Redis 데이터 복원
+docker-compose -f docker-compose.full.yml up -d redis
+sleep 5
+docker cp "$RESTORE_DIR"/*/redis_dump.rdb chatbot_redis:/data/dump.rdb
+docker-compose -f docker-compose.full.yml restart redis
+
+# 5. 전체 서비스 시작
+docker-compose -f docker-compose.full.yml up -d
+
+# 6. 정리
+rm -rf "$RESTORE_DIR"
+```
+
+### 자동 백업 (crontab)
+
+```bash
+# 매일 새벽 2시에 백업
+0 2 * * * cd /path/to/atlea-chatbot && ./scripts/backup.sh
+
+# 7일 이상 된 백업 자동 삭제
+0 3 * * * find /path/to/atlea-chatbot/backups -name "*.tar.gz" -mtime +7 -delete
+```
+
+---
+
+## 12. 모니터링
+
+### 기본 상태 확인
+
+```bash
+# 서비스 상태
+docker-compose -f docker-compose.full.yml ps
+
+# 리소스 사용량
+docker stats
+
+# 애플리케이션 로그 (최근 100줄)
+docker-compose -f docker-compose.full.yml logs -f chatbot-app --tail=100
+
+# 건강 상태 API
+curl http://localhost:8000/health
+```
+
+### Prometheus + Grafana (프로덕션)
+
+```bash
+docker-compose -f docker-compose.production.yml --profile monitoring up -d
+```
+
+| 서비스 | URL | 기본 계정 |
+|--------|-----|----------|
+| Prometheus | http://localhost:9090 | - |
+| Grafana | http://localhost:3000 | admin / admin |
+| RedisInsight | http://localhost:8001 | - |
+
+---
+
+## 13. 업데이트 및 롤백
+
+### 업데이트 절차
+
+```bash
+# 1. 백업 (권장)
+./scripts/backup.sh
+
+# 2. 소스 코드 업데이트
+git pull origin main
+
+# 3. Docker 이미지 재빌드 및 재시작
+docker-compose -f docker-compose.full.yml up -d --build
+
+# 4. 확인
+curl http://localhost:8000/health
+```
+
+### 롤백
+
+```bash
+# 1. 이전 버전 확인
+git log --oneline -10
+
+# 2. 이전 버전으로 체크아웃
+git checkout <이전_커밋_해시>
+
+# 3. 재빌드 및 재시작
+docker-compose -f docker-compose.full.yml up -d --build
+```
+
+> 데이터는 Docker 볼륨에 저장되므로 이미지 재빌드 시에도 유지됩니다.
+
+---
+
+## 14. 플랫폼별 특성
+
+### Apple Silicon (M1/M2/M3/M4)
+
+- **MLX 프레임워크**로 GPU 가속 자동 지원
+- Docker Desktop에서는 MLX를 사용할 수 없으므로 **네이티브 설치 권장**
+- 통합 메모리 구조로 GPU/CPU 메모리 공유
+
+### Linux + NVIDIA GPU
+
+- **Transformers + CUDA** 또는 **Ollama + GPU**로 빠른 추론
+- `docker-compose.gpu.yml`로 GPU 컨테이너 지원
+- NVIDIA Container Toolkit 필수
+
+### 성능 비교
+
+| 플랫폼 | 백엔드 | 상대 속도 |
+|--------|--------|----------|
+| Mac M2 Max | MLX / Ollama | 1.5x |
+| Mac M1 Pro | MLX / Ollama | 1.0x (기준) |
+| RTX 4090 | CUDA / Ollama | 3-4x |
+| RTX 3090 | CUDA / Ollama | 2-3x |
+| CPU 16코어 | Ollama | 0.1-0.3x |
+
+### 모델 호환성
+
+| 플랫폼 | MLX 모델 | Ollama 모델 | Transformers 모델 |
+|--------|---------|------------|------------------|
+| macOS (Apple Silicon) | O | O | O |
+| Linux (NVIDIA GPU) | X | O | O |
+| Linux (CPU) | X | O | O (느림) |
+
+---
+
+## 15. 문제 해결
+
+### 서비스가 시작되지 않음
+
+```bash
+# 로그 확인
+docker-compose -f docker-compose.full.yml logs chatbot-app
+
+# 주요 원인:
+# 1. Redis 연결 실패 → Redis 먼저 시작 확인
+# 2. 포트 충돌 → lsof -i :8000
+# 3. 메모리 부족 → docker stats
+```
+
+### Redis 연결 실패
+
+```bash
+docker-compose -f docker-compose.full.yml exec redis redis-cli ping
+# PONG 응답이 와야 정상
+```
+
+### 모델 로딩 실패
+
+```bash
+# Ollama 상태 확인
+curl http://localhost:11434/api/version
+
+# 모델 목록 확인
+ollama list
+
+# 모델 재다운로드
 ollama pull alibayram/Qwen3-30B-A3B-Instruct-2507:latest
 ```
 
-**GPU 메모리 부족 시**:
+### 포트 충돌
+
 ```bash
-# 경량 모델 사용
-OLLAMA_LLM_MODEL=qwen2.5:3b
+# 사용 중인 포트 확인
+lsof -i :8000
+lsof -i :6379
+
+# 해결: .env에서 PORT 값 변경
 ```
 
----
+### Docker 메모리 부족
 
-## 플랫폼 자동 감지
+Docker Desktop 설정에서 메모리를 늘려주세요:
+- 권장: 8GB 이상
+- LLM 포함 시: 16GB 이상
 
-프로그램은 시작 시 자동으로 플랫폼을 감지하고 최적의 백엔드를 선택합니다:
+### Ollama 연결 실패
 
-```python
-# src/platform_utils.py
-PlatformDetector 클래스가 자동으로:
-1. 현재 시스템 감지 (Darwin, Linux, Windows)
-2. 하드웨어 확인 (Apple Silicon, NVIDIA GPU, CPU)
-3. 최적 백엔드 선택 (MLX, Transformers+CUDA, Transformers+CPU)
-```
-
-### 로그 예시
-
-**Mac (Apple Silicon)**:
-```
-Platform Information:
-  System: Darwin
-  Machine: arm64
-  CUDA Available: False
-  MPS Available: True
-  MLX Available: True
-  Recommended LLM Backend: mlx
-  Recommended Device: mps
-```
-
-**Linux (NVIDIA GPU)**:
-```
-Platform Information:
-  System: Linux
-  Machine: x86_64
-  CUDA Available: True
-  MPS Available: False
-  MLX Available: False
-  Recommended LLM Backend: transformers
-  Recommended Device: cuda
-```
-
----
-
-## 모델 호환성
-
-### MLX 모델 (Mac 전용)
-- `mlx-community/Qwen3-30B-A3B-4bit`
-- `mlx-community/rnj-1-instruct-4bit`
-- MLX Hub의 모든 양자화 모델
-
-### Ollama 모델 (모든 플랫폼)
-- `alibayram/Qwen3-30B-A3B-Instruct-2507:latest` (기본, ~20GB)
-- `qwen2.5:3b` (경량, ~2GB)
-- `qwen2.5:1.5b` (초경량, ~1GB)
-- Ollama 라이브러리의 모든 모델 (`ollama.com/library`)
-- GGUF 형식 직접 지원
-
-### Transformers 모델 (모든 플랫폼)
-- HuggingFace Hub의 모든 모델
-- 자동 양자화 지원 (4bit/8bit)
-- GGUF 형식은 별도 변환 필요
-
-### Embedding 모델 (모든 플랫폼)
-- `nlpai-lab/KURE-v1` (한국어)
-- `jinaai/jina-embeddings-v3`
-- `intfloat/multilingual-e5-large`
-- SentenceTransformers 호환 모든 모델
-
----
-
-## 트러블슈팅
-
-### Mac 관련
-
-**문제**: MLX가 설치되지 않음
 ```bash
-# Rosetta 모드로 실행 중인지 확인
-arch
-# arm64가 아니면 네이티브 터미널 사용
+# 서버 실행 확인
+curl http://localhost:11434/api/version
 
-pip install mlx mlx-lm
+# Docker에서 호스트 Ollama 접근 시
+OLLAMA_BASE_URL=http://host.docker.internal:11434
+
+# Linux에서 Docker 호스트 접근 시
+OLLAMA_BASE_URL=http://172.17.0.1:11434
 ```
 
-### Linux NVIDIA 관련
+### SSL 인증서 오류
 
-**문제**: CUDA가 감지되지 않음
 ```bash
-# CUDA 설치 확인
-nvcc --version
-nvidia-smi
+# 인증서 파일 확인
+ls -la nginx/ssl/
 
-# PyTorch CUDA 지원 확인
-python -c "import torch; print(torch.cuda.is_available())"
+# 인증서 만료일 확인
+openssl x509 -enddate -noout -in nginx/ssl/fullchain.pem
 
-# 재설치
-pip uninstall torch torchvision torchaudio
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
-```
-
-**문제**: GPU 메모리 부족
-```bash
-# 현재 사용 중: Qwen3 30B (~20GB RAM 필요)
-# 메모리 부족 시 경량 모델로 변경 (별도 다운로드 필요)
-
-# 경량 옵션 (~2GB RAM)
-LLM_MODEL=mlx-community/Qwen2.5-3B-Instruct-4bit
-
-# 초경량 옵션 (~1.5GB RAM)
-LLM_MODEL=mlx-community/Qwen2.5-1.5B-Instruct-4bit
-```
-
-### 공통 문제
-
-**문제**: Redis 연결 실패
-```bash
-# Redis 상태 확인
-redis-cli ping
-# PONG 응답이 와야 함
-
-# Redis 재시작
-# Mac:
-brew services restart redis
-# Linux:
-sudo systemctl restart redis-server
+# 인증서 갱신
+sudo certbot renew
 ```
 
 ---
 
-## 성능 비교
+## 포트 매핑 요약
 
-| 플랫폼 | LLM 백엔드 | 상대 속도 | GPU 메모리 |
-|--------|-----------|----------|-----------|
-| Mac M1 Pro | MLX | 1.0x (기준) | 통합 메모리 |
-| Mac M2 Max | MLX | 1.5x | 통합 메모리 |
-| RTX 4090 | Transformers+CUDA | 3-4x | 24GB |
-| RTX 3090 | Transformers+CUDA | 2-3x | 24GB |
-| Mac M1 Pro | Ollama | 0.8-1.0x | 통합 메모리 |
-| Linux (NVIDIA) | Ollama | 2-3x | GPU 메모리 |
-| CPU (16코어) | Ollama | 0.1-0.3x | 시스템 RAM |
-| CPU (16코어) | Transformers+CPU | 0.1-0.2x | 시스템 RAM |
-
----
-
-## 추가 리소스
-
-- [MLX Documentation](https://ml-explore.github.io/mlx/)
-- [PyTorch CUDA Installation](https://pytorch.org/get-started/locally/)
-- [Transformers Documentation](https://huggingface.co/docs/transformers/)
-- [Redis Documentation](https://redis.io/docs/)
-
----
-
-## 문의 및 지원
-
-문제가 발생하면 GitHub Issues에 다음 정보와 함께 제보해주세요:
-1. 운영체제 및 버전
-2. 하드웨어 정보 (GPU 모델 등)
-3. Python 버전
-4. 에러 로그
-5. `python -m src.web_server` 실행 시 나타나는 플랫폼 정보
+| 포트 | 서비스 | 사용 환경 |
+|------|--------|----------|
+| 80 | Nginx HTTP | 프로덕션 |
+| 443 | Nginx HTTPS | 프로덕션 |
+| 8000 | 챗봇 웹 UI / API | 전체 |
+| 6379 | Redis | 전체 (프로덕션: 외부 차단) |
+| 8001 | RedisInsight | 전체 |
+| 8081 | Document Service | 전체 (프로덕션: 외부 차단) |
+| 3310 | ClamAV | 전체 |
+| 8888 | SearXNG | 선택 |
+| 11235 | Crawl4AI | 선택 |
+| 11434 | Ollama | 전체 |
+| 9090 | Prometheus | 모니터링 |
+| 3000 | Grafana | 모니터링 |
+| 9400 | NVIDIA Exporter | GPU 모니터링 |
