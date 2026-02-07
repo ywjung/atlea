@@ -11,7 +11,8 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-green.svg)](https://fastapi.tiangolo.com/)
 [![Redis](https://img.shields.io/badge/Redis-Stack-red.svg)](https://redis.io/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/Version-2.5.0-brightgreen.svg)]()
+[![Version](https://img.shields.io/badge/Version-2.5.1-brightgreen.svg)]()
+[![PyPI](https://img.shields.io/badge/pip%20install-atlea--chatbot-blue.svg)]()
 [![Built with Claude Code](https://img.shields.io/badge/Built%20with-Claude%20Code-blueviolet?logo=anthropic)](https://claude.ai/claude-code)
 
 [빠른 시작](#-빠른-시작) • [기능](#-주요-기능) • [API](#-api-레퍼런스) • [보안](#-보안) • [로드맵](#%EF%B8%8F-로드맵)
@@ -247,7 +248,43 @@ python scripts/setup_admin.py
 | http://localhost:8000/metrics | Prometheus 메트릭 |
 
 <details>
-<summary>수동 설치 (고급 사용자)</summary>
+<summary>pip install (패키지 설치)</summary>
+
+```bash
+# 1. Python 환경
+python3 -m venv venv
+source venv/bin/activate
+
+# 2. PyTorch 설치 (플랫폼별 — pip install 전에 먼저 설치)
+# Mac (Apple Silicon):
+pip install torch torchvision torchaudio
+# Linux (NVIDIA GPU):
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+
+# 3. ATLEA 설치
+pip install -e .                   # 개발용 (editable)
+pip install -e ".[mac]"            # + Apple Silicon MLX 지원
+pip install -e ".[gpu]"            # + NVIDIA GPU (bitsandbytes)
+pip install -e ".[dev]"            # + 테스트/린트 도구
+
+# 4. 환경 설정
+cp .env.example .env && nano .env
+
+# 5. Redis 시작
+docker compose up -d redis
+
+# 6. 서버 시작
+atlea                              # 기본 (0.0.0.0:8000)
+atlea --port 9000 --reload         # 포트 변경 + 자동 리로드
+```
+
+> **참고**: `torch`는 플랫폼별 설치 방법이 다르므로 `pip install .`에 포함되지 않습니다.
+> 반드시 ATLEA 설치 전에 수동으로 설치하세요.
+
+</details>
+
+<details>
+<summary>수동 설치 (requirements.txt)</summary>
 
 ```bash
 # 1. Python 환경
@@ -372,6 +409,7 @@ curl http://localhost:8000/api/documents \
 ```
 atlea/
 ├── src/                          # Python 소스 코드
+│   ├── cli.py                    # CLI 엔트리포인트 (atlea 명령)
 │   ├── web_server.py             # FastAPI 메인 서버
 │   ├── startup.py                # 서버 초기화
 │   ├── routers/                  # API 라우터 (26개)
@@ -496,6 +534,9 @@ atlea/
 ├── stop.sh                       # 종료 스크립트
 ├── vite.config.js                # Vite 설정
 ├── playwright.config.js          # Playwright 설정
+├── pyproject.toml                # 패키지 설정 (pip install -e .)
+├── MANIFEST.in                   # sdist 빌드 포함 파일
+├── Makefile                      # 빌드/배포 명령
 ├── requirements.txt              # Python 의존성
 ├── requirements-mac.txt          # macOS 의존성
 ├── requirements-linux.txt        # Linux 의존성
