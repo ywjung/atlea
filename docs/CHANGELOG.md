@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (2026-02-07)
+- **Makefile 추가**: 배포/운영 명령 간소화
+  - `make dev`, `make up`, `make down` 등 26개 타겟
+  - 기존 `deploy.sh`, `run.sh`, `setup.sh` 스크립트 래핑
+  - `make help`로 전체 명령 목록 확인
+  - Docker 배포, 모니터링, 백업/복원, 테스트, SearXNG 관리 지원
+- **로그인 페이지 → 랜딩 페이지 링크**: 로그인 화면 하단에 ATLEA 소개 페이지 링크 추가
+
 ### Added (2026-01-21)
 - **SearXNG 웹 검색 프로바이더 추가**: 자체 호스팅 메타 검색 엔진 지원
   - `docker-compose.searxng.yml`: SearXNG + Crawl4AI Docker Compose 설정
