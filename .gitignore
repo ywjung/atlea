@@ -18,6 +18,7 @@ venv.bak/
 .pytest_cache/
 .coverage
 htmlcov/
+coverage/
 .tox/
 *.cover
 
@@ -165,6 +166,7 @@ reindex_all.py
 verify_*.sh
 *_test.py
 test_*.html
+generate_valid_rrn.py
 
 # ============================================================
 # Browser Testing & Screenshots
