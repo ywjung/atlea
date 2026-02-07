@@ -48,6 +48,7 @@ document-service/owasp-data/
 .env.*.local
 .env.development
 .env.production
+.env.production.example
 .env.test
 .admin_initial_password
 
@@ -120,6 +121,8 @@ log/
 # ============================================================
 *.backup
 *.bak
+*.bak2
+*.bak3
 *.old
 backups/
 backup/
@@ -167,6 +170,10 @@ verify_*.sh
 *_test.py
 test_*.html
 generate_valid_rrn.py
+fix_doc_group_mapping.py
+full_reindex.py
+full_reindex_direct.py
+test_query.json
 
 # ============================================================
 # Browser Testing & Screenshots
