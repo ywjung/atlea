@@ -16,7 +16,11 @@
     <meta name="environment" content="production">
     <title>관리자 대시보드 - ATLEA</title>
     <link rel="stylesheet" href="/static/auth.css">
-    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32x32.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
+    <link rel="manifest" href="/static/site.webmanifest">
+    <meta name="theme-color" content="#7c3aed">
     <!-- Admin Dashboard Redesign CSS -->
     <link rel="stylesheet" href="/static/admin/css/admin-core.css?v=20260126">
     <link rel="stylesheet" href="/static/admin/css/admin-components.css?v=20260126">
@@ -1707,7 +1711,7 @@
     <div class="admin-container">
         <div class="admin-header">
             <div>
-                <h1>관리자 대시보드</h1>
+                <h1><img src="/static/favicon.svg" alt="ATLEA" style="width:28px;height:28px;vertical-align:middle;margin-right:8px;">관리자 대시보드</h1>
                 <p style="color: var(--text-secondary, #666);">시스템 관리 및 사용자 관리</p>
             </div>
             <div class="user-info" style="display: flex; align-items: center; gap: 16px;">
@@ -10759,7 +10763,7 @@
             if (alert.level === 'critical' && Notification.permission === 'granted') {
                 new Notification('보안 알림: ' + eventTitle, {
                     body: alert.message,
-                    icon: '/static/favicon.ico',
+                    icon: '/static/favicon.svg',
                     tag: alert.event_type
                 });
             }

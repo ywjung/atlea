@@ -1,17 +1,19 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-  <!-- Background circle -->
-  <circle cx="50" cy="50" r="45" fill="#2563eb"/>
+  <!-- Background circle - primary purple -->
+  <circle cx="50" cy="50" r="45" fill="#7c3aed"/>
 
-  <!-- Document icon -->
-  <rect x="30" y="25" width="30" height="40" fill="white" rx="2"/>
-  <line x1="35" y1="32" x2="55" y2="32" stroke="#2563eb" stroke-width="2"/>
-  <line x1="35" y1="40" x2="55" y2="40" stroke="#2563eb" stroke-width="2"/>
-  <line x1="35" y1="48" x2="50" y2="48" stroke="#2563eb" stroke-width="2"/>
+  <!-- Document icon - white with purple text lines -->
+  <rect x="28" y="22" width="32" height="42" fill="white" rx="3"/>
+  <rect x="28" y="22" width="32" height="10" fill="#ede9fe" rx="3"/>
+  <rect x="28" y="29" width="32" height="3" fill="#ede9fe" rx="0"/>
+  <line x1="33" y1="40" x2="55" y2="40" stroke="#7c3aed" stroke-width="2" stroke-linecap="round"/>
+  <line x1="33" y1="47" x2="55" y2="47" stroke="#7c3aed" stroke-width="2" stroke-linecap="round"/>
+  <line x1="33" y1="54" x2="48" y2="54" stroke="#7c3aed" stroke-width="2" stroke-linecap="round"/>
 
-  <!-- Chat bubble -->
-  <circle cx="65" cy="55" r="12" fill="#10b981"/>
-  <path d="M 65 62 L 62 67 L 65 65 L 68 67 Z" fill="#10b981"/>
+  <!-- AI Chat bubble - accent green -->
+  <circle cx="66" cy="58" r="14" fill="#10b981"/>
+  <path d="M66 65 L62 72 L66 68 L70 72Z" fill="#10b981"/>
 
-  <!-- Question mark in bubble -->
-  <text x="65" y="60" font-family="Arial" font-size="14" fill="white" text-anchor="middle" font-weight="bold">?</text>
+  <!-- AI Spark symbol in bubble -->
+  <text x="66" y="63" font-family="Arial,sans-serif" font-size="16" fill="white" text-anchor="middle" font-weight="bold">&#x2726;</text>
 </svg>
