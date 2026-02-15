@@ -220,7 +220,7 @@ ls -la model/
 | 📚 API 문서 (Swagger) | http://localhost:8000/docs |
 | 📖 API 문서 (ReDoc) | http://localhost:8000/redoc |
 | ❤️ 헬스체크 | http://localhost:8000/health |
-| 🔍 Redis 관리 | http://localhost:8001 |
+| 🔍 DB 관리 | http://localhost:5432 (PostgreSQL) |
 
 ---
 
@@ -272,11 +272,11 @@ docker-compose -f docker-compose.full.yml restart
 ### 성능 최적화
 
 ```bash
-# Redis 메모리 최적화
-docker exec rag_chatbot_redis redis-cli CONFIG SET maxmemory 4gb
+# PostgreSQL 상태 확인
+docker exec -it postgres psql -U atlea -c "SELECT pg_database_size('atlea');"
 
-# 캐시 확인
-docker exec rag_chatbot_redis redis-cli INFO stats
+# 캐시 통계 확인
+curl http://localhost:8000/api/admin/stats
 ```
 
 ---

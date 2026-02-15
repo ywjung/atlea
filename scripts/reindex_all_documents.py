@@ -132,7 +132,7 @@ def reindex_all_documents():
                     chunk["chunk_index"] = 0
 
             # 벡터 DB에 저장 (새 인덱스에 추가)
-            vector_db.add_documents(chunks, embeddings, target_index=new_index_name)
+            vector_db.add_documents(chunks, embeddings, target_index=new_index_name, embedding_model=embedding_model)
 
             # 그룹 매핑 확인 및 설정
             try:

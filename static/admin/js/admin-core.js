@@ -142,6 +142,10 @@ AdminCore.switchTab = function(tabName) {
             if (typeof loadHybridRagConfig === 'function') loadHybridRagConfig();
             if (typeof loadRagQualityConfig === 'function') loadRagQualityConfig();
         },
+        'backup': () => {
+            if (typeof refreshBackupList === 'function') refreshBackupList();
+            if (typeof loadBackupSchedule === 'function') loadBackupSchedule();
+        },
         'reindex': 'checkReindexStatus',
         'performance-metrics': 'loadPerformancemetrics'
     };

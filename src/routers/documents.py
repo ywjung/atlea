@@ -212,38 +212,39 @@ def invalidate_status_cache():
     status_cache["timestamp"] = 0
 
 
-def set_reindex_progress(redis_client, step: str, progress: str = "0",
+# 인메모리 재색인 진행 상태
+_reindex_progress: dict = {}
+
+
+def set_reindex_progress(step: str = "", progress: str = "0",
                         current_item: str = "", total_items: str = "0",
                         start_time: str = None, ttl: int = 3600):
     """
-    재색인 진행 상태 설정 (자동 만료 포함)
+    재색인 진행 상태 설정 (인메모리)
 
     Args:
-        redis_client: Redis 클라이언트
         step: 진행 단계
         progress: 진행률 (0-100)
         current_item: 현재 처리 중인 항목
         total_items: 전체 항목 수
         start_time: 시작 시간 (선택사항)
-        ttl: 자동 만료 시간 (초, 기본 1시간)
+        ttl: 무시됨 (인메모리이므로 TTL 불필요)
     """
-    mapping = {
+    global _reindex_progress
+    _reindex_progress = {
         "step": step,
         "progress": progress,
         "current_item": current_item,
-        "total_items": total_items
+        "total_items": total_items,
     }
     if start_time:
-        mapping["start_time"] = start_time
-
-    redis_client.hset("reindex:progress", mapping=mapping)
-    # 자동 만료 설정 (1시간 후 자동 삭제)
-    redis_client.expire("reindex:progress", ttl)
+        _reindex_progress["start_time"] = start_time
 
 
-def clear_reindex_progress(redis_client):
-    """재색인 진행 상태 초기화"""
-    redis_client.delete("reindex:progress")
+def clear_reindex_progress():
+    """재색인 진행 상태 초기화 (인메모리)"""
+    global _reindex_progress
+    _reindex_progress = {}
 
 
 async def validate_file_content(file: UploadFile, max_header_bytes: int = 1024) -> bool:
@@ -317,71 +318,44 @@ async def cleanup_old_index_async(index_name: str):
 
 async def rebuild_doc_group_mappings():
     """
-    Rebuild doc:group:{filename} mappings from indexed document data
+    Rebuild document-group mappings from PG data after reindex.
 
-    This ensures that all documents have proper group assignments after reindex.
-    Document data contains group_id, so we extract it and create the reverse mapping.
+    Ensures all indexed documents have proper group assignments.
+    Reads from document_chunks (unique filenames) and group_documents (existing mappings).
+    Documents without a group are assigned to the default group.
     """
     try:
-        # Get current index name
-        index_name = vector_db.active_index_name
+        from ..database.connection import SyncSessionFactory
+        from ..database.models.document_chunk import DocumentChunk
+        from ..database.models.group_document import GroupDocument as GD
+        from sqlalchemy import select, distinct
 
-        # Scan all document chunks to get filename → group_id mappings
-        file_to_group = {}
-        cursor = 0
+        with SyncSessionFactory() as db_session:
+            # Get unique filenames from active index
+            active_index = vector_db.active_index_name
+            stmt = select(distinct(DocumentChunk.filename)).where(
+                DocumentChunk.index_version == active_index
+            )
+            indexed_filenames = [r[0] for r in db_session.execute(stmt).all()]
 
-        # Helper for bytes decoding
-        def decode_value(val):
-            return val.decode('utf-8') if isinstance(val, bytes) else val
+            if not indexed_filenames:
+                logger.warning("No documents found for group mapping rebuild")
+                return
 
-        while True:
-            cursor, keys = vector_db.client.scan(cursor, match=f"doc:{index_name}:*", count=100)
+            # Get existing group mappings
+            existing_stmt = select(GD.filename).where(GD.filename.in_(indexed_filenames))
+            existing_mapped = {r[0] for r in db_session.execute(existing_stmt).all()}
 
-            # Filter valid document keys
-            valid_keys = []
-            for key in keys:
-                key_str = decode_value(key)
-                # Skip non-document keys
-                if any(x in key_str for x in [':hash:', ':group:', ':version:', ':counts:', ':files']):
-                    continue
-                valid_keys.append(key)
+            # Assign unmapped documents to default group
+            unmapped = [f for f in indexed_filenames if f not in existing_mapped]
+            if unmapped:
+                default_group_id = group_manager.get_default_group_id()
+                for fname in unmapped:
+                    group_manager.assign_document(fname, default_group_id)
 
-            # Batch fetch document data using pipeline (N hgetall → 1 round trip)
-            if valid_keys:
-                pipe = vector_db.client.pipeline()
-                for key in valid_keys:
-                    pipe.hgetall(key)
-                results = pipe.execute()
+                logger.info(f"Assigned {len(unmapped)} unmapped documents to default group")
 
-                for doc_data in results:
-                    if not doc_data:
-                        continue
-
-                    # Decode bytes keys/values
-                    filename = decode_value(doc_data.get(b'filename') or doc_data.get('filename'))
-                    group_id = decode_value(doc_data.get(b'group_id') or doc_data.get('group_id'))
-
-                    if filename and group_id and filename not in file_to_group:
-                        file_to_group[filename] = group_id
-
-            if cursor == 0:
-                break
-
-        if not file_to_group:
-            logger.warning("⚠️  No documents found for group mapping rebuild")
-            return
-
-        logger.info(f"📊 Found {len(file_to_group)} unique documents")
-
-        # Rebuild doc:group mappings and group:docs sets
-        pipe = vector_db.client.pipeline()
-        for filename, group_id in file_to_group.items():
-            pipe.set(f"doc:group:{filename}", group_id)
-            pipe.sadd(f"group:docs:{group_id}", filename)
-
-        pipe.execute()
-
-        logger.success(f"✅ Rebuilt {len(file_to_group)} document group mappings")
+        logger.success(f"Rebuilt group mappings for {len(indexed_filenames)} documents")
 
     except Exception as e:
         logger.error(f"Failed to rebuild doc:group mappings: {e}")
@@ -399,7 +373,6 @@ async def index_pdfs(doc_tracker: DocumentTracker, target_index: Optional[str] =
     try:
         # Update progress: Step 1 - Processing documents
         set_reindex_progress(
-            vector_db.client,
             step="문서 처리 중",
             progress="0"
         )
@@ -432,7 +405,6 @@ async def index_pdfs(doc_tracker: DocumentTracker, target_index: Optional[str] =
 
         # Update progress: Step 2 - Creating embeddings
         set_reindex_progress(
-            vector_db.client,
             step="임베딩 생성 중",
             progress="0",
             current_item="0",
@@ -455,7 +427,6 @@ async def index_pdfs(doc_tracker: DocumentTracker, target_index: Optional[str] =
             if should_cancel_reindex:
                 logger.warning("🛑 Reindexing cancelled by user")
                 set_reindex_progress(
-                    vector_db.client,
                     step="취소됨",
                     progress="0"
                 )
@@ -481,7 +452,6 @@ async def index_pdfs(doc_tracker: DocumentTracker, target_index: Optional[str] =
             current_documents = len(processed_sources)
 
             set_reindex_progress(
-                vector_db.client,
                 step="임베딩 생성 중",
                 progress=str(progress),
                 current_item=str(current_documents),
@@ -492,25 +462,33 @@ async def index_pdfs(doc_tracker: DocumentTracker, target_index: Optional[str] =
 
         # Update progress: Step 3 - Adding to database
         set_reindex_progress(
-            vector_db.client,
             step="데이터베이스 저장 중",
             progress="50"
         )
 
+        # Progress callback for sentence embedding generation
+        def sentence_progress(current, total, sentences):
+            pct = int(50 + (current / total) * 40) if total > 0 else 50
+            set_reindex_progress(
+                step="문장 임베딩 생성 중",
+                progress=str(pct),
+                current_item=str(current),
+                total_items=str(total)
+            )
+
         # Add to vector database (use target_index for Blue-Green deployment)
         if target_index:
             logger.info(f"Adding documents to new index: {target_index} (Blue-Green deployment)")
-            vector_db.add_documents(chunks, embeddings, target_index=target_index)
+            vector_db.add_documents(chunks, embeddings, target_index=target_index, embedding_model=embedding_model, progress_callback=sentence_progress)
         else:
             logger.info("Adding documents to vector database...")
-            vector_db.add_documents(chunks, embeddings)
+            vector_db.add_documents(chunks, embeddings, embedding_model=embedding_model, progress_callback=sentence_progress)
 
         # Yield control to event loop
         await asyncio.sleep(0)
 
         # Update progress: Step 4 - Saving metadata
         set_reindex_progress(
-            vector_db.client,
             step="메타데이터 저장 중",
             progress="90"
         )
@@ -550,10 +528,19 @@ async def index_pdfs(doc_tracker: DocumentTracker, target_index: Optional[str] =
                         version_key = f"doc:version:{filename}:v{latest_version}"
                         try:
                             # Update chunk_count and indexed status in version metadata
-                            vector_db.client.hset(version_key, mapping={
-                                'chunk_count': chunk_count,
-                                'indexed': 'True'
-                            })
+                            from ..database.connection import SyncSessionFactory as _SF
+                            from ..database.models.document_version import DocumentVersion as DVModel
+                            with _SF() as _db:
+                                row = _db.query(DVModel).filter(
+                                    DVModel.filename == filename,
+                                    DVModel.version_number == latest_version
+                                ).first()
+                                if row:
+                                    row.chunk_count = chunk_count
+                                    meta = dict(row.metadata_ or {})
+                                    meta["indexed"] = True
+                                    row.metadata_ = meta
+                                    _db.commit()
                             logger.debug(f"Updated chunk_count={chunk_count} for {filename} v{latest_version}")
                         except Exception as e:
                             logger.warning(f"Failed to update chunk_count for {filename}: {e}")
@@ -611,12 +598,11 @@ async def run_reindex_task():
     # Reset cancellation flag at start
     should_cancel_reindex = False
 
-    # Reset progress state in Redis
+    # Reset progress state
     import time
     start_time = time.time()
 
     set_reindex_progress(
-        vector_db.client,
         step="준비 중",
         progress="0",
         start_time=str(start_time)
@@ -635,7 +621,6 @@ async def run_reindex_task():
             raise Exception("Failed to create new index")
 
         set_reindex_progress(
-            vector_db.client,
             step="새 인덱스 구축 중",
             progress="5"
         )
@@ -650,13 +635,12 @@ async def run_reindex_task():
         # Build new index in background (using target_index parameter)
         # This will be handled by index_pdfs with the new index
 
-        # Temporarily store the new index name for index_pdfs to use
-        vector_db.client.set("index:building", new_index_name, ex=3600)
+        # Store the new index name for index_pdfs to use (in-memory)
+        # (The target_index is passed directly to index_pdfs below)
 
         await index_pdfs(doc_tracker, target_index=new_index_name)
 
         set_reindex_progress(
-            vector_db.client,
             step="인덱스 전환 중",
             progress="95"
         )
@@ -687,7 +671,6 @@ async def run_reindex_task():
         logger.success(f"   New index: {new_index_name}")
 
         set_reindex_progress(
-            vector_db.client,
             step="완료",
             progress="100"
         )
@@ -697,7 +680,6 @@ async def run_reindex_task():
         logger.exception("Full traceback:")
 
         set_reindex_progress(
-            vector_db.client,
             step="실패",
             progress="0"
         )
@@ -737,8 +719,8 @@ async def get_reindex_progress(
     - estimated_remaining_seconds: Estimated remaining time
     """
     try:
-        progress_data = vector_db.client.hgetall("reindex:progress")
-        if not progress_data:
+        progress_dict = _reindex_progress.copy()
+        if not progress_dict:
             return {
                 "in_progress": False,
                 "step": "대기 중",
@@ -748,15 +730,6 @@ async def get_reindex_progress(
                 "elapsed_seconds": 0,
                 "estimated_remaining_seconds": 0
             }
-
-        # Redis returns bytes keys/values when decode_responses=False
-        # Convert to dict with string keys
-        progress_dict = {}
-        for key, value in progress_data.items():
-            # Decode bytes to strings
-            str_key = key.decode('utf-8') if isinstance(key, bytes) else key
-            str_value = value.decode('utf-8') if isinstance(value, bytes) else value
-            progress_dict[str_key] = str_value
 
         step = progress_dict.get("step", "대기 중")
         progress = int(progress_dict.get("progress", 0))
@@ -878,46 +851,42 @@ async def list_documents(
 
         # Batch fetch document group IDs (avoids N+1 queries)
         doc_group_map = {}
-        if cache_manager:
-            pipe = cache_manager.redis.pipeline()
-            for filename in filenames:
-                pipe.get(f'doc:group:{filename}')
-
-            group_results = pipe.execute()
-            for filename, group_id in zip(filenames, group_results):
-                if group_id:
-                    doc_group_map[filename] = group_id.decode('utf-8') if isinstance(group_id, bytes) else group_id
+        try:
+            from ..database.connection import SyncSessionFactory
+            from ..database.models.group_document import GroupDocument as GD
+            with SyncSessionFactory() as db_session:
+                from sqlalchemy import select
+                stmt = select(GD.filename, GD.group_id).where(GD.filename.in_(filenames))
+                rows = db_session.execute(stmt).all()
+                for fname, gid in rows:
+                    doc_group_map[fname] = str(gid)
+        except Exception as e:
+            logger.warning(f"Failed to batch fetch document groups: {e}")
 
         # Batch fetch virus scan status for all files
         import unicodedata
+        from ..services.config_service import config_get_sync
         virus_scan_map = {}
         if filenames:
-            pipe = cache_manager.redis.pipeline()
             for filename in filenames:
-                # Try both NFC and NFD forms for Korean compatibility
                 nfc_filename = unicodedata.normalize('NFC', filename)
-                pipe.get(f'doc:virus_scan:{nfc_filename}')
-
-            scan_results = pipe.execute()
-
-            for filename, scan_data in zip(filenames, scan_results):
+                scan_data = config_get_sync(f"virus_scan:{nfc_filename}")
                 if scan_data:
                     try:
-                        virus_scan_map[filename] = json.loads(scan_data.decode('utf-8') if isinstance(scan_data, bytes) else scan_data)
+                        virus_scan_map[filename] = json.loads(scan_data)
                     except Exception as e:
-                        logger.warning(f"⚠️ Failed to parse virus scan data for '{filename}': {e}")
+                        logger.warning(f"Failed to parse virus scan data for '{filename}': {e}")
                         virus_scan_map[filename] = None
                 else:
                     # If NFC didn't work, try NFD
                     nfd_filename = unicodedata.normalize('NFD', filename)
                     if nfd_filename != filename:
-                        try:
-                            nfd_data = cache_manager.redis.get(f'doc:virus_scan:{nfd_filename}')
-                            if nfd_data:
-                                virus_scan_map[filename] = json.loads(nfd_data.decode('utf-8') if isinstance(nfd_data, bytes) else nfd_data)
-                                logger.info(f"✅ Found virus scan data using NFD normalization: {filename}")
-                        except:
-                            pass
+                        nfd_data = config_get_sync(f"virus_scan:{nfd_filename}")
+                        if nfd_data:
+                            try:
+                                virus_scan_map[filename] = json.loads(nfd_data)
+                            except Exception:
+                                pass
 
         # Build document list with pre-fetched chunk counts
         documents = []
@@ -937,9 +906,10 @@ async def list_documents(
                     # Skip documents not in user's organization groups
                     if doc_group_id not in org_group_ids:
                         continue
-                # 그룹이 없는 문서: 관리자는 볼 수 있음, 일반 사용자는 건너뛰기
+                # 그룹이 없는 문서: filter_scope=user이면 모두 건너뛰기 (검색 필터용)
+                # 관리 페이지(filter_scope=None)에서는 관리자만 볼 수 있음
                 else:
-                    if not is_admin:
+                    if filter_scope == "user" or not is_admin:
                         continue
 
             # Get file stats
@@ -1117,7 +1087,6 @@ async def cancel_reindex(
 
         # Update progress to show cancellation (with 1 hour TTL to auto-clear)
         set_reindex_progress(
-            vector_db.client,
             step="취소 중...",
             progress="0"
         )
@@ -1151,7 +1120,7 @@ async def clear_reindex_progress_api(
         - message: 결과 메시지
     """
     try:
-        clear_reindex_progress(vector_db.client)
+        clear_reindex_progress()
         logger.info("🧹 Reindex progress state cleared by admin")
 
         return {
@@ -1442,18 +1411,15 @@ async def upload_document(
                 success=True
             )
 
-            # Store virus scan result in Redis
+            # Store virus scan result in PostgreSQL
+            from ..services.config_service import config_set_sync
             scan_status = {
                 "scanned": True,
                 "clean": True,
                 "scanned_at": datetime.now().isoformat(),
                 "scanner": "ClamAV"
             }
-            cache_manager.redis.set(
-                f"doc:virus_scan:{safe_filename}",
-                json.dumps(scan_status),
-                ex=90 * 24 * 3600  # 90 days retention
-            )
+            config_set_sync(f"virus_scan:{safe_filename}", json.dumps(scan_status))
 
         except HTTPException:
             raise
@@ -1487,17 +1453,14 @@ async def upload_document(
             )
 
             # Store scan failure status
+            from ..services.config_service import config_set_sync as _cfg_set
             scan_status = {
                 "scanned": False,
                 "clean": None,
                 "error": str(e),
                 "scanned_at": datetime.now().isoformat()
             }
-            cache_manager.redis.set(
-                f"doc:virus_scan:{safe_filename}",
-                json.dumps(scan_status),
-                ex=90 * 24 * 3600  # 90 days retention
-            )
+            _cfg_set(f"virus_scan:{safe_filename}", json.dumps(scan_status))
 
         # v2.3.0: Check for duplicate content
         # If updating existing file with same content, skip version creation
@@ -1532,21 +1495,20 @@ async def upload_document(
 
         # Delete old hash key BEFORE duplicate check (prevents orphaned hashes)
         # This must happen before duplicate check to work correctly
+        from ..services.config_service import config_get_sync as _cget, config_set_sync as _cset, config_delete_sync as _cdel
         if is_update and old_file_hash and old_file_hash != file_hash_hex:
-            old_hash_key = f"doc:hash:{old_file_hash}"
             try:
-                vector_db.client.delete(old_hash_key)
+                _cdel(f"doc:hash:{old_file_hash}")
                 logger.info(f"Deleted old file hash from registry: {old_file_hash[:8]}...")
             except Exception as e:
                 logger.warning(f"Failed to delete old file hash: {e}")
                 # Continue even if old hash deletion fails
 
-        # Check for duplicate content in other files using Redis
+        # Check for duplicate content in other files
         hash_key = f"doc:hash:{file_hash_hex}"
-        existing_filename = vector_db.client.get(hash_key)
+        existing_filename = _cget(hash_key)
 
         if existing_filename:
-            existing_filename = existing_filename.decode('utf-8') if isinstance(existing_filename, bytes) else existing_filename
             # Allow same filename (update), reject different filename (duplicate)
             if existing_filename != safe_filename:
                 # Remove the newly uploaded file (it's a duplicate of another file)
@@ -1598,14 +1560,22 @@ async def upload_document(
                 # Assign user's organization to default group if not already assigned
                 user_org_id = current_user.get('organization_id')
                 if user_org_id:
-                    default_group_key = f'group:{default_group_id}'
-                    default_group_data = cache_manager.redis.hgetall(default_group_key)
-
-                    # Only assign organization if default group has no organization
-                    if not default_group_data.get(b'organization_id'):
-                        cache_manager.redis.hset(default_group_key, 'organization_id', user_org_id)
-                        cache_manager.redis.sadd(f'org:groups:{user_org_id}', default_group_id)
-                        logger.info(f"✅ Assigned default group to organization: {user_org_id}")
+                    try:
+                        import uuid as uuid_mod
+                        from ..database.connection import SyncSessionFactory
+                        from ..database.models.group_organization import GroupOrganization
+                        gid = uuid_mod.UUID(default_group_id)
+                        oid = uuid_mod.UUID(user_org_id)
+                        with SyncSessionFactory() as db_session:
+                            existing = db_session.query(GroupOrganization).filter(
+                                GroupOrganization.group_id == gid
+                            ).first()
+                            if not existing:
+                                db_session.add(GroupOrganization(group_id=gid, org_id=oid))
+                                db_session.commit()
+                                logger.info(f"Assigned default group to organization: {user_org_id}")
+                    except Exception as org_err:
+                        logger.warning(f"Failed to assign org to default group: {org_err}")
 
                 # Update doc:group mapping BEFORE add_documents
                 group_manager.assign_document(safe_filename, default_group_id)
@@ -1615,7 +1585,7 @@ async def upload_document(
                 # Continue with upload even if group assignment fails
 
             # Add to vector database
-            vector_db.add_documents(chunks, embeddings)
+            vector_db.add_documents(chunks, embeddings, embedding_model=embedding_model)
 
             # Update document tracker
             doc_tracker = DocumentTracker(data_dir=DATA_DIR)
@@ -1643,7 +1613,7 @@ async def upload_document(
                     # Don't fail the upload if version creation fails
 
             # Store file hash to prevent future duplicates
-            vector_db.client.set(hash_key, safe_filename)
+            _cset(hash_key, safe_filename)
             logger.info(f"Stored file hash for duplicate detection: {file_hash_hex[:8]}...")
 
             # Invalidate status cache (document set changed)
@@ -1653,7 +1623,7 @@ async def upload_document(
             vector_db.clear_document_count_cache()
 
             # Invalidate statistics cache (document count changed)
-            invalidate_stats_cache(cache_manager.redis)
+            invalidate_stats_cache()
 
             # Note: Group assignment moved earlier (before add_documents) to ensure correct group_id
 
@@ -1774,11 +1744,8 @@ async def scan_document_virus(
                     "scanned_at": datetime.now().isoformat(),
                     "scanner": "ClamAV"
                 }
-                cache_manager.redis.set(
-                    f"doc:virus_scan:{safe_filename}",
-                    json.dumps(scan_status),
-                    ex=90 * 24 * 3600
-                )
+                from ..services.config_service import config_set_sync as _vs_set
+                _vs_set(f"virus_scan:{safe_filename}", json.dumps(scan_status))
 
                 logger.error(f"🚨 Virus detected in '{safe_filename}': {virus_detected}")
 
@@ -1833,13 +1800,10 @@ async def scan_document_virus(
                 "scanned_at": datetime.now().isoformat(),
                 "scanner": "ClamAV"
             }
-            cache_manager.redis.set(
-                f"doc:virus_scan:{safe_filename}",
-                json.dumps(scan_status),
-                ex=90 * 24 * 3600
-            )
+            from ..services.config_service import config_set_sync as _vs_set2
+            _vs_set2(f"virus_scan:{safe_filename}", json.dumps(scan_status))
 
-            logger.info(f"✅ Manual virus scan completed - file is clean: {safe_filename}")
+            logger.info(f"Manual virus scan completed - file is clean: {safe_filename}")
 
             # Log to audit log
             from ..audit import AuditAction
@@ -1898,11 +1862,8 @@ async def scan_document_virus(
                 "error": str(e),
                 "scanned_at": datetime.now().isoformat()
             }
-            cache_manager.redis.set(
-                f"doc:virus_scan:{safe_filename}",
-                json.dumps(scan_status),
-                ex=90 * 24 * 3600
-            )
+            from ..services.config_service import config_set_sync as _vs_set3
+            _vs_set3(f"virus_scan:{safe_filename}", json.dumps(scan_status))
 
             return {
                 "success": False,
@@ -1945,8 +1906,8 @@ async def delete_document(
         try:
             with file_path.open("rb") as f:
                 file_hash = hashlib.md5(f.read()).hexdigest()
-                hash_key = f"doc:hash:{file_hash}"
-                vector_db.client.delete(hash_key)
+                from ..services.config_service import config_delete_sync
+                config_delete_sync(f"doc:hash:{file_hash}")
                 logger.info(f"Removed file hash from registry: {file_hash[:8]}...")
         except Exception as e:
             logger.error(f"Failed to remove file hash: {e}")
@@ -2004,7 +1965,7 @@ async def delete_document(
         vector_db.clear_document_count_cache()
 
         # Invalidate statistics cache (document count changed)
-        invalidate_stats_cache(cache_manager.redis)
+        invalidate_stats_cache()
 
         return {
             "message": f"Document '{safe_filename}' deleted successfully",
@@ -2418,7 +2379,7 @@ async def restore_document_version(
                 embeddings = embedding_model.encode(texts, batch_size=32, show_progress_bar=False)
 
                 # Add to vector database
-                vector_db.add_documents(chunks, embeddings)
+                vector_db.add_documents(chunks, embeddings, embedding_model=embedding_model)
 
                 logger.success(f"Re-indexed {len(chunks)} chunks for restored {safe_filename}")
 
@@ -2596,12 +2557,16 @@ async def migrate_document_versions(
                 except Exception as e:
                     logger.debug(f"Error checking versions for {filename}: {e}")
 
-                # Get chunk count from Redis if available
+                # Get chunk count from PostgreSQL
                 chunk_count = 0
                 try:
-                    # Use SCAN instead of KEYS to avoid blocking Redis
-                    chunk_keys = cache_manager.safe_scan_keys(f"chunk:{filename}:*")
-                    chunk_count = len(chunk_keys) if chunk_keys else 0
+                    from ..database.connection import SyncSessionFactory as _SF2
+                    from ..database.models.document_chunk import DocumentChunk as _DC2
+                    from sqlalchemy import func as _fn2
+                    with _SF2() as _dbs:
+                        chunk_count = _dbs.query(_fn2.count(_DC2.id)).filter(
+                            _DC2.filename == filename
+                        ).scalar() or 0
                 except Exception as e:
                     logger.debug(f"Could not get chunk count for {filename}: {e}")
 

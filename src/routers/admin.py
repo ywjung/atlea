@@ -14,11 +14,10 @@ UUID_PATTERN = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-
 
 from ..auth.middleware import require_admin
 from .auth import invalidate_dashboard_cache
-from ..cache_manager import CacheManager
-from ..redis_helpers import decode_bytes, decode_redis_hash
 from ..auth.rate_limiter import create_rate_limit_dependency
 from ..utils.error_handling import get_safe_error_message
 from ..config.settings import CACHE_TTL_MEDIUM
+from ..services.config_service import config_get, config_set, config_delete, config_get_multi
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -238,19 +237,15 @@ async def get_rate_limit_config(
     """
     try:
         from ..config import config
+        from ..services.config_service import config_get
 
-        # CacheManager (Redis) 가져오기
-        cache_manager = request.app.state.cache_manager
-
-        # Redis에서 설정 조회 (없으면 기본값 사용)
-        enabled_str = cache_manager.redis.get("config:rate_limit_enabled")
+        # PostgreSQL에서 설정 조회 (없으면 기본값 사용)
+        enabled_str = await config_get("config:rate_limit_enabled")
 
         if enabled_str is None:
-            # Redis에 설정이 없으면 config 파일의 기본값 사용
             enabled = config.RATE_LIMIT_ENABLED
         else:
-            # Redis 값 사용 (b'true' 또는 b'false')
-            enabled = enabled_str.decode() == "true"
+            enabled = enabled_str == "true"
 
         return RateLimitConfigResponse(
             enabled=enabled,
@@ -284,14 +279,13 @@ async def update_rate_limit_config(
     """
     try:
         from ..config import config
+        from ..services.config_service import config_set
 
-        # CacheManager (Redis) 가져오기
-        cache_manager = request.app.state.cache_manager
-
-        # Redis에 enabled 상태 저장
-        cache_manager.redis.set(
+        # PostgreSQL에 enabled 상태 저장
+        await config_set(
             "config:rate_limit_enabled",
-            "true" if config_update.enabled else "false"
+            "true" if config_update.enabled else "false",
+            "boolean",
         )
 
         logger.info(
@@ -330,13 +324,9 @@ async def get_captcha_config(
         현재 CAPTCHA 설정 (enabled, site_key, configured)
     """
     try:
-        from ..auth.captcha import get_captcha_config
+        from ..auth.captcha import get_captcha_config as _get_captcha_cfg
 
-        # CacheManager (Redis) 가져오기
-        cache_manager = request.app.state.cache_manager
-
-        # CAPTCHA 설정 조회
-        config = get_captcha_config(cache_manager.redis)
+        config = _get_captcha_cfg()
 
         return CaptchaConfigResponse(
             login_enabled=config["login_enabled"],
@@ -370,14 +360,10 @@ async def update_captcha_config(
         업데이트된 CAPTCHA 설정
     """
     try:
-        from ..auth.captcha import set_captcha_enabled, get_captcha_config
+        from ..auth.captcha import set_captcha_enabled, get_captcha_config as _get_captcha_cfg
 
-        # CacheManager (Redis) 가져오기
-        cache_manager = request.app.state.cache_manager
-
-        # Redis에 enabled 상태 저장 (login_enabled 및 register_enabled 분리)
+        # PostgreSQL에 enabled 상태 저장
         success = set_captcha_enabled(
-            cache_manager.redis,
             login_enabled=config_update.login_enabled,
             register_enabled=config_update.register_enabled
         )
@@ -401,7 +387,7 @@ async def update_captcha_config(
         )
 
         # 업데이트된 설정 반환
-        config = get_captcha_config(cache_manager.redis)
+        config = _get_captcha_cfg()
 
         return CaptchaConfigResponse(
             login_enabled=config["login_enabled"],
@@ -454,7 +440,7 @@ async def get_security_logs(
     """
     from ..auth.service import AuthService
 
-    auth_service = AuthService(request.app.state.cache_manager.redis)
+    auth_service = AuthService()
     result = await auth_service.get_security_logs(
         page=page,
         page_size=page_size,
@@ -482,13 +468,9 @@ async def get_totp_config(
         현재 2FA 설정 (enabled, type, configured)
     """
     try:
-        from ..auth.totp import get_totp_config
+        from ..auth.totp import get_totp_config as _get_totp_cfg
 
-        # CacheManager (Redis) 가져오기
-        cache_manager = request.app.state.cache_manager
-
-        # 2FA 설정 조회
-        config = get_totp_config(cache_manager.redis)
+        config = _get_totp_cfg()
 
         return TotpConfigResponse(
             enabled=config["enabled"],
@@ -521,16 +503,10 @@ async def update_totp_config(
         업데이트된 2FA 설정
     """
     try:
-        from ..auth.totp import set_totp_enabled, get_totp_config
+        from ..auth.totp import set_totp_enabled, get_totp_config as _get_totp_cfg
 
-        # CacheManager (Redis) 가져오기
-        cache_manager = request.app.state.cache_manager
-
-        # Redis에 enabled 상태 저장
-        success = set_totp_enabled(
-            cache_manager.redis,
-            config_update.enabled
-        )
+        # PostgreSQL에 enabled 상태 저장
+        success = set_totp_enabled(config_update.enabled)
 
         if not success:
             raise HTTPException(
@@ -544,7 +520,7 @@ async def update_totp_config(
         )
 
         # 업데이트된 설정 반환
-        config = get_totp_config(cache_manager.redis)
+        config = _get_totp_cfg()
 
         return TotpConfigResponse(
             enabled=config["enabled"],
@@ -583,33 +559,31 @@ async def get_user_totp_qr(
         validate_uuid(user_id, "사용자 ID")
 
         from ..auth.totp import TOTPService
+        from ..database.connection import SyncSessionFactory
+        from ..database.models.user import User as PgUser
+        import uuid as uuid_mod
 
-        # Redis 가져오기
-        redis = request.app.state.cache_manager.redis
+        # PostgreSQL에서 사용자 정보 조회
+        with SyncSessionFactory() as db_session:
+            pg_user = db_session.get(PgUser, uuid_mod.UUID(user_id))
+            if not pg_user:
+                raise HTTPException(
+                    status_code=404,
+                    detail="사용자를 찾을 수 없습니다"
+                )
 
-        # 사용자 정보 조회
-        user_data = redis.hgetall(f"user:{user_id}")
-        if not user_data:
-            raise HTTPException(
-                status_code=404,
-                detail="사용자를 찾을 수 없습니다"
-            )
+            email = pg_user.email or ""
+            totp_secret = pg_user.totp_secret
 
-        # bytes를 string으로 변환
-        user_dict = decode_redis_hash(user_data)
+            # TOTP 서비스 인스턴스 생성
+            totp_service = TOTPService()
 
-        email = user_dict.get("email", "")
-        totp_secret = user_dict.get("totp_secret")
-
-        # TOTP 서비스 인스턴스 생성
-        totp_service = TOTPService(redis)
-
-        # totp_secret이 없거나 비어있으면 새로 생성
-        if not totp_secret or totp_secret == "None" or totp_secret == "":
-            totp_secret = totp_service.generate_secret()
-            # Redis에 저장
-            redis.hset(f"user:{user_id}", "totp_secret", totp_secret)
-            logger.info(f"Generated new TOTP secret for user: {user_id}")
+            # totp_secret이 없거나 비어있으면 새로 생성
+            if not totp_secret or totp_secret == "None" or totp_secret == "":
+                totp_secret = totp_service.generate_secret()
+                pg_user.totp_secret = totp_secret
+                db_session.commit()
+                logger.info(f"Generated new TOTP secret for user: {user_id}")
 
         # QR 코드 생성
         qr_code = totp_service.generate_qr_code(totp_secret, email)
@@ -652,32 +626,31 @@ async def reset_user_totp(
         validate_uuid(user_id, "사용자 ID")
 
         from ..auth.totp import TOTPService
+        from ..database.connection import SyncSessionFactory
+        from ..database.models.user import User as PgUser
+        import uuid as uuid_mod
 
-        # Redis 가져오기
-        redis = request.app.state.cache_manager.redis
+        # PostgreSQL에서 사용자 정보 조회
+        with SyncSessionFactory() as db_session:
+            pg_user = db_session.get(PgUser, uuid_mod.UUID(user_id))
+            if not pg_user:
+                raise HTTPException(
+                    status_code=404,
+                    detail="사용자를 찾을 수 없습니다"
+                )
 
-        # 사용자 정보 조회
-        user_data = redis.hgetall(f"user:{user_id}")
-        if not user_data:
-            raise HTTPException(
-                status_code=404,
-                detail="사용자를 찾을 수 없습니다"
-            )
+            email = pg_user.email or ""
 
-        # bytes를 string으로 변환
-        user_dict = decode_redis_hash(user_data)
+            # TOTP 서비스 인스턴스 생성
+            totp_service = TOTPService()
 
-        email = user_dict.get("email", "")
+            # 새로운 secret 생성
+            totp_secret = totp_service.generate_secret()
 
-        # TOTP 서비스 인스턴스 생성
-        totp_service = TOTPService(redis)
-
-        # 새로운 secret 생성
-        totp_secret = totp_service.generate_secret()
-
-        # Redis에 저장
-        redis.hset(f"user:{user_id}", "totp_secret", totp_secret)
-        logger.info(f"Reset TOTP secret for user: {user_id}")
+            # PostgreSQL에 저장
+            pg_user.totp_secret = totp_secret
+            db_session.commit()
+            logger.info(f"Reset TOTP secret for user: {user_id}")
 
         # QR 코드 생성
         qr_code = totp_service.generate_qr_code(totp_secret, email)
@@ -715,10 +688,9 @@ async def get_brute_force_config(
         현재 브루트 포스 보호 설정
     """
     try:
-        from ..auth.brute_force_protection import get_brute_force_config
+        from ..auth.brute_force_protection import get_brute_force_config as _get_bf_config
 
-        cache_manager = request.app.state.cache_manager
-        config = get_brute_force_config(cache_manager.redis)
+        config = _get_bf_config()
 
         return BruteForceConfigResponse(
             max_attempts=config["max_attempts"],
@@ -754,8 +726,6 @@ async def update_brute_force_config(
     try:
         from ..auth.brute_force_protection import update_brute_force_config
 
-        cache_manager = request.app.state.cache_manager
-
         # 입력 검증
         if config.max_attempts < 1 or config.max_attempts > 100:
             raise HTTPException(
@@ -779,7 +749,7 @@ async def update_brute_force_config(
             )
 
         # 설정 업데이트
-        success = update_brute_force_config(cache_manager.redis, config.model_dump())
+        success = update_brute_force_config(config.model_dump())
 
         if not success:
             raise HTTPException(
@@ -863,63 +833,41 @@ async def reset_user_password(
     """
     try:
         from ..auth.service import AuthService
+        from ..database.connection import SyncSessionFactory
+        from ..database.models.user import User as PgUser
 
-        redis = request.app.state.cache_manager.redis
-        auth_service = AuthService(redis)
+        auth_service = AuthService()
 
-        # 이메일로 사용자 찾기
-        user_id = redis.get(f"user:email:{reset_request.email}")
-        if not user_id:
-            raise HTTPException(
-                status_code=404,
-                detail="해당 이메일의 사용자를 찾을 수 없습니다"
-            )
+        # PostgreSQL에서 이메일로 사용자 찾기
+        with SyncSessionFactory() as db_session:
+            from sqlalchemy import select
+            stmt = select(PgUser).where(PgUser.email == reset_request.email)
+            pg_user = db_session.execute(stmt).scalar_one_or_none()
 
-        user_id_str = decode_bytes(user_id)
+            if not pg_user:
+                raise HTTPException(
+                    status_code=404,
+                    detail="해당 이메일의 사용자를 찾을 수 없습니다"
+                )
 
-        # 새 비밀번호 결정 (입력된 것 또는 자동 생성)
-        new_password = reset_request.new_password
-        auto_generated = False
+            user_id_str = str(pg_user.id)
 
-        if not new_password:
-            new_password = generate_temporary_password()
-            auto_generated = True
+            # 새 비밀번호 결정 (입력된 것 또는 자동 생성)
+            new_password = reset_request.new_password
+            auto_generated = False
 
-        # 비밀번호 해싱
-        from ..auth.utils import hash_password
-        hashed_password = hash_password(new_password)
+            if not new_password:
+                new_password = generate_temporary_password()
+                auto_generated = True
 
-        # Redis에 업데이트
-        redis.hset(f"user:{user_id_str}", "password_hash", hashed_password)
+            # 비밀번호 해싱 및 업데이트
+            from ..auth.utils import hash_password
+            hashed_password = hash_password(new_password)
+            pg_user.hashed_password = hashed_password
+            db_session.commit()
 
         # 모든 세션 무효화 (보안: 비밀번호 변경 시 모든 기존 세션 종료)
-        # Get all session IDs using SSCAN to avoid blocking
-        session_ids = []
-        cursor = 0
-
-        while True:
-            cursor, ids = redis.sscan(
-                f"user:sessions:{user_id_str}",
-                cursor=cursor,
-                count=100
-            )
-            session_ids.extend(ids)
-
-            if cursor == 0:
-                break
-
-        invalidated_sessions = len(session_ids) if session_ids else 0
-
-        # Pipeline으로 모든 세션을 배치 삭제 (N+1 방지)
-        if session_ids:
-            pipe = redis.pipeline()
-            for session_id in session_ids:
-                session_id_str = CacheManager.decode_bytes(session_id)
-                pipe.delete(f"session:{session_id_str}")
-            pipe.delete(f"user:sessions:{user_id_str}")
-            pipe.execute()
-        else:
-            redis.delete(f"user:sessions:{user_id_str}")
+        invalidated_sessions = await auth_service.revoke_all_sessions(user_id_str)
 
         logger.info(
             f"관리자 {user.get('email', 'unknown')}가 사용자 {reset_request.email}의 비밀번호를 재설정했습니다 "
@@ -958,10 +906,9 @@ async def get_password_reset_method(
         현재 설정된 방식 및 이메일 설정 여부
     """
     try:
-        from ..auth.password_reset_config import get_password_reset_config
+        from ..auth.password_reset_config import get_password_reset_config as _get_pr_cfg
 
-        redis = request.app.state.cache_manager.redis
-        config = get_password_reset_config(redis)
+        config = _get_pr_cfg()
 
         return PasswordResetMethodResponse(
             method=config["method"],
@@ -995,10 +942,8 @@ async def update_password_reset_method(
     try:
         from ..auth.password_reset_config import (
             set_password_reset_method,
-            get_password_reset_config
+            get_password_reset_config as _get_pr_cfg,
         )
-
-        redis = request.app.state.cache_manager.redis
 
         # 유효성 검사
         if config_update.method not in ["email", "otp", "admin"]:
@@ -1007,8 +952,8 @@ async def update_password_reset_method(
                 detail="유효하지 않은 방식입니다. 'email', 'otp', 또는 'admin'만 가능합니다."
             )
 
-        # 설정 업데이트
-        success = set_password_reset_method(redis, config_update.method)
+        # PostgreSQL에 설정 업데이트
+        success = set_password_reset_method(config_update.method)
 
         if not success:
             raise HTTPException(
@@ -1022,7 +967,7 @@ async def update_password_reset_method(
         )
 
         # 업데이트된 설정 반환
-        config = get_password_reset_config(redis)
+        config = _get_pr_cfg()
 
         method_names = {
             "email": "이메일 방식",
@@ -1063,8 +1008,7 @@ async def get_smtp_settings_endpoint(
     try:
         from ..email_service import get_smtp_settings
 
-        redis = request.app.state.cache_manager.redis
-        settings = get_smtp_settings(redis)
+        settings = get_smtp_settings()
 
         # 보안상 비밀번호는 마스킹
         if settings.get("password"):
@@ -1101,9 +1045,7 @@ async def save_smtp_settings_endpoint(
         저장 결과
     """
     try:
-        from ..email_service import save_smtp_settings
-
-        redis = request.app.state.cache_manager.redis
+        from ..email_service import save_smtp_settings, get_smtp_settings
 
         # 필수 필드 검증 (password는 기존 설정이 있으면 선택적)
         required_fields = ["host", "port", "username"]
@@ -1117,10 +1059,9 @@ async def save_smtp_settings_endpoint(
         # 비밀번호 처리: 새로 입력하지 않았으면 기존 비밀번호 유지
         password = smtp_config.get("password")
         if not password:
-            # 기존 설정에서 비밀번호 직접 가져오기 (Redis에서)
-            existing_smtp = redis.hgetall("smtp:settings")
-            if existing_smtp and b"password" in existing_smtp:
-                password = existing_smtp[b"password"].decode()
+            existing_smtp = get_smtp_settings()
+            if existing_smtp.get("configured") and existing_smtp.get("password"):
+                password = existing_smtp["password"]
             else:
                 raise HTTPException(
                     status_code=400,
@@ -1129,7 +1070,6 @@ async def save_smtp_settings_endpoint(
 
         # SMTP 설정 저장
         success = save_smtp_settings(
-            redis,
             host=smtp_config["host"],
             port=int(smtp_config["port"]),
             username=smtp_config["username"],
@@ -1230,101 +1170,44 @@ async def list_all_sessions(
     """
     try:
         from datetime import datetime, timezone
+        from ..database.connection import SyncSessionFactory
+        from ..database.models.session import Session as PgSession
+        from ..database.models.user import User as PgUser
+        from sqlalchemy import select
+        from sqlalchemy.orm import joinedload
 
-        cache_manager = request.app.state.cache_manager
-        redis = cache_manager.redis
-
-        # 모든 세션 키 가져오기 (SCAN 사용 - 블로킹 방지)
-        session_keys = cache_manager.safe_scan_keys("session:*")
-
-        if not session_keys:
-            return SessionListResponse(
-                total_sessions=0,
-                active_sessions=0,
-                expired_sessions=0,
-                sessions=[]
+        with SyncSessionFactory() as db_session:
+            # 모든 세션 조회 (사용자 정보 JOIN)
+            stmt = (
+                select(PgSession, PgUser)
+                .outerjoin(PgUser, PgSession.user_id == PgUser.id)
+                .order_by(PgSession.created_at.desc())
             )
+            rows = db_session.execute(stmt).all()
 
-        # Pipeline 1: 모든 세션 데이터를 배치로 가져오기 (N+1 쿼리 방지)
-        pipe = redis.pipeline()
-        for session_key in session_keys:
-            session_key_str = CacheManager.decode_bytes(session_key)
-            pipe.hgetall(session_key_str)
+            sessions = []
+            active_count = 0
+            expired_count = 0
+            now = datetime.now(timezone.utc)
 
-        session_data_list = pipe.execute()
+            for pg_session, pg_user in rows:
+                is_expired = not pg_session.is_active or pg_session.expires_at < now
 
-        # 세션 데이터 파싱 및 user_id 수집
-        session_dicts = []
-        user_ids = set()
+                if is_expired:
+                    expired_count += 1
+                else:
+                    active_count += 1
 
-        for session_data in session_data_list:
-            if not session_data:
-                continue
-
-            # bytes를 str로 변환
-            session_dict = CacheManager.decode_redis_hash(session_data)
-
-            session_dicts.append(session_dict)
-            user_id = session_dict.get("user_id")
-            if user_id:
-                user_ids.add(user_id)
-
-        # Pipeline 2: 모든 사용자 데이터를 배치로 가져오기
-        user_data_map = {}
-        if user_ids:
-            pipe = redis.pipeline()
-            for user_id in user_ids:
-                pipe.hgetall(f"user:{user_id}")
-
-            user_data_results = pipe.execute()
-
-            # 사용자 데이터를 딕셔너리로 변환
-            for user_id, user_data in zip(user_ids, user_data_results):
-                if user_data:
-                    decoded_user = CacheManager.decode_redis_hash(user_data)
-                    user_data_map[user_id] = {
-                        'email': decoded_user.get('email', 'Unknown'),
-                        'username': decoded_user.get('username', 'Unknown')
-                    }
-
-        # 세션 목록 생성
-        sessions = []
-        active_count = 0
-        expired_count = 0
-
-        for session_dict in session_dicts:
-            user_id = session_dict.get("user_id")
-            user_info = user_data_map.get(user_id, {'email': 'Unknown', 'username': 'Unknown'})
-
-            # 만료 여부 확인
-            expires_at_str = session_dict.get("expires_at", "")
-            is_expired = False
-
-            if expires_at_str:
-                try:
-                    expires_at = datetime.fromisoformat(expires_at_str.replace('Z', '+00:00'))
-                    is_expired = expires_at < datetime.now(timezone.utc)
-                except Exception:
-                    pass
-
-            if is_expired:
-                expired_count += 1
-            else:
-                active_count += 1
-
-            sessions.append(SessionInfo(
-                session_id=session_dict.get("session_id", ""),
-                user_id=user_id or "",
-                user_email=user_info.get('email', '') or "",
-                username=user_info.get('username', '') or "",
-                created_at=session_dict.get("created_at", ""),
-                expires_at=expires_at_str,
-                ip_address=session_dict.get("ip_address", ""),
-                is_expired=is_expired
-            ))
-
-        # 생성 시간 기준 정렬 (최신순)
-        sessions.sort(key=lambda x: x.created_at, reverse=True)
+                sessions.append(SessionInfo(
+                    session_id=str(pg_session.id),
+                    user_id=str(pg_session.user_id),
+                    user_email=pg_user.email if pg_user else "Unknown",
+                    username=pg_user.username if pg_user else "Unknown",
+                    created_at=pg_session.created_at.isoformat() if pg_session.created_at else "",
+                    expires_at=pg_session.expires_at.isoformat() if pg_session.expires_at else "",
+                    ip_address=pg_session.ip_address or "",
+                    is_expired=is_expired
+                ))
 
         return SessionListResponse(
             total_sessions=len(sessions),
@@ -1355,34 +1238,26 @@ async def revoke_all_sessions(
         무효화 결과
     """
     try:
-        cache_manager = request.app.state.cache_manager
-        redis = cache_manager.redis
+        from ..database.connection import SyncSessionFactory
+        from ..database.models.session import Session as PgSession
+        from sqlalchemy import update
 
-        # 모든 세션 키 가져오기 (SCAN 사용 - 블로킹 방지)
-        session_keys = cache_manager.safe_scan_keys("session:*")
-        user_session_keys = cache_manager.safe_scan_keys("user:sessions:*")
-
-        # Pipeline으로 모든 키를 배치 삭제 (N+1 방지)
-        if session_keys or user_session_keys:
-            pipe = redis.pipeline()
-
-            for session_key in session_keys:
-                session_key_str = CacheManager.decode_bytes(session_key)
-                pipe.delete(session_key_str)
-
-            for key in user_session_keys:
-                key_str = CacheManager.decode_bytes(key)
-                pipe.delete(key_str)
-
-            pipe.execute()
-
-        revoked_count = len(session_keys)
+        with SyncSessionFactory() as db_session:
+            # 모든 활성 세션 비활성화
+            stmt = (
+                update(PgSession)
+                .where(PgSession.is_active == True)
+                .values(is_active=False)
+            )
+            result = db_session.execute(stmt)
+            revoked_count = result.rowcount
+            db_session.commit()
 
         # 대시보드 캐시 무효화 (세션 수 변경)
-        await invalidate_dashboard_cache(redis)
+        await invalidate_dashboard_cache()
 
         logger.warning(
-            f"🚨 관리자 {user.get('email', 'unknown')}가 모든 세션을 무효화했습니다 "
+            f"관리자 {user.get('email', 'unknown')}가 모든 세션을 무효화했습니다 "
             f"(무효화된 세션: {revoked_count}개)"
         )
 
@@ -1415,16 +1290,13 @@ async def revoke_session(
         무효화 결과
     """
     try:
-        redis = request.app.state.cache_manager.redis
+        from ..database.connection import SyncSessionFactory
+        from ..database.models.session import Session as PgSession
+        from ..database.models.user import User as PgUser
+        import uuid as uuid_mod
 
         # 세션 ID 형식 검증 (UUID 형식)
-        import re
-        uuid_pattern = re.compile(r'^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$', re.IGNORECASE)
-        if not session_id or not uuid_pattern.match(session_id):
-            raise HTTPException(
-                status_code=400,
-                detail="유효하지 않은 세션 ID 형식입니다"
-            )
+        validate_uuid(session_id, "세션 ID")
 
         # 자기 자신의 세션인지 확인 (현재 요청의 세션)
         current_session_id = request.cookies.get("session_id")
@@ -1434,28 +1306,25 @@ async def revoke_session(
                 detail="자신의 현재 세션은 무효화할 수 없습니다"
             )
 
-        # 세션 존재 확인
-        session_data = redis.hgetall(f"session:{session_id}")
-        if not session_data:
-            raise HTTPException(
-                status_code=404,
-                detail="세션을 찾을 수 없습니다"
-            )
+        with SyncSessionFactory() as db_session:
+            # 세션 존재 확인
+            pg_session = db_session.get(PgSession, uuid_mod.UUID(session_id))
+            if not pg_session:
+                raise HTTPException(
+                    status_code=404,
+                    detail="세션을 찾을 수 없습니다"
+                )
 
-        # 세션에서 user_id 추출
-        decoded_session = decode_redis_hash(session_data)
-        target_user_id = decoded_session.get("user_id")
-        target_email = decoded_session.get("email", "unknown")
+            # 사용자 이메일 조회
+            pg_user = db_session.get(PgUser, pg_session.user_id)
+            target_email = pg_user.email if pg_user else "unknown"
 
-        # 세션 삭제
-        redis.delete(f"session:{session_id}")
-
-        # user:sessions 세트에서도 제거
-        if target_user_id:
-            redis.srem(f"user:sessions:{target_user_id}", session_id)
+            # 세션 비활성화
+            pg_session.is_active = False
+            db_session.commit()
 
         # 대시보드 캐시 무효화 (세션 수 변경)
-        await invalidate_dashboard_cache(redis)
+        await invalidate_dashboard_cache()
 
         logger.info(
             f"관리자 {user.get('email', 'unknown')}가 세션을 무효화했습니다 "
@@ -1496,7 +1365,10 @@ async def revoke_user_sessions(
         # Validate user_id format to prevent injection
         validate_uuid(user_id, "사용자 ID")
 
-        redis = request.app.state.cache_manager.redis
+        from ..auth.service import AuthService
+        from ..database.connection import SyncSessionFactory
+        from ..database.models.user import User as PgUser
+        import uuid as uuid_mod
 
         # 자기 자신의 세션을 무효화하려는 경우 경고
         if user.get("user_id") == user_id:
@@ -1506,48 +1378,21 @@ async def revoke_user_sessions(
             )
 
         # 사용자 존재 확인
-        user_data = redis.hgetall(f"user:{user_id}")
-        if not user_data:
-            raise HTTPException(
-                status_code=404,
-                detail="사용자를 찾을 수 없습니다"
-            )
+        with SyncSessionFactory() as db_session:
+            pg_user = db_session.get(PgUser, uuid_mod.UUID(user_id))
+            if not pg_user:
+                raise HTTPException(
+                    status_code=404,
+                    detail="사용자를 찾을 수 없습니다"
+                )
+            target_email = pg_user.email or "unknown"
 
-        # 사용자 이메일 추출
-        decoded_user = decode_redis_hash(user_data)
-        target_email = decoded_user.get("email", "unknown")
-
-        # 사용자의 모든 세션 가져오기
-        # Get all session IDs using SSCAN to avoid blocking
-        session_ids = []
-        cursor = 0
-
-        while True:
-            cursor, ids = redis.sscan(
-                f"user:sessions:{user_id}",
-                cursor=cursor,
-                count=100
-            )
-            session_ids.extend(ids)
-
-            if cursor == 0:
-                break
-
-        revoked_count = len(session_ids) if session_ids else 0
-
-        # Pipeline으로 모든 세션을 배치 삭제 (N+1 방지)
-        if session_ids:
-            pipe = redis.pipeline()
-            for session_id in session_ids:
-                session_id_str = CacheManager.decode_bytes(session_id)
-                pipe.delete(f"session:{session_id_str}")
-            pipe.delete(f"user:sessions:{user_id}")
-            pipe.execute()
-        else:
-            redis.delete(f"user:sessions:{user_id}")
+        # 사용자의 모든 세션 무효화
+        auth_service = AuthService()
+        revoked_count = await auth_service.revoke_all_sessions(user_id)
 
         # 대시보드 캐시 무효화 (세션 수 변경)
-        await invalidate_dashboard_cache(redis)
+        await invalidate_dashboard_cache()
 
         logger.info(
             f"관리자 {user.get('email', 'unknown')}가 사용자 {target_email}의 모든 세션을 무효화했습니다 "
@@ -1588,28 +1433,27 @@ async def get_hybrid_rag_config(
         import os
         cache_manager = request.app.state.cache_manager
 
-        # Redis에서 설정 가져오기 (Pipeline으로 배치 조회)
-        pipe = cache_manager.redis.pipeline()
-        pipe.get("config:hybrid_rag_enabled")
-        pipe.get("config:hybrid_rag_web_search")
-        pipe.get("config:hybrid_rag_doc_search")
-        pipe.get("config:tavily_api_key")
-        pipe.get("config:web_search_provider")
-        pipe.get("config:searxng_url")
-        results = pipe.execute()
-
-        enabled_raw, web_search_raw, doc_search_raw, tavily_key, provider_raw, searxng_url_raw = results
+        # PostgreSQL에서 설정 조회
+        cfg = await config_get_multi([
+            "config:hybrid_rag_enabled",
+            "config:hybrid_rag_web_search",
+            "config:hybrid_rag_doc_search",
+            "config:tavily_api_key",
+            "config:web_search_provider",
+            "config:searxng_url",
+        ])
 
         # 기본값 설정
-        enabled = enabled_raw.decode() == "true" if enabled_raw else False
-        web_search_enabled = web_search_raw.decode() == "true" if web_search_raw else False
-        doc_search_enabled = doc_search_raw.decode() == "true" if doc_search_raw else False
+        enabled = cfg.get("config:hybrid_rag_enabled") == "true"
+        web_search_enabled = cfg.get("config:hybrid_rag_web_search") == "true"
+        doc_search_enabled = cfg.get("config:hybrid_rag_doc_search") == "true"
 
         # 웹 검색 프로바이더 설정 (기본값: tavily)
-        web_search_provider = provider_raw.decode() if provider_raw else 'tavily'
-        searxng_url = searxng_url_raw.decode() if searxng_url_raw else os.getenv('SEARXNG_URL', 'http://localhost:8888')
+        web_search_provider = cfg.get("config:web_search_provider") or 'tavily'
+        searxng_url = cfg.get("config:searxng_url") or os.getenv('SEARXNG_URL', 'http://localhost:8888')
 
-        # Tavily API 키 설정 여부 확인 (Redis 우선, 환경 변수 대체)
+        # Tavily API 키 설정 여부 확인 (PG 우선, 환경 변수 대체)
+        tavily_key = cfg.get("config:tavily_api_key")
         env_key = os.getenv('TAVILY_API_KEY')
         tavily_configured = bool(tavily_key or env_key)
 
@@ -1654,62 +1498,61 @@ async def update_hybrid_rag_config(
         import os
         cache_manager = request.app.state.cache_manager
 
-        # Redis에 설정 저장
-        cache_manager.redis.set(
+        # 설정 저장 (PostgreSQL)
+        await config_set(
             "config:hybrid_rag_enabled",
-            "true" if config_update.enabled else "false"
+            "true" if config_update.enabled else "false",
+            "boolean", "하이브리드 RAG 활성화 여부"
         )
 
         # 웹 검색 활성화 설정
         if config_update.web_search_enabled is not None:
-            cache_manager.redis.set(
+            await config_set(
                 "config:hybrid_rag_web_search",
-                "true" if config_update.web_search_enabled else "false"
+                "true" if config_update.web_search_enabled else "false",
+                "boolean", "웹 검색 활성화 여부"
             )
             web_search_enabled = config_update.web_search_enabled
         else:
-            # 기존 값 유지
-            web_setting = cache_manager.redis.get("config:hybrid_rag_web_search")
-            web_search_enabled = web_setting.decode() == "true" if web_setting else False
+            web_val = await config_get("config:hybrid_rag_web_search")
+            web_search_enabled = web_val == "true" if web_val else False
 
         # 공식 문서 검색 활성화 설정
         if config_update.doc_search_enabled is not None:
-            cache_manager.redis.set(
+            await config_set(
                 "config:hybrid_rag_doc_search",
-                "true" if config_update.doc_search_enabled else "false"
+                "true" if config_update.doc_search_enabled else "false",
+                "boolean", "공식 문서 검색 활성화 여부"
             )
             doc_search_enabled = config_update.doc_search_enabled
         else:
-            # 기존 값 유지
-            doc_setting = cache_manager.redis.get("config:hybrid_rag_doc_search")
-            doc_search_enabled = doc_setting.decode() == "true" if doc_setting else False
+            doc_val = await config_get("config:hybrid_rag_doc_search")
+            doc_search_enabled = doc_val == "true" if doc_val else False
 
         # 웹 검색 프로바이더 설정
         if config_update.web_search_provider is not None:
             provider = config_update.web_search_provider.lower()
             if provider in ['tavily', 'searxng']:
-                cache_manager.redis.set("config:web_search_provider", provider)
+                await config_set("config:web_search_provider", provider, "string", "웹 검색 프로바이더")
                 web_search_provider = provider
             else:
                 web_search_provider = 'tavily'
         else:
-            # 기존 값 유지
-            provider_setting = cache_manager.redis.get("config:web_search_provider")
-            web_search_provider = provider_setting.decode() if provider_setting else 'tavily'
+            provider_val = await config_get("config:web_search_provider")
+            web_search_provider = provider_val or 'tavily'
 
         # SearXNG URL 설정
         if config_update.searxng_url is not None:
-            cache_manager.redis.set("config:searxng_url", config_update.searxng_url)
+            await config_set("config:searxng_url", config_update.searxng_url, "string", "SearXNG URL")
             searxng_url = config_update.searxng_url
         else:
-            # 기존 값 유지
-            url_setting = cache_manager.redis.get("config:searxng_url")
-            searxng_url = url_setting.decode() if url_setting else os.getenv('SEARXNG_URL', 'http://localhost:8888')
+            url_val = await config_get("config:searxng_url")
+            searxng_url = url_val or os.getenv('SEARXNG_URL', 'http://localhost:8888')
 
-        # Tavily API 키 설정 여부 확인 (Redis 우선, 환경 변수 대체)
-        tavily_key_redis = cache_manager.redis.get("config:tavily_api_key")
+        # Tavily API 키 설정 여부 확인
+        tavily_key = await config_get("config:tavily_api_key")
         tavily_key_env = os.getenv('TAVILY_API_KEY')
-        tavily_configured = bool(tavily_key_redis or tavily_key_env)
+        tavily_configured = bool(tavily_key or tavily_key_env)
 
         # SearXNG 설정 여부 확인
         searxng_configured = bool(searxng_url)
@@ -1765,21 +1608,18 @@ async def get_rag_quality_config(
         현재 RAG 품질 설정 (재랭킹, 쿼리 재작성)
     """
     try:
-        cache_manager = request.app.state.cache_manager
+        from ..services.config_service import config_get_multi
 
-        # Redis에서 설정 가져오기 (Pipeline으로 배치 조회)
-        pipe = cache_manager.redis.pipeline()
-        pipe.get("config:reranking_enabled")
-        pipe.get("config:query_rewrite_enabled")
-        pipe.get("config:reranker_model")
-        results = pipe.execute()
+        # PostgreSQL에서 설정 가져오기
+        cfg = await config_get_multi([
+            "config:reranking_enabled",
+            "config:query_rewrite_enabled",
+            "config:reranker_model",
+        ])
 
-        reranking_raw, query_rewrite_raw, reranker_model_raw = results
-
-        # 기본값 설정
-        reranking_enabled = reranking_raw.decode() == "true" if reranking_raw else False
-        query_rewrite_enabled = query_rewrite_raw.decode() == "true" if query_rewrite_raw else False
-        reranker_model = reranker_model_raw.decode() if reranker_model_raw else "dengcao/Qwen3-Reranker-8B:Q4_K_M"
+        reranking_enabled = cfg.get("config:reranking_enabled") == "true"
+        query_rewrite_enabled = cfg.get("config:query_rewrite_enabled") == "true"
+        reranker_model = cfg.get("config:reranker_model") or "dengcao/Qwen3-Reranker-8B:Q4_K_M"
 
         return RAGQualityConfigResponse(
             reranking_enabled=reranking_enabled,
@@ -1812,40 +1652,38 @@ async def update_rag_quality_config(
         업데이트된 RAG 품질 설정
     """
     try:
-        cache_manager = request.app.state.cache_manager
+        from ..services.config_service import config_get, config_set
 
         # 재랭킹 설정
         if config_update.reranking_enabled is not None:
-            cache_manager.redis.set(
+            await config_set(
                 "config:reranking_enabled",
-                "true" if config_update.reranking_enabled else "false"
+                "true" if config_update.reranking_enabled else "false",
+                "boolean",
             )
             reranking_enabled = config_update.reranking_enabled
         else:
-            # 기존 값 유지
-            reranking_setting = cache_manager.redis.get("config:reranking_enabled")
-            reranking_enabled = reranking_setting.decode() == "true" if reranking_setting else False
+            reranking_setting = await config_get("config:reranking_enabled")
+            reranking_enabled = reranking_setting == "true" if reranking_setting else False
 
         # 쿼리 재작성 설정
         if config_update.query_rewrite_enabled is not None:
-            cache_manager.redis.set(
+            await config_set(
                 "config:query_rewrite_enabled",
-                "true" if config_update.query_rewrite_enabled else "false"
+                "true" if config_update.query_rewrite_enabled else "false",
+                "boolean",
             )
             query_rewrite_enabled = config_update.query_rewrite_enabled
         else:
-            # 기존 값 유지
-            query_rewrite_setting = cache_manager.redis.get("config:query_rewrite_enabled")
-            query_rewrite_enabled = query_rewrite_setting.decode() == "true" if query_rewrite_setting else False
+            query_rewrite_setting = await config_get("config:query_rewrite_enabled")
+            query_rewrite_enabled = query_rewrite_setting == "true" if query_rewrite_setting else False
 
         # Reranker 모델 설정
         if config_update.reranker_model is not None:
-            cache_manager.redis.set("config:reranker_model", config_update.reranker_model)
+            await config_set("config:reranker_model", config_update.reranker_model)
             reranker_model = config_update.reranker_model
         else:
-            # 기존 값 유지
-            reranker_model_setting = cache_manager.redis.get("config:reranker_model")
-            reranker_model = reranker_model_setting.decode() if reranker_model_setting else "dengcao/Qwen3-Reranker-8B:Q4_K_M"
+            reranker_model = await config_get("config:reranker_model") or "dengcao/Qwen3-Reranker-8B:Q4_K_M"
 
         # HybridRAGOrchestrator 설정 새로고침 트리거
         try:
@@ -1912,11 +1750,10 @@ async def get_tavily_api_key(
     try:
         cache_manager = request.app.state.cache_manager
 
-        # Redis에서 API 키 가져오기
-        stored_key = cache_manager.redis.get("config:tavily_api_key")
+        # PostgreSQL에서 API 키 가져오기
+        key_str = await config_get("config:tavily_api_key")
 
-        if stored_key:
-            key_str = stored_key.decode()
+        if key_str:
             # 키 마스킹 (처음 8자, 마지막 4자만 표시)
             if len(key_str) > 12:
                 masked = f"{key_str[:8]}...{key_str[-4:]}"
@@ -2014,14 +1851,16 @@ async def update_tavily_api_key(
                 detail="API 키가 유효하지 않습니다. 키를 확인해주세요."
             )
 
-        # Redis에 저장
-        cache_manager.redis.set("config:tavily_api_key", api_key)
+        # PostgreSQL에 저장
+        await config_set(
+            "config:tavily_api_key", api_key,
+            "secret", "Tavily API Key for web search"
+        )
 
-        # 🆕 하이브리드 RAG 재초기화 (API 키 업데이트 반영)
+        # 하이브리드 RAG 재초기화 (API 키 업데이트 반영)
         try:
             from ..web_server import hybrid_rag_orchestrator
             import sys
-            # 전역 변수 초기화하여 다음 요청 시 재생성되도록 함
             sys.modules['src.web_server'].hybrid_rag_orchestrator = None
             logger.info("🔄 Hybrid RAG will be reinitialized on next request")
         except Exception as e:
@@ -2060,8 +1899,8 @@ async def delete_tavily_api_key(
     try:
         cache_manager = request.app.state.cache_manager
 
-        # Redis에서 삭제
-        cache_manager.redis.delete("config:tavily_api_key")
+        # PostgreSQL에서 삭제
+        await config_delete("config:tavily_api_key")
 
         logger.info(f"🗑️ Tavily API 키 삭제 완료 (관리자: {user.get('username')})")
 
@@ -2087,21 +1926,20 @@ async def reveal_tavily_api_key(
     """Tavily API 키 조회 (관리자 전용)
 
     보안상 항상 마스킹된 키만 반환합니다.
-    전체 키가 필요한 경우 Redis 또는 환경변수에서 직접 확인하세요.
+    전체 키가 필요한 경우 환경변수에서 직접 확인하세요.
     """
     try:
         cache_manager = request.app.state.cache_manager
 
-        # Redis에서 API 키 가져오기
-        stored_key = cache_manager.redis.get("config:tavily_api_key")
+        # PostgreSQL에서 API 키 가져오기
+        full_key = await config_get("config:tavily_api_key")
 
-        if stored_key:
-            full_key = stored_key.decode()
+        if full_key:
             return {
                 "success": True,
                 "api_key": mask_api_key(full_key),
                 "masked": True,
-                "source": "redis"
+                "source": "database"
             }
         else:
             # 환경 변수 확인
@@ -2152,11 +1990,10 @@ async def get_context7_api_key(
     try:
         cache_manager = request.app.state.cache_manager
 
-        # Redis에서 API 키 가져오기
-        stored_key = cache_manager.redis.get("config:context7_api_key")
+        # PostgreSQL에서 API 키 가져오기
+        key_str = await config_get("config:context7_api_key")
 
-        if stored_key:
-            key_str = stored_key.decode()
+        if key_str:
             # 키 마스킹 (처음 8자, 마지막 4자만 표시)
             if len(key_str) > 12:
                 masked = f"{key_str[:8]}...{key_str[-4:]}"
@@ -2251,14 +2088,16 @@ async def update_context7_api_key(
                 detail="API 키가 유효하지 않습니다. 키를 확인해주세요."
             )
 
-        # Redis에 저장
-        cache_manager.redis.set("config:context7_api_key", api_key)
+        # PostgreSQL에 저장
+        await config_set(
+            "config:context7_api_key", api_key,
+            "secret", "Context7 API Key for docs search"
+        )
 
-        # 🆕 하이브리드 RAG 재초기화 (API 키 업데이트 반영)
+        # 하이브리드 RAG 재초기화 (API 키 업데이트 반영)
         try:
             from ..web_server import hybrid_rag_orchestrator
             import sys
-            # 전역 변수 초기화하여 다음 요청 시 재생성되도록 함
             sys.modules['src.web_server'].hybrid_rag_orchestrator = None
             logger.info("🔄 Hybrid RAG will be reinitialized on next request")
         except Exception as e:
@@ -2297,8 +2136,8 @@ async def delete_context7_api_key(
     try:
         cache_manager = request.app.state.cache_manager
 
-        # Redis에서 삭제
-        cache_manager.redis.delete("config:context7_api_key")
+        # PostgreSQL에서 삭제
+        await config_delete("config:context7_api_key")
 
         logger.info(f"🗑️ Context7 API 키 삭제 완료 (관리자: {user.get('username')})")
 
@@ -2324,21 +2163,20 @@ async def reveal_context7_api_key(
     """Context7 API 키 조회 (관리자 전용)
 
     보안상 항상 마스킹된 키만 반환합니다.
-    전체 키가 필요한 경우 Redis 또는 환경변수에서 직접 확인하세요.
+    전체 키가 필요한 경우 PostgreSQL 또는 환경변수에서 직접 확인하세요.
     """
     try:
         cache_manager = request.app.state.cache_manager
 
-        # Redis에서 API 키 가져오기
-        stored_key = cache_manager.redis.get("config:context7_api_key")
+        # PostgreSQL에서 API 키 가져오기
+        full_key = await config_get("config:context7_api_key")
 
-        if stored_key:
-            full_key = stored_key.decode()
+        if full_key:
             return {
                 "success": True,
                 "api_key": mask_api_key(full_key),
                 "masked": True,
-                "source": "redis"
+                "source": "database"
             }
         else:
             # 환경 변수 확인
@@ -2372,29 +2210,6 @@ async def reveal_context7_api_key(
 
 
 
-def count_redis_keys(redis_client, pattern: str, max_count: int = 100000) -> int:
-    """Redis 키 개수를 메모리 효율적으로 카운트
-
-    모든 키를 메모리에 로드하지 않고 스캔하면서 카운트합니다.
-    max_count에 도달하면 조기 종료합니다.
-
-    Args:
-        redis_client: Redis 클라이언트
-        pattern: 매칭할 키 패턴 (예: "doc:group:*")
-        max_count: 최대 카운트 제한 (메모리 보호)
-
-    Returns:
-        매칭된 키 개수 (max_count 이상이면 max_count 반환)
-    """
-    count = 0
-    for _ in redis_client.scan_iter(match=pattern, count=1000):
-        count += 1
-        if count >= max_count:
-            logger.warning(f"키 카운트가 최대값 {max_count}에 도달: {pattern}")
-            break
-    return count
-
-
 def mask_api_key(key: str, show_chars: int = 4) -> str:
     """API 키를 마스킹하여 보안 강화
 
@@ -2412,88 +2227,39 @@ def mask_api_key(key: str, show_chars: int = 4) -> str:
     return f"{key[:show_chars]}{'*' * 8}...{'*' * 8}{key[-show_chars:]}"
 
 
-def invalidate_stats_cache(redis_client, include_dashboard: bool = True):
-    """통계 캐시 무효화
+def invalidate_stats_cache(include_dashboard: bool = True):
+    """통계 캐시 무효화 (인메모리)
 
     문서 업로드/삭제, 대화 생성 등 통계에 영향을 주는 작업 후 호출합니다.
-    Pipeline을 사용하여 원자적으로 여러 캐시를 삭제합니다.
-
-    Args:
-        redis_client: Redis 클라이언트
-        include_dashboard: 대시보드 캐시도 함께 무효화할지 여부
     """
-    try:
-        pipe = redis_client.pipeline()
-        
-        # 통계 관련 캐시
-        pipe.delete("cache:stats:documents")
-        pipe.delete("cache:stats:redis")
-        
-        # 대시보드 캐시 (선택적)
-        if include_dashboard:
-            pipe.delete("cache:admin:dashboard")
-            pipe.delete("cache:admin:dashboard:stats")
-        
-        results = pipe.execute()
-        deleted_count = sum(1 for r in results if r)
-        
-        if deleted_count > 0:
-            logger.debug(f"통계 캐시 무효화 완료: {deleted_count}개 키 삭제")
-    except Exception as e:
-        logger.warning(f"통계 캐시 무효화 실패: {e}")
+    global _stats_cache
+    _stats_cache.clear()
+    logger.debug("통계 캐시 무효화 완료")
 
 
-@router.get("/redis-stats")
-async def get_redis_stats(
+# 인메모리 통계 캐시
+_stats_cache: dict = {}
+
+
+@router.get("/db-stats")
+async def get_db_stats(
     request: Request,
     user: dict = Depends(require_admin),
-    _rate_limit=Depends(create_rate_limit_dependency(30, 60, "admin_redis_stats"))
+    _rate_limit=Depends(create_rate_limit_dependency(30, 60, "admin_db_stats"))
 ):
-    """Redis 통계 조회 (관리자 전용)
-
-    Returns:
-        - total_keys: 전체 Redis 키 개수
-        - keyspace_hits: 캐시 히트 횟수
-        - keyspace_misses: 캐시 미스 횟수
-
-    Note:
-        통계는 5분간 캐싱됩니다 (빈번한 조회로 인한 성능 저하 방지)
-    """
+    """데이터베이스 통계 조회 (관리자 전용)"""
     try:
-        import json
-        cache_manager = request.app.state.cache_manager
-        redis_client = cache_manager.redis
-
-        cache_key = "cache:stats:redis"
-        cache_ttl = CACHE_TTL_MEDIUM
-
-        # 캐시 확인
-        cached_stats = redis_client.get(cache_key)
-        if cached_stats:
-            logger.debug("Redis 통계 캐시 히트")
-            return json.loads(cached_stats)
-
-        # Redis 통계 정보 조회
-        info = redis_client.info('stats')
-
-        stats = {
-            "total_keys": redis_client.dbsize(),
-            "keyspace_hits": info.get('keyspace_hits', 0),
-            "keyspace_misses": info.get('keyspace_misses', 0)
-        }
-
-        # 캐시 저장
-        redis_client.setex(cache_key, cache_ttl, json.dumps(stats))
-        logger.debug(f"Redis 통계 캐시 저장 (TTL: {cache_ttl}초)")
-
-        return stats
-
-    except Exception as e:
-        logger.error(f"Redis 통계 조회 실패: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=get_safe_error_message(e, "redis stats")
-        )
+        from src.database.connection import SyncSessionFactory
+        from sqlalchemy import text
+        with SyncSessionFactory() as session:
+            result = session.execute(text(
+                "SELECT count(*) FROM information_schema.tables "
+                "WHERE table_schema = 'public'"
+            ))
+            table_count = result.scalar() or 0
+        return {"total_keys": table_count}
+    except Exception:
+        return {"total_keys": 0}
 
 
 @router.get("/document-stats")
@@ -2513,37 +2279,42 @@ async def get_document_stats(
         통계는 5분간 캐싱됩니다 (scan_iter 성능 부하 최소화)
     """
     try:
-        import json
-        cache_manager = request.app.state.cache_manager
-        redis_client = cache_manager.redis
+        import time as _time
 
-        cache_key = "cache:stats:documents"
-        cache_ttl = CACHE_TTL_MEDIUM
-
-        # 캐시 확인
-        cached_stats = redis_client.get(cache_key)
-        if cached_stats:
+        # 인메모리 캐시 확인
+        cache_key = "document_stats"
+        cached = _stats_cache.get(cache_key)
+        if cached and (_time.time() - cached.get("_ts", 0)) < CACHE_TTL_MEDIUM:
             logger.debug("문서 통계 캐시 히트")
-            return json.loads(cached_stats)
+            return {k: v for k, v in cached.items() if not k.startswith("_")}
 
-        # 문서 개수 (메모리 효율적 카운팅)
-        total_documents = count_redis_keys(redis_client, "doc:group:*", max_count=100000)
+        from ..database.connection import SyncSessionFactory
+        from ..database.models.document_chunk import DocumentChunk
+        from ..database.models.conversation import Conversation
+        from ..database.models.document_group import DocumentGroup
+        from ..services.config_service import config_get_sync
+        from sqlalchemy import func, distinct
 
-        # RediSearch 인덱스에서 청크 개수
-        total_chunks = 0
-        try:
-            # vector_db.py에서 사용하는 실제 키: index:active
-            active_index = redis_client.get("index:active")
-            if active_index:
-                active_index = CacheManager.decode_bytes(active_index)
-                index_info = redis_client.ft(active_index).info()
-                total_chunks = int(index_info.get('num_docs', 0))
-        except Exception as e:
-            logger.warning(f"RediSearch 인덱스 정보 조회 실패: {e}")
+        with SyncSessionFactory() as db_session:
+            # 문서 개수 (document_groups 테이블의 고유 파일 수)
+            total_documents = db_session.query(
+                func.count(distinct(DocumentGroup.id))
+            ).scalar() or 0
+
+            # 청크 개수 (활성 인덱스의 document_chunks)
             total_chunks = 0
+            active_index = config_get_sync("vector:active_index")
+            if active_index:
+                total_chunks = db_session.query(
+                    func.count(DocumentChunk.id)
+                ).filter(
+                    DocumentChunk.index_version == active_index
+                ).scalar() or 0
 
-        # 대화 개수 (메모리 효율적 카운팅)
-        total_conversations = count_redis_keys(redis_client, "conversation:*", max_count=100000)
+            # 대화 개수
+            total_conversations = db_session.query(
+                func.count(Conversation.id)
+            ).scalar() or 0
 
         stats = {
             "total_documents": total_documents,
@@ -2551,9 +2322,9 @@ async def get_document_stats(
             "total_conversations": total_conversations
         }
 
-        # 캐시 저장
-        redis_client.setex(cache_key, cache_ttl, json.dumps(stats))
-        logger.debug(f"문서 통계 캐시 저장 (TTL: {cache_ttl}초)")
+        # 인메모리 캐시 저장
+        _stats_cache[cache_key] = {**stats, "_ts": _time.time()}
+        logger.debug(f"문서 통계 캐시 저장 (TTL: {CACHE_TTL_MEDIUM}초)")
 
         return stats
 
@@ -2562,4 +2333,127 @@ async def get_document_stats(
         raise HTTPException(
             status_code=500,
             detail=get_safe_error_message(e, "document stats")
+        )
+
+
+@router.get("/arag-stats")
+async def get_arag_stats(
+    request: Request,
+    user: dict = Depends(require_admin),
+    _rate_limit=Depends(create_rate_limit_dependency(30, 60, "admin_arag_stats"))
+):
+    """A-RAG 파이프라인 및 벡터 검색 통계 조회 (관리자 전용, 실시간)"""
+    try:
+        from ..database.connection import SyncSessionFactory
+        from ..database.models.document_chunk import DocumentChunk
+        from ..database.models.sentence_embedding import SentenceEmbedding
+        from ..database.models.system_config import SystemConfig
+        from sqlalchemy import func, distinct
+
+        # --- 설정값 + 벡터 통계 단일 세션 조회 ---
+        config_keys = [
+            "config:hybrid_rag_enabled",
+            "config:hybrid_rag_web_search",
+            "config:hybrid_rag_doc_search",
+            "config:reranking_enabled",
+            "config:query_rewrite_enabled",
+            "config:tavily_api_key",
+            "config:searxng_url",
+            "config:context7_api_key",
+            "config:crawl4ai_url",
+            "config:reranker_model",
+            "vector:active_index",
+        ]
+        cfg: dict = {}
+        total_chunks = 0
+        total_sentence_embeddings = 0
+        total_files = 0
+        avg_sentences_per_chunk = 0.0
+
+        with SyncSessionFactory() as session:
+            # 1) 설정값 일괄 조회
+            try:
+                rows = session.query(SystemConfig).filter(
+                    SystemConfig.key.in_(config_keys)
+                ).all()
+                cfg = {r.key: r.value for r in rows}
+            except Exception as cfg_err:
+                logger.warning(f"A-RAG config 일괄 조회 실패: {cfg_err}")
+
+            # 2) 벡터 통계 (설정 조회 실패해도 독립 실행)
+            active_index = cfg.get("vector:active_index") or ""
+            if active_index:
+                try:
+                    # document_chunks: COUNT + COUNT(DISTINCT filename) 병합
+                    chunk_row = session.query(
+                        func.count(DocumentChunk.id),
+                        func.count(distinct(DocumentChunk.filename))
+                    ).filter(
+                        DocumentChunk.index_version == active_index
+                    ).one()
+                    total_chunks = chunk_row[0] or 0
+                    total_files = chunk_row[1] or 0
+
+                    total_sentence_embeddings = session.query(
+                        func.count(SentenceEmbedding.id)
+                    ).filter(
+                        SentenceEmbedding.index_version == active_index
+                    ).scalar() or 0
+                except Exception as vec_err:
+                    logger.warning(f"A-RAG 벡터 통계 조회 실패: {vec_err}")
+
+        hybrid_enabled = cfg.get("config:hybrid_rag_enabled") == "true"
+        web_search = cfg.get("config:hybrid_rag_web_search") == "true"
+        doc_search = cfg.get("config:hybrid_rag_doc_search") == "true"
+        reranking = cfg.get("config:reranking_enabled") == "true"
+        query_rewrite = cfg.get("config:query_rewrite_enabled") == "true"
+
+        tavily_key = cfg.get("config:tavily_api_key")
+        searxng_url = cfg.get("config:searxng_url")
+        context7_key = cfg.get("config:context7_api_key")
+        crawl4ai_url = cfg.get("config:crawl4ai_url")
+
+        reranker_model = cfg.get("config:reranker_model") or "dengcao/Qwen3-Reranker-8B:Q4_K_M"
+        embedding_model = os.getenv("EMBEDDING_MODEL", "nlpai-lab/KURE-v1")
+
+        if total_chunks > 0 and total_sentence_embeddings > 0:
+            avg_sentences_per_chunk = round(total_sentence_embeddings / total_chunks, 1)
+
+        stats = {
+            "features": {
+                "hybrid_search": hybrid_enabled,
+                "sentence_embeddings": total_sentence_embeddings > 0,
+                "reranking": reranking,
+                "query_rewrite": query_rewrite,
+                "web_search": web_search,
+                "doc_search": doc_search,
+                "context_compression": hybrid_enabled,
+                "query_contextualization": hybrid_enabled,
+            },
+            "stats": {
+                "total_chunks": total_chunks,
+                "total_sentence_embeddings": total_sentence_embeddings,
+                "avg_sentences_per_chunk": avg_sentences_per_chunk,
+                "active_index_version": active_index,
+                "total_files": total_files,
+            },
+            "sources": {
+                "tavily": bool(tavily_key),
+                "searxng": bool(searxng_url),
+                "context7": bool(context7_key),
+                "crawl4ai": bool(crawl4ai_url),
+            },
+            "models": {
+                "reranker": reranker_model,
+                "embedding": embedding_model,
+            },
+        }
+
+        return stats
+
+    except Exception as e:
+        logger.error(f"A-RAG 통계 조회 실패: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=get_safe_error_message(e, "arag stats")
         )

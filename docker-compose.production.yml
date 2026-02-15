@@ -62,9 +62,6 @@ services:
     image: chatbot-app:latest
     container_name: chatbot_app_1
     environment:
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - REDIS_PASSWORD=${REDIS_PASSWORD}
       - DOCUMENT_SERVICE_URL=http://document-service:8081
       - HWP_SERVICE_URL=http://document-service:8081
       - EMBEDDING_MODEL=${EMBEDDING_MODEL:-intfloat/multilingual-e5-large}
@@ -82,8 +79,6 @@ services:
       - app_models:/app/model
       - app_logs:/app/logs
     depends_on:
-      redis:
-        condition: service_healthy
       document-service:
         condition: service_healthy
     restart: unless-stopped
@@ -101,56 +96,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 60s
-
-  # Redis with persistence and authentication
-  redis:
-    image: redis:7-alpine
-    container_name: chatbot_redis
-    command: >
-      redis-server
-      --requirepass ${REDIS_PASSWORD}
-      --maxmemory 2gb
-      --maxmemory-policy allkeys-lru
-      --save 900 1
-      --save 300 10
-      --save 60 10000
-      --appendonly yes
-      --appendfsync everysec
-      --auto-aof-rewrite-percentage 100
-      --auto-aof-rewrite-min-size 64mb
-    ports:
-      - "127.0.0.1:6379:6379"
-    volumes:
-      - redis_data:/data
-      - redis_logs:/var/log/redis
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          cpus: '1'
-          memory: 2G
-        reservations:
-          cpus: '0.5'
-          memory: 1G
-    healthcheck:
-      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-
-  # Redis monitoring (optional, for development/staging)
-  redis-insight:
-    image: redis/redisinsight:latest
-    container_name: chatbot_redis_insight
-    ports:
-      - "127.0.0.1:8001:5540"
-    volumes:
-      - redis_insight:/data
-    depends_on:
-      - redis
-    restart: unless-stopped
-    profiles:
-      - monitoring
 
   # Prometheus for metrics collection (optional)
   prometheus:
@@ -195,14 +140,6 @@ volumes:
   app_models:
     driver: local
   app_logs:
-    driver: local
-
-  # Redis volumes
-  redis_data:
-    driver: local
-  redis_logs:
-    driver: local
-  redis_insight:
     driver: local
 
   # Nginx volumes

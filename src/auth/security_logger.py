@@ -2,6 +2,7 @@
 
 보안 관련 이벤트를 체계적으로 로깅합니다.
 민감한 정보는 로깅하지 않으며, 감사(audit) 로그를 생성합니다.
+PostgreSQL 기반 저장.
 """
 
 from typing import Optional, Dict, Any
@@ -9,7 +10,6 @@ from datetime import datetime, timezone
 from loguru import logger
 import json
 import asyncio
-from redis import Redis
 
 
 class SecurityEventType:
@@ -22,18 +22,18 @@ class SecurityEventType:
 
     # 계정 관리
     USER_REGISTERED = "ACCOUNT_REGISTERED"
-    USER_CREATED = "ACCOUNT_CREATED"  # 사용자 생성
+    USER_CREATED = "ACCOUNT_CREATED"
     USER_DELETED = "ACCOUNT_DELETED"
     ACCOUNT_LOCKED = "ACCOUNT_LOCKED"
     ACCOUNT_UNLOCKED = "ACCOUNT_UNLOCKED"
-    USER_STATUS_CHANGED = "ACCOUNT_STATUS_CHANGED"  # 계정 상태 변경
-    USER_ROLE_CHANGED = "ACCOUNT_ROLE_CHANGED"  # 계정 역할 변경
+    USER_STATUS_CHANGED = "ACCOUNT_STATUS_CHANGED"
+    USER_ROLE_CHANGED = "ACCOUNT_ROLE_CHANGED"
 
     # 비밀번호 관련
-    PASSWORD_RESET_REQUESTED = "PASSWORD_RESET_REQUESTED"  # 비밀번호 재설정 요청
-    PASSWORD_RESET_COMPLETED = "PASSWORD_RESET_COMPLETED"  # 비밀번호 재설정 완료
-    PASSWORD_CHANGED = "PASSWORD_CHANGED"  # 비밀번호 변경
-    PASSWORD_RESET_BY_ADMIN = "PASSWORD_RESET_BY_ADMIN"  # 관리자에 의한 비밀번호 강제 변경
+    PASSWORD_RESET_REQUESTED = "PASSWORD_RESET_REQUESTED"
+    PASSWORD_RESET_COMPLETED = "PASSWORD_RESET_COMPLETED"
+    PASSWORD_CHANGED = "PASSWORD_CHANGED"
+    PASSWORD_RESET_BY_ADMIN = "PASSWORD_RESET_BY_ADMIN"
 
     # 토큰 관련
     TOKEN_ISSUED = "TOKEN_ISSUED"
@@ -66,29 +66,14 @@ class SecurityLogger:
     모든 보안 관련 이벤트를 구조화된 형식으로 로깅합니다.
     """
 
-    # 전역 Redis 인스턴스 (웹훅 트리거용)
-    _redis: Optional[Redis] = None
-
     @classmethod
-    def set_redis(cls, redis: Redis):
-        """Redis 인스턴스 설정
-
-        Args:
-            redis: Redis 클라이언트
-        """
-        cls._redis = redis
+    def initialize(cls):
+        """Initialize SecurityLogger."""
+        pass
 
     @staticmethod
     def _sanitize_data(data: Dict[str, Any]) -> Dict[str, Any]:
-        """민감한 정보 제거
-
-        Args:
-            data: 로깅할 데이터
-
-        Returns:
-            민감한 정보가 제거된 데이터
-        """
-        # 절대 로깅하지 말아야 할 필드
+        """민감한 정보 제거"""
         sensitive_fields = [
             "password",
             "password_hash",
@@ -102,10 +87,8 @@ class SecurityLogger:
 
         sanitized = {}
         for key, value in data.items():
-            # 민감한 필드는 마스킹
             if key.lower() in sensitive_fields:
                 sanitized[key] = "***REDACTED***"
-            # 이메일은 부분 마스킹
             elif key.lower() == "email" and isinstance(value, str) and "@" in value:
                 local, domain = value.split("@")
                 if len(local) > 3:
@@ -127,22 +110,11 @@ class SecurityLogger:
         message: Optional[str] = None,
         **extra_data
     ):
-        """보안 이벤트 로깅 (Redis + 파일 하이브리드)
-
-        Args:
-            event_type: 이벤트 타입 (SecurityEventType 상수 사용)
-            level: 로그 레벨 (SecurityEventLevel 상수 사용)
-            user_id: 사용자 ID
-            ip_address: IP 주소
-            message: 추가 메시지
-            **extra_data: 추가 데이터 (민감한 정보는 자동 제거됨)
-        """
-        # 민감한 정보 제거
+        """보안 이벤트 로깅 (PostgreSQL + 파일 하이브리드)"""
         sanitized_data = cls._sanitize_data(extra_data)
 
-        # 보안 이벤트 데이터 구성
         event_data = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),  # UTC timezone-aware datetime
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "event_type": event_type,
             "level": level,
             "user_id": user_id or "anonymous",
@@ -151,10 +123,9 @@ class SecurityLogger:
             **sanitized_data
         }
 
-        # 1. 파일 로깅 (장기 보관 및 감사)
+        # 1. 파일 로깅
         log_message = f"SECURITY_EVENT: {json.dumps(event_data, ensure_ascii=False)}"
 
-        # 레벨에 따라 적절한 로깅
         if level == SecurityEventLevel.CRITICAL:
             logger.critical(log_message)
         elif level == SecurityEventLevel.ERROR:
@@ -164,33 +135,24 @@ class SecurityLogger:
         else:
             logger.info(log_message)
 
-        # 2. Redis 저장 (빠른 조회, 최근 7일)
-        if cls._redis is not None:
+        # 2. PostgreSQL 저장 (비동기 백그라운드)
+        try:
+            cls._store_to_pg(event_data)
+        except Exception as e:
+            logger.error(f"Failed to store to PostgreSQL: {e}")
+
+        # 3. 웹훅 트리거
+        try:
+            from .models import WebhookEvent
             try:
-                # Redis 저장 (동기)
-                cls._store_to_redis(event_data)
-            except Exception as e:
-                logger.error(f"Failed to store to Redis: {e}")
+                webhook_event = WebhookEvent(event_type)
+                asyncio.create_task(cls._trigger_webhooks(webhook_event, event_data))
+            except ValueError:
+                pass
+        except Exception as e:
+            logger.error(f"Failed to trigger webhooks: {e}")
 
-        # 3. 웹훅 트리거 (비동기 - 백그라운드에서 실행)
-        if cls._redis is not None:
-            try:
-                # WebhookEvent enum 값과 매핑
-                from .models import WebhookEvent
-
-                # 이벤트 타입을 WebhookEvent로 변환
-                try:
-                    webhook_event = WebhookEvent(event_type)
-
-                    # 비동기 태스크로 웹훅 트리거 (블로킹하지 않음)
-                    asyncio.create_task(cls._trigger_webhooks(webhook_event, event_data))
-                except ValueError:
-                    # WebhookEvent에 없는 이벤트 타입은 무시
-                    pass
-            except Exception as e:
-                logger.error(f"Failed to trigger webhooks: {e}")
-
-        # 4. 실시간 알림 전송 (WebSocket)
+        # 4. 실시간 알림 전송
         try:
             from .alert_system import alert_manager
             asyncio.create_task(alert_manager.send_alert(event_data))
@@ -198,50 +160,37 @@ class SecurityLogger:
             logger.error(f"Failed to send real-time alert: {e}")
 
     @classmethod
-    def _store_to_redis(cls, event_data: Dict[str, Any]):
-        """Redis에 보안 로그 저장 (동기)
-
-        Args:
-            event_data: 보안 이벤트 데이터
-        """
+    def _store_to_pg(cls, event_data: Dict[str, Any]):
+        """PostgreSQL에 보안 로그 저장 (동기)"""
         try:
-            import time
+            from ..database.connection import SyncSessionFactory
+            from ..database.models.security_log import SecurityLog
 
-            # Redis ZSET에 저장 (타임스탬프 기반 정렬)
-            # 키 형식: security_logs:{level}
-            key = f"security_logs:{event_data['level']}"
-            score = time.time()  # Unix timestamp for scoring
-
-            # JSON 직렬화
-            log_json = json.dumps(event_data, ensure_ascii=False)
-
-            # ZSET에 추가
-            cls._redis.zadd(key, {log_json: score})
-
-            # 전체 보안 로그 키 (레벨 무관)
-            all_key = "security_logs:all"
-            cls._redis.zadd(all_key, {log_json: score})
-
-            # 7일 이상 된 로그 자동 삭제
-            cutoff_score = score - (7 * 24 * 60 * 60)  # 7 days ago
-            cls._redis.zremrangebyscore(key, 0, cutoff_score)
-            cls._redis.zremrangebyscore(all_key, 0, cutoff_score)
+            with SyncSessionFactory() as session:
+                log_entry = SecurityLog(
+                    level=event_data.get("level", "INFO"),
+                    event_type=event_data.get("event_type", "UNKNOWN"),
+                    message=event_data.get("message", ""),
+                    details={
+                        k: v for k, v in event_data.items()
+                        if k not in ("level", "event_type", "message", "ip_address", "user_id", "timestamp")
+                    },
+                    ip_address=event_data.get("ip_address"),
+                    user_id=event_data.get("user_id"),
+                )
+                session.add(log_entry)
+                session.commit()
 
         except Exception as e:
-            logger.error(f"Redis storage failed: {e}")
+            logger.error(f"PostgreSQL storage failed: {e}")
 
     @classmethod
     async def _trigger_webhooks(cls, event: 'WebhookEvent', payload: Dict[str, Any]):
-        """웹훅 트리거 (비동기)
-
-        Args:
-            event: 웹훅 이벤트
-            payload: 페이로드 데이터
-        """
+        """웹훅 트리거 (비동기)"""
         try:
             from .webhook_service import WebhookService
 
-            webhook_service = WebhookService(cls._redis)
+            webhook_service = WebhookService()
             await webhook_service.trigger_event(event, payload)
 
         except Exception as e:
@@ -251,7 +200,6 @@ class SecurityLogger:
 
     @staticmethod
     def log_login_success(user_id: str, ip_address: Optional[str] = None, **extra):
-        """로그인 성공 로깅"""
         SecurityLogger.log_event(
             SecurityEventType.LOGIN_SUCCESS,
             SecurityEventLevel.INFO,
@@ -268,7 +216,6 @@ class SecurityLogger:
         reason: str = "Invalid credentials",
         **extra
     ):
-        """로그인 실패 로깅"""
         SecurityLogger.log_event(
             SecurityEventType.LOGIN_FAILED,
             SecurityEventLevel.WARNING,
@@ -281,7 +228,6 @@ class SecurityLogger:
 
     @staticmethod
     def log_logout(user_id: str, ip_address: Optional[str] = None, **extra):
-        """로그아웃 로깅"""
         SecurityLogger.log_event(
             SecurityEventType.LOGOUT,
             SecurityEventLevel.INFO,
@@ -293,7 +239,6 @@ class SecurityLogger:
 
     @staticmethod
     def log_user_registered(user_id: str, email: str, ip_address: Optional[str] = None, **extra):
-        """회원가입 로깅"""
         SecurityLogger.log_event(
             SecurityEventType.USER_REGISTERED,
             SecurityEventLevel.INFO,
@@ -312,7 +257,6 @@ class SecurityLogger:
         failed_attempts: int = 0,
         **extra
     ):
-        """계정 잠금 로깅"""
         SecurityLogger.log_event(
             SecurityEventType.ACCOUNT_LOCKED,
             SecurityEventLevel.CRITICAL,
@@ -326,7 +270,6 @@ class SecurityLogger:
 
     @staticmethod
     def log_account_unlocked(user_id: str, **extra):
-        """계정 잠금 해제 로깅"""
         SecurityLogger.log_event(
             SecurityEventType.ACCOUNT_UNLOCKED,
             SecurityEventLevel.INFO,
@@ -337,7 +280,6 @@ class SecurityLogger:
 
     @staticmethod
     def log_token_issued(user_id: str, token_type: str = "access", **extra):
-        """토큰 발급 로깅"""
         SecurityLogger.log_event(
             SecurityEventType.TOKEN_ISSUED,
             SecurityEventLevel.INFO,
@@ -353,7 +295,6 @@ class SecurityLogger:
         reason: str = "Invalid token",
         **extra
     ):
-        """유효하지 않은 토큰 로깅"""
         SecurityLogger.log_event(
             SecurityEventType.TOKEN_INVALID,
             SecurityEventLevel.WARNING,
@@ -365,7 +306,6 @@ class SecurityLogger:
 
     @staticmethod
     def log_token_expired(user_id: Optional[str] = None, **extra):
-        """만료된 토큰 로깅"""
         SecurityLogger.log_event(
             SecurityEventType.TOKEN_EXPIRED,
             SecurityEventLevel.INFO,
@@ -381,7 +321,6 @@ class SecurityLogger:
         limit: int,
         **extra
     ):
-        """Rate limit 초과 로깅"""
         SecurityLogger.log_event(
             SecurityEventType.RATE_LIMIT_EXCEEDED,
             SecurityEventLevel.WARNING,
@@ -399,12 +338,11 @@ class SecurityLogger:
         attempts: int,
         **extra
     ):
-        """Brute force 공격 시도 로깅"""
         SecurityLogger.log_event(
             SecurityEventType.BRUTE_FORCE_ATTEMPT,
             SecurityEventLevel.CRITICAL,
             ip_address=ip_address,
-            message=f"Potential brute force attack detected",
+            message="Potential brute force attack detected",
             email=email,
             attempts=attempts,
             **extra
@@ -417,7 +355,6 @@ class SecurityLogger:
         resource: str = "",
         **extra
     ):
-        """무단 접근 시도 로깅"""
         SecurityLogger.log_event(
             SecurityEventType.UNAUTHORIZED_ACCESS,
             SecurityEventLevel.ERROR,
@@ -436,7 +373,6 @@ class SecurityLogger:
         resource: str = "",
         **extra
     ):
-        """권한 부족 로깅"""
         SecurityLogger.log_event(
             SecurityEventType.PERMISSION_DENIED,
             SecurityEventLevel.WARNING,
@@ -456,7 +392,6 @@ class SecurityLogger:
         document_uri: str = "",
         **extra
     ):
-        """CSP 위반 로깅"""
         SecurityLogger.log_event(
             SecurityEventType.CSP_VIOLATION,
             SecurityEventLevel.WARNING,

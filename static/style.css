@@ -1830,6 +1830,97 @@ body {
     color: var(--gray-900);
 }
 
+/* ===== Custom Dialog Modal (Confirm/Alert) ===== */
+.custom-dialog-content {
+    max-width: 480px;
+}
+
+.custom-dialog-body {
+    padding: var(--space-lg) var(--space-xl);
+    text-align: center;
+}
+
+.custom-dialog-icon {
+    font-size: 3rem;
+    margin-bottom: var(--space-md);
+    line-height: 1.2;
+}
+
+.custom-dialog-message {
+    font-size: 1rem;
+    line-height: 1.7;
+    color: var(--text-primary);
+    white-space: pre-line;
+    margin: 0;
+}
+
+.custom-dialog-footer {
+    display: flex;
+    gap: var(--space-sm);
+    justify-content: center;
+    padding: var(--space-md) var(--space-xl) var(--space-xl);
+}
+
+.custom-dialog-btn {
+    padding: var(--space-sm) var(--space-xl);
+    border-radius: var(--radius-md);
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    box-shadow: var(--shadow-sm);
+    min-width: 100px;
+}
+
+.custom-dialog-btn.btn-primary {
+    background: linear-gradient(135deg, var(--primary-600) 0%, var(--primary-500) 100%);
+    color: white;
+    border: none;
+}
+
+.custom-dialog-btn.btn-primary:hover {
+    background: linear-gradient(135deg, var(--primary-700) 0%, var(--primary-600) 100%);
+    box-shadow: var(--shadow-md);
+    transform: translateY(-1px);
+}
+
+.custom-dialog-btn.btn-primary.danger {
+    background: linear-gradient(135deg, #ef4444, #dc2626);
+}
+
+.custom-dialog-btn.btn-primary.danger:hover {
+    background: linear-gradient(135deg, #dc2626, #b91c1c);
+    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
+}
+
+.custom-dialog-btn.btn-secondary {
+    background-color: var(--gray-100);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+}
+
+.custom-dialog-btn.btn-secondary:hover {
+    background-color: var(--gray-200);
+    border-color: var(--gray-300);
+    transform: translateY(-1px);
+}
+
+[data-theme="dark"] .custom-dialog-btn.btn-secondary {
+    background-color: var(--bg-secondary);
+    border-color: var(--border-color);
+    color: var(--text-secondary);
+}
+
+[data-theme="dark"] .custom-dialog-btn.btn-secondary:hover {
+    background-color: rgba(255, 255, 255, 0.08);
+    border-color: var(--gray-500);
+}
+
+[data-theme="dark"] .modal-close:hover {
+    background: var(--hover-bg);
+    color: var(--text-primary);
+}
+
 /* ===== Document Upload Section ===== */
 .upload-section {
     padding: var(--space-md) var(--space-xl);
@@ -2550,6 +2641,32 @@ textarea:focus {
 .reset-btn:hover {
     background: var(--hover-bg);
     border-color: var(--gray-400);
+}
+
+/* ===== Settings Panel Dark Mode ===== */
+[data-theme="dark"] .settings-panel select {
+    background: var(--gray-50) !important;
+    color: var(--text-primary) !important;
+    border-color: var(--border-color) !important;
+}
+
+[data-theme="dark"] .settings-panel select:focus {
+    border-color: var(--primary-500) !important;
+}
+
+[data-theme="dark"] #llmModelDisplay,
+[data-theme="dark"] #embeddingModelDisplay,
+[data-theme="dark"] #rerankerModelDisplay,
+[data-theme="dark"] #ttsModelDisplay {
+    background: var(--gray-50) !important;
+    color: var(--text-secondary) !important;
+    border-color: var(--border-color) !important;
+}
+
+[data-theme="dark"] #ttsStatusDisplay {
+    background: rgba(16, 185, 129, 0.1) !important;
+    color: #6ee7b7 !important;
+    border-color: rgba(16, 185, 129, 0.3) !important;
 }
 
 /* ===== Source Details Modal ===== */
@@ -3466,6 +3583,16 @@ textarea:focus {
     color: var(--text-secondary);
     display: flex;
     gap: var(--space-md);
+    flex-wrap: wrap;
+}
+
+.doc-group-badge {
+    font-size: 0.7rem;
+    font-weight: 500;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: var(--bg-secondary);
+    white-space: nowrap;
 }
 
 .document-actions {

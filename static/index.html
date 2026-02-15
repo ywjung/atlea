@@ -2566,7 +2566,14 @@
         // 로그아웃 처리
         async function handleLogout(event) {
             if (event) event.stopPropagation();
-            if (confirm('로그아웃하시겠습니까?')) {
+            const confirmed = await showConfirmModal({
+                title: '로그아웃',
+                message: '로그아웃하시겠습니까?',
+                icon: '👋',
+                confirmText: '로그아웃',
+                cancelText: '취소'
+            });
+            if (confirmed) {
                 // Stop TTS before navigating to prevent error toast
                 if (typeof stopAllTTS === 'function') stopAllTTS();
                 // Allow navigation without beforeunload warning
@@ -2706,8 +2713,26 @@
         import '/static/js/compat/auth-bridge.js';
     </script>
 
+    <!-- Generic Confirm/Alert Modal -->
+    <div id="customModal" class="modal custom-dialog">
+        <div class="modal-content custom-dialog-content">
+            <div class="modal-header">
+                <h2 id="customModalTitle">확인</h2>
+                <button class="modal-close" id="closeCustomModal">&times;</button>
+            </div>
+            <div class="custom-dialog-body">
+                <div id="customModalIcon" class="custom-dialog-icon"></div>
+                <p id="customModalMessage" class="custom-dialog-message"></p>
+            </div>
+            <div id="customModalFooter" class="custom-dialog-footer">
+                <button id="customModalCancel" class="btn-secondary custom-dialog-btn">취소</button>
+                <button id="customModalConfirm" class="btn-primary custom-dialog-btn">확인</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Main Script -->
-    <script src="/static/script.js?v=68"></script>
+    <script src="/static/script.js?v=70"></script>
 
     <!-- Cache Buster Verification -->
     <script>

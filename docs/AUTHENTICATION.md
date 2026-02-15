@@ -78,7 +78,7 @@ Route Handler (auth.py)
     ↓
 Service Layer (service.py)
     ↓
-Redis Storage
+PostgreSQL Storage
     ↓
 Security Logger
 ```
@@ -122,7 +122,7 @@ Register a new user account.
 }
 ```
 
-**Rate Limit:** 3 requests per 5 minutes per IP
+**Rate Limit:** 5 requests per 1 hour per IP
 
 ---
 
@@ -153,11 +153,11 @@ Authenticate user and receive tokens.
 - Access Token: 1 hour
 - Refresh Token: 7 days
 
-**Rate Limit:** 5 requests per 5 minutes per IP
+**Rate Limit:** 10 requests per 5 minutes per IP
 
 **Account Lockout:**
 - 5 failed attempts → Account locked for 15 minutes
-- Failed attempts reset after successful login
+- Successful login resets failed attempt count
 
 ---
 
@@ -200,12 +200,11 @@ Request password reset token.
 **Response:** (200 OK)
 ```json
 {
-  "message": "비밀번호 재설정 토큰이 발급되었습니다",
-  "reset_token": "eyJ..."
+  "message": "비밀번호 재설정 이메일이 발송되었습니다"
 }
 ```
 
-**Note:** In production, send token via email instead of returning it.
+**Note:** 보안상 토큰은 응답에 포함되지 않으며, 실제 환경에서는 이메일로 전송됩니다.
 
 **Token Expiration:** 30 minutes
 
@@ -234,8 +233,6 @@ Reset password using reset token.
 **Effects:**
 - Password updated
 - All sessions invalidated
-- Failed login attempts reset
-- Account unlocked
 
 ---
 
@@ -354,12 +351,12 @@ Logout and invalidate all sessions.
 
 ### Rate Limiting
 
-Implemented using sliding window algorithm with Redis.
+Implemented using sliding window algorithm with in-memory storage.
 
 | Endpoint | Max Requests | Window |
 |----------|-------------|--------|
-| Register | 3 | 5 min |
-| Login | 5 | 5 min |
+| Register | 5 | 1 hour |
+| Login | 10 | 5 min |
 | Password Reset Request | 3 | 1 hour |
 | Token Refresh | 10 | 5 min |
 | General API | 60 | 1 min |
@@ -379,7 +376,7 @@ Headers: {
 
 - **Trigger:** 5 failed login attempts
 - **Duration:** 15 minutes
-- **Reset:** Successful login or password reset
+- **Reset:** Successful login
 
 **Locked account response:**
 ```json
@@ -440,7 +437,7 @@ All security events are logged with structured JSON:
 
 ### Test Coverage
 
-Total: **164 tests** across 9 test files
+Total: **164 tests** across 10 test files
 
 | Test File | Tests | Coverage |
 |-----------|-------|----------|
@@ -470,7 +467,7 @@ python -m pytest tests/auth/ --cov=src/auth --cov-report=html
 
 ### Test Environment
 
-Tests use `MockRedis` to avoid external dependencies. All tests are async-compatible using `pytest-asyncio`.
+Tests use SQLite in-memory database to avoid external dependencies. All tests are async-compatible using `pytest-asyncio`.
 
 ## Configuration
 
@@ -486,9 +483,9 @@ ACCESS_TOKEN_EXPIRE_MINUTES=60
 REFRESH_TOKEN_EXPIRE_DAYS=7
 
 # Rate Limiting
-REGISTER_MAX_REQUESTS=3
-REGISTER_WINDOW_SECONDS=300
-LOGIN_MAX_REQUESTS=5
+REGISTER_MAX_REQUESTS=5
+REGISTER_WINDOW_SECONDS=3600
+LOGIN_MAX_REQUESTS=10
 LOGIN_WINDOW_SECONDS=300
 
 # Account Lockout
@@ -496,32 +493,23 @@ MAX_FAILED_ATTEMPTS=5
 LOCKOUT_DURATION_MINUTES=15
 ```
 
-### Redis Storage Schema
+### PostgreSQL Storage Schema
 
-```
-# User Data
-user:{user_id} → Hash {
-  user_id, email, username, password_hash,
+```sql
+-- User Data (users table)
+users: id (UUID), email, username, hashed_password,
   created_at, last_login, is_active, role,
   failed_login_attempts, locked_until
-}
 
-# Email Index
-user:email:{email} → user_id
+-- Session Data (sessions table)
+sessions: id (UUID), user_id (FK), created_at, expires_at,
+  ip_address, user_agent, is_active
 
-# Session Data
-session:{session_id} → Hash {
-  session_id, user_id, created_at, expires_at,
-  ip_address, user_agent
-}
-TTL: 3600 seconds (1 hour)
+-- Rate Limiting (in-memory)
+-- Sliding window algorithm, no persistent storage
 
-# User Sessions Set
-user:sessions:{user_id} → Set { session_id, ... }
-
-# Rate Limiting
-rate_limit:{ip}:{identifier} → count
-TTL: window_seconds
+-- Token Blacklist (token_blacklist table)
+token_blacklist: id, token_jti, user_id, expires_at
 ```
 
 ## Error Responses
@@ -590,7 +578,7 @@ TTL: window_seconds
 3. **Configure Redis persistence** - Enable AOF/RDB
 4. **Set up monitoring** - Track security events
 5. **Email integration** - Send password reset tokens via email
-6. **Backup strategy** - Regular Redis backups
+6. **Backup strategy** - Regular PostgreSQL backups
 
 ## Migration Guide
 
@@ -603,7 +591,7 @@ TTL: window_seconds
 
 2. **Set environment variables** in `.env`
 
-3. **Initialize Redis** with appropriate configuration
+3. **Initialize PostgreSQL** with appropriate configuration
 
 4. **Update routes** to include authentication middleware
 
@@ -623,7 +611,7 @@ If you need stricter password requirements:
 ### Common Issues
 
 **Issue:** "Account locked" error persists
-- **Solution:** Check Redis for `locked_until` field, verify system time
+- **Solution:** Check database for `locked_until` field, verify system time
 
 **Issue:** Token refresh fails
 - **Solution:** Ensure refresh token type is correct, check expiration
@@ -631,8 +619,8 @@ If you need stricter password requirements:
 **Issue:** Rate limiting too aggressive
 - **Solution:** Adjust `RateLimitConfig` values in `rate_limiter.py`
 
-**Issue:** Tests failing with Redis connection
-- **Solution:** Tests use MockRedis, no Redis needed. Check imports.
+**Issue:** Tests failing with database connection
+- **Solution:** Tests use SQLite in-memory database, no external DB needed. Check conftest.py imports.
 
 ## Changelog
 
@@ -641,7 +629,7 @@ If you need stricter password requirements:
 - ✅ Password reset functionality
 - ✅ User profile management
 - ✅ Session management
-- ✅ Comprehensive testing (164 tests)
+- ✅ Comprehensive testing (164 auth tests, 328 total project tests)
 
 ### Week 3
 - ✅ Rate limiting middleware
@@ -657,4 +645,4 @@ If you need stricter password requirements:
 
 ## License
 
-This authentication system is part of the chatbot_redis project.
+This authentication system is part of the ATLEA project.

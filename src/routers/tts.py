@@ -22,7 +22,8 @@ from loguru import logger
 
 from ..auth.middleware import get_current_active_user
 from ..auth.utils import require_admin, verify_token
-from ..redis_helpers import decode_bytes
+from ..data_helpers import decode_bytes
+from ..services.config_service import config_get_sync, config_set_sync
 
 # Optional bearer scheme for audio endpoints (allows query param fallback)
 optional_bearer = HTTPBearer(auto_error=False)
@@ -168,7 +169,7 @@ _TTS_DEFAULT_CONFIG = {
 
 # Helper functions
 def get_tts_config() -> dict:
-    """Get TTS configuration from Redis (인메모리 캐시 사용)"""
+    """Get TTS configuration (인메모리 캐시 사용)"""
     if not cache_manager:
         raise HTTPException(status_code=500, detail="Service not initialized")
 
@@ -178,12 +179,9 @@ def get_tts_config() -> dict:
             now - _tts_config_cache["timestamp"] < _tts_config_cache["ttl"]):
         return _tts_config_cache["data"]
 
-    redis = cache_manager.redis
-    config_str = redis.get("config:tts")
+    config_str = config_get_sync("config:tts")
 
     if config_str:
-        # Decode bytes from Redis if needed
-        config_str = decode_bytes(config_str)
         config = json.loads(config_str)
     else:
         config = _TTS_DEFAULT_CONFIG.copy()
@@ -195,12 +193,11 @@ def get_tts_config() -> dict:
 
 
 def save_tts_config(config: dict):
-    """Save TTS configuration to Redis"""
+    """Save TTS configuration to PostgreSQL"""
     if not cache_manager:
         raise HTTPException(status_code=500, detail="Service not initialized")
 
-    redis = cache_manager.redis
-    redis.set("config:tts", json.dumps(config))
+    config_set_sync("config:tts", json.dumps(config), "json")
 
     # 인메모리 캐시 무효화
     _tts_config_cache["data"] = None
@@ -213,7 +210,7 @@ async def get_tts_configuration(request: Request):
     """
     Get TTS configuration (Admin only)
     """
-    require_admin(request, cache_manager.redis)
+    require_admin(request)
 
     config = get_tts_config()
 
@@ -241,7 +238,7 @@ async def update_tts_configuration(request: Request, config: TTSConfigRequest):
     """
     global tts_service
 
-    require_admin(request, cache_manager.redis)
+    require_admin(request)
 
     logger.info(f"Updating TTS config: enabled={config.enabled}, model={config.model_id}")
 
@@ -300,7 +297,7 @@ async def get_available_tts_models(request: Request):
     """
     Get available TTS models (Admin only)
     """
-    require_admin(request, cache_manager.redis)
+    require_admin(request)
 
     if tts_service:
         return tts_service.get_available_models()
@@ -324,7 +321,7 @@ async def clear_tts_cache(request: Request):
     """
     Clear TTS audio cache (Admin only)
     """
-    require_admin(request, cache_manager.redis)
+    require_admin(request)
 
     service = get_or_create_tts_service()
     if not service:
@@ -353,7 +350,7 @@ async def get_tts_status(request: Request):
     """
     Get TTS service status (Admin only)
     """
-    require_admin(request, cache_manager.redis)
+    require_admin(request)
 
     config = get_tts_config()
 

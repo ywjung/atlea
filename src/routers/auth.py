@@ -22,7 +22,6 @@ from ..auth.service import AuthService
 from ..auth.webhook_service import WebhookService
 from ..auth.middleware import get_current_active_user, require_admin
 from ..auth.rate_limiter import create_rate_limit_dependency, RateLimitConfig
-from ..redis_helpers import decode_bytes, decode_redis_hash
 from ..utils.error_handling import get_safe_error_message
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
@@ -30,47 +29,20 @@ router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 
 # ============= Cache Invalidation Helper =============
 
-async def invalidate_dashboard_cache(redis):
+# In-memory dashboard cache
+_dashboard_cache = {}
+
+
+async def invalidate_dashboard_cache():
     """대시보드 캐시 무효화
 
-    사용자 데이터가 변경되었을 때 모든 대시보드 캐시를 삭제합니다.
-    동기 Redis 클라이언트를 사용하며, Pipeline으로 배치 삭제합니다.
+    사용자 데이터가 변경되었을 때 인메모리 대시보드 캐시를 삭제합니다.
 
     Args:
-        redis: Redis 클라이언트 (동기)
+        
     """
-    try:
-        from loguru import logger
-        pattern = "dashboard_cache:*"
-
-        # scan_iter로 키를 배치 단위로 삭제 (메모리 효율적)
-        deleted_count = 0
-        batch = []
-        batch_size = 100
-
-        for key in redis.scan_iter(match=pattern, count=100):
-            batch.append(key)
-            if len(batch) >= batch_size:
-                pipe = redis.pipeline()
-                for k in batch:
-                    pipe.delete(k)
-                pipe.execute()
-                deleted_count += len(batch)
-                batch = []
-
-        # 남은 키 삭제
-        if batch:
-            pipe = redis.pipeline()
-            for k in batch:
-                pipe.delete(k)
-            pipe.execute()
-            deleted_count += len(batch)
-
-        if deleted_count > 0:
-            logger.info(f"🗑️  Invalidated {deleted_count} dashboard cache entries")
-    except Exception as e:
-        from loguru import logger
-        logger.error(f"Failed to invalidate dashboard cache: {e}")
+    global _dashboard_cache
+    _dashboard_cache.clear()
 
 
 async def send_password_reset_email(email_service, to_email: str, reset_token: str) -> bool:
@@ -190,8 +162,7 @@ async def get_totp_status(request: Request):
     """
     try:
         from ..auth.totp import TOTPService
-        redis = request.app.state.cache_manager.redis
-        totp_service = TOTPService(redis)
+        totp_service = TOTPService()
 
         return {"enabled": totp_service.is_enabled()}
     except Exception as e:
@@ -224,17 +195,11 @@ async def register(
     Raises:
         HTTPException: 이메일 중복 또는 유효성 검사 실패 시 400
     """
-    from loguru import logger
-    logger.debug(f"app.state has cache_manager: {hasattr(request.app.state, 'cache_manager')}")
-    if hasattr(request.app.state, 'cache_manager'):
-        logger.debug(f"cache_manager.redis is None: {request.app.state.cache_manager.redis is None}")
-
-    auth_service = AuthService(request.app.state.cache_manager.redis)
-    redis = request.app.state.cache_manager.redis
+    auth_service = AuthService()
 
     # CAPTCHA 검증 (회원가입)
     from ..auth.captcha import SimpleCaptchaService
-    captcha_service = SimpleCaptchaService(redis)
+    captcha_service = SimpleCaptchaService()
     if captcha_service.is_enabled("register"):
         success, error_msg = await captcha_service.verify_captcha(
             captcha_id=user_data.captcha_id or "",
@@ -250,7 +215,7 @@ async def register(
         user = await auth_service.create_user(user_data)
 
         # 대시보드 캐시 무효화 (새 사용자 등록)
-        await invalidate_dashboard_cache(redis)
+        await invalidate_dashboard_cache()
 
         return {
             "message": "회원가입이 완료되었습니다",
@@ -293,8 +258,7 @@ async def login(
     # 최소 응답 시간 (밀리초): 200-300ms 랜덤 (성공/실패 여부와 무관)
     min_response_time_ms = 200 + secrets.randbelow(100)
 
-    auth_service = AuthService(request.app.state.cache_manager.redis)
-    redis = request.app.state.cache_manager.redis
+    auth_service = AuthService()
 
     try:
         # IP 주소 추출
@@ -305,7 +269,7 @@ async def login(
 
         # CAPTCHA 검증 (로그인)
         from ..auth.captcha import SimpleCaptchaService
-        captcha_service = SimpleCaptchaService(redis)
+        captcha_service = SimpleCaptchaService()
         if captcha_service.is_enabled("login"):
             success, error_msg = await captcha_service.verify_captcha(
                 captcha_id=credentials.captcha_id or "",
@@ -383,7 +347,7 @@ async def logout(
     import jwt
     from ..config import config
 
-    auth_service = AuthService(request.app.state.cache_manager.redis)
+    auth_service = AuthService()
 
     # IP 주소 추출
     ip_address = request.client.host if request.client else None
@@ -408,29 +372,14 @@ async def logout(
                 if user_id:
                     # 토큰을 블랙리스트에 추가
                     from ..auth.token_blacklist import TokenBlacklist
-                    blacklist = TokenBlacklist(request.app.state.cache_manager.redis)
+                    blacklist = TokenBlacklist()
                     blacklist.add_token(token, config.SECRET_KEY, reason="logout")
 
-                    # 사용자의 모든 활성 세션 조회 및 삭제
-                    # Get all session IDs using SSCAN to avoid blocking
-                    session_ids = []
-                    cursor = 0
-
-                    while True:
-                        cursor, ids = request.app.state.cache_manager.redis.sscan(
-                            f"user:sessions:{user_id}",
-                            cursor=cursor,
-                            count=100
-                        )
-                        session_ids.extend(ids)
-
-                        if cursor == 0:
-                            break
-
-                    for session_id in session_ids:
-                        session_id_str = decode_bytes(session_id)
+                    # 사용자의 모든 활성 세션 조회 및 삭제 (PG)
+                    sessions = await auth_service.get_user_sessions(user_id)
+                    for session in sessions:
                         await auth_service.logout(
-                            session_id_str,
+                            session.session_id,
                             ip_address=ip_address,
                             username=username
                         )
@@ -473,7 +422,7 @@ async def refresh_token(
         HTTPException: 토큰 검증 실패 시 401
     """
 
-    auth_service = AuthService(request.app.state.cache_manager.redis)
+    auth_service = AuthService()
 
     try:
         # IP 주소 추출
@@ -539,7 +488,7 @@ async def request_password_reset(
         HTTPException: 사용자를 찾을 수 없을 때 400
     """
 
-    auth_service = AuthService(request.app.state.cache_manager.redis)
+    auth_service = AuthService()
 
     try:
         reset_token = await auth_service.request_password_reset(reset_request.email)
@@ -547,8 +496,7 @@ async def request_password_reset(
         # SMTP 설정 확인 및 이메일 전송
         from ..email_service import get_email_service
 
-        redis = request.app.state.cache_manager.redis
-        email_service = get_email_service(redis)
+        email_service = get_email_service()
 
         if email_service.is_configured():
             # 이메일 발송
@@ -605,7 +553,7 @@ async def confirm_password_reset(
         HTTPException: 토큰 검증 실패 시 401
     """
 
-    auth_service = AuthService(request.app.state.cache_manager.redis)
+    auth_service = AuthService()
 
     try:
         await auth_service.reset_password(
@@ -644,51 +592,42 @@ async def reset_password_with_otp(
     """
     from ..auth.totp import TOTPService
     from ..auth.utils import hash_password
+    from ..database.connection import AsyncSessionFactory
+    from ..repositories.user_repository import UserRepository
 
-    redis = request.app.state.cache_manager.redis
-    totp_service = TOTPService(redis)
+    totp_service = TOTPService()
 
     try:
-        # 1. 이메일로 사용자 찾기
-        user_id = redis.get(f"user:email:{reset_data.email}")
-        if not user_id:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="사용자를 찾을 수 없습니다"
-            )
+        # 1. 이메일로 사용자 찾기 (PG)
+        async with AsyncSessionFactory() as session:
+            repo = UserRepository(session)
+            pg_user = await repo.get_by_email(reset_data.email)
 
-        user_id = decode_bytes(user_id)
+            if not pg_user:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="사용자를 찾을 수 없습니다"
+                )
 
-        # 사용자 데이터 조회
-        user_data = redis.hgetall(f"user:{user_id}")
-        if not user_data:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="사용자를 찾을 수 없습니다"
-            )
+            # 2. 사용자에게 OTP가 설정되어 있는지 확인
+            if not pg_user.totp_secret:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="해당 계정에 OTP가 설정되지 않았습니다"
+                )
 
-        # bytes를 문자열로 변환
-        user = decode_redis_hash(user_data)
+            # 3. OTP 코드 검증
+            is_valid = totp_service.verify_token(pg_user.totp_secret, reset_data.otp_code)
+            if not is_valid:
+                logger.warning(f"Invalid OTP attempt for user: {reset_data.email}")
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="OTP 코드가 일치하지 않습니다"
+                )
 
-        # 2. 사용자에게 OTP가 설정되어 있는지 확인
-        if not user.get("totp_secret"):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="해당 계정에 OTP가 설정되지 않았습니다"
-            )
-
-        # 3. OTP 코드 검증
-        is_valid = totp_service.verify_token(user["totp_secret"], reset_data.otp_code)
-        if not is_valid:
-            logger.warning(f"Invalid OTP attempt for user: {reset_data.email}")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="OTP 코드가 일치하지 않습니다"
-            )
-
-        # 4. 비밀번호 해싱 및 업데이트
-        password_hash_value = hash_password(reset_data.new_password)
-        redis.hset(f"user:{user_id}", "password_hash", password_hash_value)
+            # 4. 비밀번호 해싱 및 업데이트
+            pg_user.password_hash = hash_password(reset_data.new_password)
+            await session.commit()
 
         logger.info(f"Password reset successful via OTP for user: {reset_data.email}")
 
@@ -726,6 +665,9 @@ async def verify_otp_for_reset(
         HTTPException: OTP 검증 실패 시
     """
     from ..auth.totp import TOTPService
+    from ..database.connection import AsyncSessionFactory
+    from ..repositories.user_repository import UserRepository
+    from ..services.config_service import config_set_sync
 
     # Extract data from JSON body
     email = verify_data.get("email")
@@ -737,54 +679,39 @@ async def verify_otp_for_reset(
             detail="이메일과 OTP 코드는 필수입니다"
         )
 
-    redis = request.app.state.cache_manager.redis
-    totp_service = TOTPService(redis)
+    totp_service = TOTPService()
 
     try:
-        # 1. 이메일로 사용자 찾기
-        user_id = redis.get(f"user:email:{email}")
-        if not user_id:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="사용자를 찾을 수 없습니다"
-            )
+        # 1. 이메일로 사용자 찾기 (PG)
+        async with AsyncSessionFactory() as session:
+            repo = UserRepository(session)
+            pg_user = await repo.get_by_email(email)
 
-        user_id = decode_bytes(user_id)
+            if not pg_user:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="사용자를 찾을 수 없습니다"
+                )
 
-        # 사용자 데이터 조회
-        user_data = redis.hgetall(f"user:{user_id}")
-        if not user_data:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="사용자를 찾을 수 없습니다"
-            )
+            # 2. 사용자에게 OTP가 설정되어 있는지 확인
+            if not pg_user.totp_secret:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="해당 계정에 OTP가 설정되지 않았습니다"
+                )
 
-        # bytes를 문자열로 변환
-        user = decode_redis_hash(user_data)
+            # 3. OTP 코드 검증
+            is_valid = totp_service.verify_token(pg_user.totp_secret, otp_code)
+            if not is_valid:
+                logger.warning(f"Invalid OTP attempt for password reset: {email}")
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="OTP 코드가 일치하지 않습니다"
+                )
 
-        # 2. 사용자에게 OTP가 설정되어 있는지 확인
-        if not user.get("totp_secret"):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="해당 계정에 OTP가 설정되지 않았습니다"
-            )
-
-        # 3. OTP 코드 검증
-        is_valid = totp_service.verify_token(user["totp_secret"], otp_code)
-        if not is_valid:
-            logger.warning(f"Invalid OTP attempt for password reset: {email}")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="OTP 코드가 일치하지 않습니다"
-            )
-
-        # 4. 검증 성공 - 임시 토큰 생성 (5분 유효)
+        # 4. 검증 성공 - 임시 토큰 생성 (PG SystemConfig에 저장)
         reset_token = secrets.token_urlsafe(32)
-        redis.setex(
-            f"otp_reset_token:{reset_token}",
-            300,  # 5분
-            email
-        )
+        config_set_sync(f"otp_reset_token:{reset_token}", email)
 
         logger.info(f"OTP verified for password reset: {email}")
 
@@ -824,42 +751,42 @@ async def confirm_password_reset_otp(
         HTTPException: 토큰 검증 실패 또는 비밀번호 업데이트 실패 시
     """
     from ..auth.utils import hash_password
+    from ..database.connection import AsyncSessionFactory
+    from ..repositories.user_repository import UserRepository
+    from ..services.config_service import config_get_sync, config_delete_sync
 
     # Pydantic 모델로 이미 검증됨 - reset_token과 new_password
     reset_token = reset_data.reset_token
     new_password = reset_data.new_password
 
-    redis = request.app.state.cache_manager.redis
-
     try:
-        # 1. 토큰으로 이메일 조회
-        email = redis.get(f"otp_reset_token:{reset_token}")
+        # 1. 토큰으로 이메일 조회 (PG SystemConfig)
+        email = config_get_sync(f"otp_reset_token:{reset_token}")
         if not email:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="유효하지 않거나 만료된 토큰입니다"
             )
 
-        email = decode_bytes(email)
-
         # 비밀번호 강도 검증은 Pydantic 모델에서 이미 수행됨
 
-        # 2. 사용자 찾기
-        user_id = redis.get(f"user:email:{email}")
-        if not user_id:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="사용자를 찾을 수 없습니다"
-            )
+        # 2. 사용자 찾기 및 비밀번호 업데이트 (PG)
+        async with AsyncSessionFactory() as session:
+            repo = UserRepository(session)
+            pg_user = await repo.get_by_email(email)
 
-        user_id = decode_bytes(user_id)
+            if not pg_user:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="사용자를 찾을 수 없습니다"
+                )
 
-        # 4. 비밀번호 해싱 및 업데이트
-        password_hash = hash_password(new_password)
-        redis.hset(f"user:{user_id}", "password_hash", password_hash)
+            # 비밀번호 해싱 및 업데이트
+            pg_user.password_hash = hash_password(new_password)
+            await session.commit()
 
-        # 5. 토큰 삭제 (일회용)
-        redis.delete(f"otp_reset_token:{reset_token}")
+        # 3. 토큰 삭제 (일회용)
+        config_delete_sync(f"otp_reset_token:{reset_token}")
 
         logger.info(f"Password reset successful via OTP token for user: {email}")
 
@@ -895,7 +822,7 @@ async def update_profile(
         업데이트된 사용자 정보
     """
 
-    auth_service = AuthService(request.app.state.cache_manager.redis)
+    auth_service = AuthService()
 
     try:
         user = await auth_service.update_profile(
@@ -932,7 +859,7 @@ async def change_password(
         성공 메시지
     """
 
-    auth_service = AuthService(request.app.state.cache_manager.redis)
+    auth_service = AuthService()
 
     try:
         await auth_service.change_password(
@@ -967,7 +894,7 @@ async def get_sessions(
         세션 목록
     """
 
-    auth_service = AuthService(request.app.state.cache_manager.redis)
+    auth_service = AuthService()
 
     sessions = await auth_service.get_user_sessions(current_user["user_id"])
 
@@ -993,7 +920,7 @@ async def revoke_session(
         성공 메시지
     """
 
-    auth_service = AuthService(request.app.state.cache_manager.redis)
+    auth_service = AuthService()
 
     try:
         success = await auth_service.revoke_session(
@@ -1033,7 +960,7 @@ async def revoke_all_sessions(
         무효화된 세션 수
     """
 
-    auth_service = AuthService(request.app.state.cache_manager.redis)
+    auth_service = AuthService()
 
     count = await auth_service.revoke_all_sessions(
         user_id=current_user["user_id"]
@@ -1054,10 +981,10 @@ async def get_admin_dashboard(
     page_size: int = 50,
     admin_user: dict = Depends(require_admin)
 ):
-    """관리자 대시보드 데이터 (통합 엔드포인트 - Redis 캐싱 적용)
+    """관리자 대시보드 데이터 (통합 엔드포인트 - 인메모리 캐싱 적용)
 
     통계, 사용자 목록, 보안 로그를 한 번에 조회하여 네트워크 요청 최적화
-    Redis 캐싱으로 대시보드 응답 속도 최적화 (TTL: 30초)
+    인메모리 캐싱으로 대시보드 응답 속도 최적화 (TTL: 30초)
 
     Args:
         request: FastAPI Request
@@ -1072,26 +999,18 @@ async def get_admin_dashboard(
     import json
     from loguru import logger
 
-    auth_service = AuthService(request.app.state.cache_manager.redis)
-    redis = request.app.state.cache_manager.redis
+    auth_service = AuthService()
 
-    # 캐시 키 생성 (페이지별로 캐싱)
-    cache_key = f"dashboard_cache:page_{page}:size_{page_size}"
+    # 인메모리 캐시 키 (페이지별로 캐싱)
+    cache_key = f"page_{page}:size_{page_size}"
     cache_ttl = 30  # 30초 TTL
 
-    # 1. 캐시 조회 시도
-    try:
-        cached_data = redis.get(cache_key)
-        if cached_data:
-            logger.info(f"✅ Dashboard cache HIT: {cache_key}")
-            # Decode bytes to string if needed
-            if isinstance(cached_data, bytes):
-                cached_data = cached_data.decode('utf-8')
-            return json.loads(cached_data)
-        else:
-            logger.info(f"❌ Dashboard cache MISS: {cache_key}")
-    except Exception as e:
-        logger.warning(f"Cache read failed, proceeding without cache: {e}")
+    # 1. 인메모리 캐시 조회 시도
+    cached_entry = _dashboard_cache.get(cache_key)
+    if cached_entry:
+        cached_time, cached_data = cached_entry
+        if (time.time() - cached_time) < cache_ttl:
+            return cached_data
 
     # 2. 캐시 미스 - 데이터 조회 (병렬 실행)
     stats_task = auth_service.get_system_stats()
@@ -1108,16 +1027,8 @@ async def get_admin_dashboard(
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
-    # 3. 캐시 저장
-    try:
-        redis.setex(
-            cache_key,
-            cache_ttl,
-            json.dumps(dashboard_data, ensure_ascii=False, default=str)
-        )
-        logger.info(f"💾 Dashboard cached: {cache_key} (TTL: {cache_ttl}s)")
-    except Exception as e:
-        logger.warning(f"Cache write failed: {e}")
+    # 3. 인메모리 캐시 저장
+    _dashboard_cache[cache_key] = (time.time(), dashboard_data)
 
     return dashboard_data
 
@@ -1136,7 +1047,7 @@ async def get_admin_stats(
     Returns:
         시스템 통계 정보
     """
-    auth_service = AuthService(request.app.state.cache_manager.redis)
+    auth_service = AuthService()
     stats = await auth_service.get_system_stats()
     return stats
 
@@ -1159,7 +1070,7 @@ async def get_all_users_admin(
     Returns:
         사용자 목록 및 페이지 정보
     """
-    auth_service = AuthService(request.app.state.cache_manager.redis)
+    auth_service = AuthService()
     result = await auth_service.get_all_users(page=page, page_size=page_size)
     return result
 
@@ -1182,9 +1093,7 @@ async def update_user_status_admin(
     Returns:
         업데이트된 사용자 정보
     """
-    auth_service = AuthService(request.app.state.cache_manager.redis)
-    redis = request.app.state.cache_manager.redis
-
+    auth_service = AuthService()
     try:
         user = await auth_service.update_user_status(
             user_id=user_id,
@@ -1193,7 +1102,7 @@ async def update_user_status_admin(
         )
 
         # 대시보드 캐시 무효화 (사용자 상태 변경)
-        await invalidate_dashboard_cache(redis)
+        await invalidate_dashboard_cache()
 
         return {
             "message": f"사용자가 {'활성화' if is_active else '비활성화'}되었습니다",
@@ -1225,8 +1134,7 @@ async def update_user_role_admin(
     Returns:
         업데이트된 사용자 정보
     """
-    auth_service = AuthService(request.app.state.cache_manager.redis)
-    redis = request.app.state.cache_manager.redis
+    auth_service = AuthService()
 
     try:
         user = await auth_service.update_user_role(
@@ -1236,7 +1144,7 @@ async def update_user_role_admin(
         )
 
         # 대시보드 캐시 무효화 (사용자 역할 변경)
-        await invalidate_dashboard_cache(redis)
+        await invalidate_dashboard_cache()
 
         return {
             "message": "사용자 역할이 변경되었습니다",
@@ -1273,8 +1181,7 @@ async def delete_user_admin(
             detail="자기 자신을 삭제할 수 없습니다"
         )
 
-    auth_service = AuthService(request.app.state.cache_manager.redis)
-    redis = request.app.state.cache_manager.redis
+    auth_service = AuthService()
 
     try:
         await auth_service.delete_user(
@@ -1283,7 +1190,7 @@ async def delete_user_admin(
         )
 
         # 대시보드 캐시 무효화 (사용자 삭제)
-        await invalidate_dashboard_cache(redis)
+        await invalidate_dashboard_cache()
 
         return {
             "message": "사용자가 삭제되었습니다"
@@ -1326,8 +1233,6 @@ async def reset_user_password_admin(
             detail="자기 자신의 비밀번호는 일반 비밀번호 변경 기능을 사용하세요"
         )
 
-    redis = request.app.state.cache_manager.redis
-
     try:
         # 새 비밀번호 가져오기
         new_password = password_data.get("new_password")
@@ -1345,20 +1250,23 @@ async def reset_user_password_admin(
                 detail=f"비밀번호 요구사항을 충족하지 않습니다: {', '.join(errors)}"
             )
 
-        # 사용자 존재 확인
-        user_data = redis.hgetall(f"user:{user_id}")
-        if not user_data:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="사용자를 찾을 수 없습니다"
-            )
+        # 사용자 존재 확인 및 비밀번호 업데이트 (PG)
+        from ..database.connection import SyncSessionFactory
+        from ..database.models.user import User as PgUser
+        import uuid as uuid_mod
 
-        # 비밀번호 해싱 및 업데이트
-        password_hash = hash_password(new_password)
-        redis.hset(f"user:{user_id}", "password_hash", password_hash)
+        with SyncSessionFactory() as db_session:
+            pg_user = db_session.get(PgUser, uuid_mod.UUID(user_id))
+            if not pg_user:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="사용자를 찾을 수 없습니다"
+                )
 
-        # 감사 로그 기록
-        user_email = user_data.get("email", "").decode() if isinstance(user_data.get("email"), bytes) else user_data.get("email", "")
+            # 비밀번호 해싱 및 업데이트
+            pg_user.password_hash = hash_password(new_password)
+            user_email = pg_user.email or ""
+            db_session.commit()
         ip_address = IPValidator.get_client_ip(request, trust_proxy=True)
 
         # 보안 로그 기록 (실패해도 비밀번호 변경 작업은 성공으로 처리)
@@ -1423,7 +1331,7 @@ async def get_security_logs_admin(
     from loguru import logger
     logger.debug(f"Security logs request - event_type: {event_type}, level: {level}, page: {page}")
 
-    auth_service = AuthService(request.app.state.cache_manager.redis)
+    auth_service = AuthService()
     result = await auth_service.get_security_logs(
         page=page,
         page_size=page_size,
@@ -1461,7 +1369,7 @@ async def get_login_history_admin(
     Returns:
         로그인 히스토리 목록
     """
-    auth_service = AuthService(request.app.state.cache_manager.redis)
+    auth_service = AuthService()
     result = await auth_service.get_login_history(
         user_id=user_id,
         page=page,
@@ -1493,7 +1401,7 @@ async def create_webhook(
     Returns:
         생성된 웹훅
     """
-    webhook_service = WebhookService(request.app.state.cache_manager.redis)
+    webhook_service = WebhookService()
     webhook = await webhook_service.create_webhook(
         webhook_data=webhook_data,
         user_id=current_user["user_id"]
@@ -1515,7 +1423,7 @@ async def list_webhooks(
     Returns:
         웹훅 목록
     """
-    webhook_service = WebhookService(request.app.state.cache_manager.redis)
+    webhook_service = WebhookService()
     webhooks = await webhook_service.list_webhooks(user_id=current_user["user_id"])
     return webhooks
 
@@ -1536,7 +1444,7 @@ async def get_webhook(
     Returns:
         웹훅 상세 정보
     """
-    webhook_service = WebhookService(request.app.state.cache_manager.redis)
+    webhook_service = WebhookService()
     webhook = await webhook_service.get_webhook(webhook_id)
 
     if not webhook:
@@ -1572,7 +1480,7 @@ async def update_webhook(
     Returns:
         업데이트된 웹훅
     """
-    webhook_service = WebhookService(request.app.state.cache_manager.redis)
+    webhook_service = WebhookService()
     webhook = await webhook_service.update_webhook(
         webhook_id=webhook_id,
         webhook_data=webhook_data,
@@ -1604,7 +1512,7 @@ async def delete_webhook(
     Returns:
         삭제 성공 메시지
     """
-    webhook_service = WebhookService(request.app.state.cache_manager.redis)
+    webhook_service = WebhookService()
     deleted = await webhook_service.delete_webhook(
         webhook_id=webhook_id,
         user_id=current_user["user_id"]
@@ -1637,7 +1545,7 @@ async def test_webhook(
     Returns:
         전송 기록
     """
-    webhook_service = WebhookService(request.app.state.cache_manager.redis)
+    webhook_service = WebhookService()
 
     try:
         delivery = await webhook_service.test_webhook(
@@ -1672,7 +1580,7 @@ async def get_webhook_deliveries(
     Returns:
         전송 기록 목록
     """
-    webhook_service = WebhookService(request.app.state.cache_manager.redis)
+    webhook_service = WebhookService()
     deliveries = await webhook_service.get_delivery_logs(
         webhook_id=webhook_id,
         user_id=current_user["user_id"],
@@ -1702,8 +1610,7 @@ async def generate_captcha(request: Request, action: str = "login"):
     try:
         from ..auth.captcha import SimpleCaptchaService
 
-        redis = request.app.state.cache_manager.redis
-        captcha_service = SimpleCaptchaService(redis)
+        captcha_service = SimpleCaptchaService()
 
         # CAPTCHA 비활성화 시 빈 응답
         if not captcha_service.is_enabled(action):

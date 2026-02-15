@@ -8,7 +8,6 @@ import qrcode
 import io
 import base64
 from typing import Optional, Tuple
-from redis import Redis
 from loguru import logger
 
 
@@ -19,27 +18,27 @@ class TOTPService:
     - Secret key 생성 및 관리
     - QR 코드 생성 (Google Authenticator 호환)
     - TOTP 코드 검증
-    - Redis 기반 2FA 활성화 설정
+    - PostgreSQL 기반 2FA 활성화 설정
     """
 
-    def __init__(self, redis_client: Redis):
+    def __init__(self):
         """초기화
 
         Args:
-            redis_client: Redis 클라이언트 인스턴스
         """
-        self.redis = redis_client
+        pass
 
     def is_enabled(self) -> bool:
-        """2FA 활성화 여부 확인 (Redis 설정)
+        """2FA 활성화 여부 확인 (PostgreSQL 설정)
 
         Returns:
             bool: 2FA 활성화 여부
         """
         try:
-            enabled_str = self.redis.get("config:totp_enabled")
+            from ..services.config_service import config_get_sync
+            enabled_str = config_get_sync("config:totp_enabled")
             if enabled_str is not None:
-                return enabled_str.decode() == "true"
+                return enabled_str == "true"
 
             # 기본값: 비활성화
             return False
@@ -152,20 +151,21 @@ class TOTPService:
 
 
 # TOTP 설정 헬퍼 함수
-def set_totp_enabled(redis_client: Redis, enabled: bool) -> bool:
-    """2FA 활성화 상태 설정
+def set_totp_enabled(enabled: bool) -> bool:
+    """2FA 활성화 상태 설정 (PostgreSQL)
 
     Args:
-        redis_client: Redis 클라이언트
         enabled: 2FA 활성화 여부
 
     Returns:
         성공 여부
     """
     try:
-        redis_client.set(
+        from ..services.config_service import config_set_sync
+        config_set_sync(
             "config:totp_enabled",
-            "true" if enabled else "false"
+            "true" if enabled else "false",
+            "boolean",
         )
         logger.info(f"2FA enabled status set to: {enabled}")
         return True
@@ -175,11 +175,8 @@ def set_totp_enabled(redis_client: Redis, enabled: bool) -> bool:
         return False
 
 
-def get_totp_config(redis_client: Redis) -> dict:
-    """2FA 설정 조회
-
-    Args:
-        redis_client: Redis 클라이언트
+def get_totp_config() -> dict:
+    """2FA 설정 조회 (PostgreSQL)
 
     Returns:
         {
@@ -189,8 +186,9 @@ def get_totp_config(redis_client: Redis) -> dict:
         }
     """
     try:
-        enabled_str = redis_client.get("config:totp_enabled")
-        enabled = enabled_str.decode() == "true" if enabled_str else False
+        from ..services.config_service import config_get_sync
+        enabled_str = config_get_sync("config:totp_enabled")
+        enabled = enabled_str == "true" if enabled_str else False
 
         return {
             "enabled": enabled,

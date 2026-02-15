@@ -76,14 +76,41 @@ Comprehensive file upload security implementation with multiple validation layer
   - Configurable limits and burst allowance
   - Automatic rate limit header exposure
 
-### 8. **Virus Scanning Hook** ✅ (Placeholder)
-- **Location**: `src/utils/file_security.py:scan_with_antivirus()`
-- **Status**: Integration hook provided for future AV integration
-- **Supported Engines**:
-  - ClamAV (clamd)
-  - VirusTotal API
-  - Custom AV solutions
-- **Implementation**: Ready for plugin when needed
+### 8. **ClamAV Virus Scanning** ✅ (Integrated)
+- **Location**: `src/routers/documents.py` (Lines 1263-1336)
+- **Status**: ClamAV 실시간 스캔 통합 완료
+- **Scan Method**: Stream 방식 (메모리 효율적)
+- **Performance**: ~0.07초 (소형 파일), 업로드 지연 <100ms
+- **Result Caching**: Redis에 90일 보관 (`doc:virus_scan:{filename}`)
+- **Flow**:
+  1. 파일 저장 후 즉시 ClamAV 스캔
+  2. 바이러스 발견 시: 파일 즉시 삭제 → 보안 로그 기록 → HTTP 400 반환
+  3. 안전한 파일: Redis에 검사 결과 저장 → 업로드 계속 진행
+  4. 스캔 실패 시: 경고 로그 기록 → 업로드는 계속 (fail-open)
+
+#### ClamAV Docker 설정
+
+```yaml
+# docker-compose.yml에 포함
+clamav:
+  image: clamav/clamav:latest
+  platform: linux/amd64
+  container_name: chatbot_clamav
+  ports:
+    - "3310:3310"
+  healthcheck:
+    test: ["CMD", "sh", "-c", "clamdscan --ping || exit 1"]
+    interval: 60s
+    timeout: 10s
+    retries: 3
+    start_period: 180s  # 바이러스 정의 로딩에 3~5분 소요
+```
+
+```env
+# .env
+CLAMAV_HOST=localhost
+CLAMAV_PORT=3310
+```
 
 ## Security Architecture
 
@@ -145,10 +172,32 @@ await validate_file_security(
 - Extension mismatches: `⚠️ MIME/extension mismatch: {mime} vs {ext}`
 - Malicious patterns: `🚨 Malicious pattern detected: {pattern} in {filename}`
 
+### Virus Scan Event Types
+
+| Event Type | Level | 발생 시점 | 조치 |
+|-----------|-------|----------|------|
+| `virus_detected` | CRITICAL | 업로드 중 바이러스 감지 | 파일 삭제, 업로드 차단 |
+| `virus_scan_clean` | INFO | 업로드 중 안전 확인 | 업로드 계속 |
+| `virus_scan_failed` | WARNING | ClamAV 스캔 실패 | 경고 로그, 업로드 계속 |
+| `manual_virus_detected` | CRITICAL | 관리자 수동 스캔 감지 | 감지만 (관리자 판단) |
+| `manual_virus_scan_clean` | INFO | 관리자 수동 스캔 안전 | 안전 확인 기록 |
+| `manual_virus_scan_failed` | WARNING | 관리자 수동 스캔 실패 | 실패 기록 |
+
+### Virus Scan Log Search Patterns
+
+| 상황 | 검색어 | 레벨 |
+|------|--------|------|
+| 바이러스 발견 확인 | `virus_detected` | CRITICAL |
+| 오늘 업로드 파일 | `virus_scan_clean` | INFO |
+| ClamAV 오류 확인 | `virus_scan_failed` | WARNING |
+| 관리자 작업 이력 | `manual_virus` | 전체 |
+| 모든 스캔 활동 | `virus` | 전체 |
+
 ### Log Locations
 - **Application logs**: `logs/server.log`
-- **Audit logs**: Redis `audit:security:*` keys
+- **Audit logs**: Redis `audit:security:*` keys (90일 보관)
 - **Security events**: WebSocket alerts for admins
+- **Admin UI**: http://localhost:8000/admin.html → [보안] 탭 → [보안 이벤트]
 
 ## Testing Recommendations
 
@@ -205,8 +254,7 @@ curl -X POST http://localhost:8000/api/documents/upload \
 ## Future Enhancements
 
 ### Recommended Additions
-1. **Virus Scanning Integration**: Implement ClamAV or VirusTotal API
-2. **Content Sandboxing**: Process uploads in isolated environment
+1. **Content Sandboxing**: Process uploads in isolated environment
 3. **User Upload Quotas**: Per-user storage limits
 4. **File Encryption**: Encrypt files at rest
 5. **Digital Signatures**: Verify document authenticity

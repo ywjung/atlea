@@ -26,10 +26,6 @@ mlx-lm>=0.19.0
 langchain>=0.3.7
 langchain-community>=0.3.6
 
-# Redis
-redis>=5.0.0
-redis-om>=0.2.1
-
 # Utilities
 python-dotenv>=1.0.0
 pydantic>=2.7.4

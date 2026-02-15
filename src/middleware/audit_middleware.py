@@ -59,13 +59,6 @@ class AuditMiddleware(BaseHTTPMiddleware):
         # IPValidator를 사용하여 안전하게 IP 추출
         return IPValidator.get_client_ip(request, trust_proxy=True)
 
-    def _get_redis_client(self, request: Request):
-        """Redis 클라이언트 가져오기"""
-        cache_mgr = getattr(request.app.state, 'cache_manager', None)
-        if cache_mgr and hasattr(cache_mgr, 'redis'):
-            return cache_mgr.redis
-        return None
-
     def _get_user_info(self, request: Request) -> tuple[Optional[str], Optional[str]]:
         """요청에서 사용자 정보 추출"""
         try:
@@ -74,15 +67,13 @@ class AuditMiddleware(BaseHTTPMiddleware):
                 user = request.state.user
                 return user.get("user_id"), user.get("username")
 
-            redis_client = self._get_redis_client(request)
-
             # JWT 토큰에서 직접 추출
             auth_header = request.headers.get("Authorization")
             if auth_header and auth_header.startswith("Bearer "):
                 token = auth_header.split(" ")[1]
                 try:
                     from ..auth.utils import verify_token
-                    user_data = verify_token(token, expected_type="access", redis_client=redis_client)
+                    user_data = verify_token(token, expected_type="access")
                     if user_data:
                         return user_data.get("user_id"), user_data.get("sub")  # sub = username
                 except Exception:
@@ -93,7 +84,7 @@ class AuditMiddleware(BaseHTTPMiddleware):
             if token:
                 try:
                     from ..auth.utils import verify_token
-                    user_data = verify_token(token, expected_type="access", redis_client=redis_client)
+                    user_data = verify_token(token, expected_type="access")
                     if user_data:
                         return user_data.get("user_id"), user_data.get("sub")  # sub = username
                 except Exception:

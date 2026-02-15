@@ -1,42 +1,44 @@
 """Settings service
 
 시스템 설정을 관리하는 서비스 계층입니다.
-Redis에서 설정을 읽고 쓰는 비즈니스 로직을 처리합니다.
+PostgreSQL(system_config 테이블)에서 설정을 읽고 씁니다.
 """
 
 import json
 from typing import Dict
 from ..auth.models import SystemSettings
 from ..config.settings import (
-    REDIS_SETTINGS_KEY,
+    SETTINGS_KEY,
     DEFAULT_INACTIVITY_TIMEOUT,
     DEFAULT_WARNING_TIME,
     DEFAULT_CHECK_INTERVAL
 )
+from .config_service import config_get_sync, config_set_sync
 
 
 class SettingsService:
-    """시스템 설정 관리 서비스"""
+    """시스템 설정 관리 서비스
 
-    def __init__(self, redis_client):
+    모든 읽기/쓰기는 PostgreSQL을 통해 수행됩니다.
+    """
+
+    def __init__(self):
         """
         Args:
-            redis_client: Redis 클라이언트 인스턴스
         """
-        self.redis = redis_client
+        pass
 
     def get_settings(self) -> SystemSettings:
         """시스템 설정 조회
 
-        Redis에서 설정을 읽고, 없으면 기본값을 반환합니다.
+        PostgreSQL에서 설정을 읽고, 없으면 기본값을 반환합니다.
 
         Returns:
             SystemSettings 객체
         """
-        settings_json = self.redis.get(REDIS_SETTINGS_KEY)
+        settings_json = config_get_sync(SETTINGS_KEY)
 
         if settings_json:
-            # Redis에 저장된 설정 사용
             settings_dict = json.loads(settings_json)
             return SystemSettings(**settings_dict)
 
@@ -59,18 +61,15 @@ class SettingsService:
         Raises:
             ValueError: 유효성 검증 실패 시
         """
-        # Pydantic 모델 검증 (Field constraints)
-        # settings 객체가 이미 검증되었음
-
         # 추가 비즈니스 로직 검증
         if settings.warning_time >= settings.inactivity_timeout:
             raise ValueError(
                 "Warning time must be less than inactivity timeout"
             )
 
-        # Redis에 저장
+        # PostgreSQL에 저장
         settings_dict = settings.model_dump()
-        self.redis.set(REDIS_SETTINGS_KEY, json.dumps(settings_dict))
+        config_set_sync(SETTINGS_KEY, json.dumps(settings_dict), "string")
 
         return settings
 
@@ -86,9 +85,9 @@ class SettingsService:
             check_interval=DEFAULT_CHECK_INTERVAL
         )
 
-        # Redis에 저장
+        # PostgreSQL에 저장
         settings_dict = default_settings.model_dump()
-        self.redis.set(REDIS_SETTINGS_KEY, json.dumps(settings_dict))
+        config_set_sync(SETTINGS_KEY, json.dumps(settings_dict), "string")
 
         return default_settings
 

@@ -13,6 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     cmake \
     git \
     curl \
+    libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
@@ -42,6 +43,8 @@ ARG APP_GID=1000
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
+    libpq5 \
+    postgresql-client \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
@@ -58,10 +61,12 @@ COPY --from=builder /opt/venv /opt/venv
 # Copy application code
 COPY --chown=${APP_USER}:${APP_USER} src/ ./src/
 COPY --chown=${APP_USER}:${APP_USER} static/ ./static/
+COPY --chown=${APP_USER}:${APP_USER} alembic/ ./alembic/
+COPY --chown=${APP_USER}:${APP_USER} alembic.ini ./alembic.ini
 COPY --chown=${APP_USER}:${APP_USER} .env.example .env
 
 # Create necessary directories with proper permissions
-RUN mkdir -p data model logs && \
+RUN mkdir -p data model logs backups && \
     chown -R ${APP_USER}:${APP_USER} /app
 
 # Set environment variables
@@ -75,12 +80,12 @@ ENV PATH="/opt/venv/bin:$PATH" \
 # Switch to non-root user
 USER ${APP_USER}
 
-# Expose port
-EXPOSE 8000
+# Expose port (default; override via docker-compose or -e PORT=...)
+EXPOSE ${PORT}
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:8000/api/status || exit 1
+    CMD curl -f http://localhost:${PORT}/health || exit 1
 
-# Run application
-CMD ["python", "-m", "uvicorn", "src.web_server:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+# Run application (shell form to expand $PORT at runtime)
+CMD python -m uvicorn src.web_server:app --host 0.0.0.0 --port ${PORT} --workers 1

@@ -3,8 +3,8 @@
 시스템 전역에서 사용되는 설정 상수들을 정의합니다.
 """
 
-# Redis keys
-REDIS_SETTINGS_KEY = "system:settings"
+# Config keys
+SETTINGS_KEY = "system:settings"
 
 # Default system settings (in minutes)
 DEFAULT_INACTIVITY_TIMEOUT = 30  # 30분
@@ -47,10 +47,10 @@ API_TIMEOUT_EXTENDED = 60 # 파일 업로드/다운로드 등
 #
 # Endpoint-specific rate limits are defined in router files:
 # - Query endpoints: 30 req/60s (query, query_stream, follow_up_questions)
-# - Redis backup: 5 req/60s (create), 3 req/60s (restore), 30 req/60s (list)
+# - DB backup: 5 req/60s (create), 3 req/60s (restore), 30 req/60s (list)
 # - Admin sensitive: 5 req/60s (TOTP reset, password reset, API key reveal)
 # - Admin session: 3 req/60s (revoke all), 20 req/60s (revoke single)
-# - Statistics: 30 req/60s (redis_stats, document_stats)
+# - Statistics: 30 req/60s (db_stats, document_stats)
 #
 RATE_LIMIT_WINDOW = 60           # 기본 rate limit 윈도우 (초)
 RATE_LIMIT_DEFAULT = 30          # 기본 요청 제한 수

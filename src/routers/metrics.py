@@ -33,7 +33,7 @@ def inject_dependencies(cache_mgr):
     Inject dependencies from main application
 
     Args:
-        cache_mgr: CacheManager instance for Redis access
+        cache_mgr: CacheManager instance
     """
     global cache_manager
     cache_manager = cache_mgr
@@ -58,12 +58,11 @@ async def get_metrics_summary(request: Request):
         if not cache_manager:
             raise_service_unavailable("캐시 관리자", "get metrics summary")
 
-        redis_client = cache_manager.redis
-        require_admin(request, redis_client)
+        require_admin(request)
 
         # MetricsCollector 초기화
         from ..metrics_collector import MetricsCollector
-        metrics = MetricsCollector(redis_client)
+        metrics = MetricsCollector()
 
         # 메트릭 수집 - get_summary()가 모든 통계를 제공
         summary = metrics.get_summary()
@@ -101,15 +100,14 @@ async def get_recent_searches(request: Request, limit: int = 100):
         if not cache_manager:
             raise_service_unavailable("캐시 관리자", "get recent searches")
 
-        redis_client = cache_manager.redis
-        require_admin(request, redis_client)
+        require_admin(request)
 
         # Limit 값 검증
         limit = min(limit, 1000)
 
         # MetricsCollector 초기화
         from ..metrics_collector import MetricsCollector
-        metrics = MetricsCollector(redis_client)
+        metrics = MetricsCollector()
 
         # 최근 검색 기록 조회
         recent_searches = metrics.get_recent_searches(limit=limit)
@@ -139,12 +137,11 @@ async def get_source_performance(request: Request):
         if not cache_manager:
             raise_service_unavailable("캐시 관리자", "get source performance")
 
-        redis_client = cache_manager.redis
-        require_admin(request, redis_client)
+        require_admin(request)
 
         # MetricsCollector 초기화
         from ..metrics_collector import MetricsCollector
-        metrics = MetricsCollector(redis_client)
+        metrics = MetricsCollector()
 
         # 소스별 성능 통계 - get_source_performance()가 모든 소스 통계를 반환
         source_performance = metrics.get_source_performance()
@@ -177,12 +174,11 @@ async def cleanup_old_metrics(request: Request, days: int = 30):
         if not cache_manager:
             raise_service_unavailable("캐시 관리자", "cleanup old metrics")
 
-        redis_client = cache_manager.redis
-        require_admin(request, redis_client)
+        require_admin(request)
 
         # MetricsCollector 초기화
         from ..metrics_collector import MetricsCollector
-        metrics = MetricsCollector(redis_client)
+        metrics = MetricsCollector()
 
         # 오래된 데이터 삭제
         deleted_count = metrics.clear_old_data(days=days)

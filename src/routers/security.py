@@ -12,7 +12,7 @@ Public endpoint for browser CSP reporting.
 from fastapi import APIRouter, Request
 from typing import Optional, Dict, Any
 from loguru import logger
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 
 # Create router with prefix and tags
@@ -31,7 +31,7 @@ def inject_dependencies(cache_mgr, audit_log):
     Inject dependencies from main application
 
     Args:
-        cache_mgr: CacheManager instance for Redis access
+        cache_mgr: CacheManager instance (kept for backward compatibility)
         audit_log: AuditLogger instance for security event logging
     """
     global cache_manager, audit_logger
@@ -74,37 +74,7 @@ async def csp_report(request: Request):
             f"Source: {source_file}:{line_number}"
         )
 
-        # Store violation in Redis for analysis
-        if cache_manager and cache_manager.redis:
-            try:
-                # Create violation record
-                violation_data = {
-                    "timestamp": datetime.utcnow().isoformat(),
-                    "blocked_uri": blocked_uri,
-                    "violated_directive": violated_directive,
-                    "document_uri": document_uri,
-                    "source_file": source_file,
-                    "line_number": line_number,
-                    "user_agent": request.headers.get("user-agent", ""),
-                    "client_ip": request.client.host if request.client else "unknown"
-                }
-
-                # Store in Redis list (keep last 1000 violations)
-                cache_manager.redis.lpush(
-                    "security:csp_violations",
-                    json.dumps(violation_data)
-                )
-                cache_manager.redis.ltrim("security:csp_violations", 0, 999)
-
-                # Increment violation counter by directive
-                counter_key = f"security:csp_count:{violated_directive}"
-                cache_manager.redis.incr(counter_key)
-                cache_manager.redis.expire(counter_key, 86400)  # 24 hours
-
-            except Exception as redis_error:
-                logger.error(f"Failed to store CSP violation in Redis: {redis_error}")
-
-        # Log security event via SecurityLogger
+        # Log security event via SecurityLogger (stores to PostgreSQL)
         try:
             from ..auth.security_logger import SecurityLogger
 
@@ -133,52 +103,67 @@ async def csp_report(request: Request):
 @router.get("/csp-violations/stats")
 async def get_csp_violation_stats(request: Request):
     """
-    Get CSP violation statistics
+    Get CSP violation statistics from PostgreSQL
 
     Returns aggregated statistics about CSP violations for monitoring.
-    Requires admin authentication.
 
     Returns:
         JSON with violation counts by directive and recent violations
     """
     try:
-        if not cache_manager or not cache_manager.redis:
-            return {
-                "error": "Redis not available",
-                "total_violations": 0,
-                "by_directive": {},
-                "recent_violations": []
-            }
+        from ..database.connection import SyncSessionFactory
+        from ..database.models.security_log import SecurityLog
+        from sqlalchemy import func
 
-        # Get all directive counters (using SCAN to avoid blocking)
-        by_directive = {}
-        total = 0
-        cursor = 0
+        with SyncSessionFactory() as session:
+            # Only look at last 24 hours
+            since = datetime.utcnow() - timedelta(hours=24)
 
-        while True:
-            cursor, keys = cache_manager.redis.scan(
-                cursor=cursor,
-                match="security:csp_count:*",
-                count=100
+            # Count by directive (from details JSONB)
+            rows = (
+                session.query(
+                    SecurityLog.details["violated_directive"].as_string().label("directive"),
+                    func.count().label("cnt"),
+                )
+                .filter(
+                    SecurityLog.event_type == "CSP_VIOLATION",
+                    SecurityLog.created_at >= since,
+                )
+                .group_by(SecurityLog.details["violated_directive"].as_string())
+                .all()
             )
-            for key in keys:
-                directive = key.decode().replace("security:csp_count:", "")
-                count = int(cache_manager.redis.get(key) or 0)
-                by_directive[directive] = count
-                total += count
 
-            if cursor == 0:
-                break
+            by_directive = {}
+            total = 0
+            for row in rows:
+                directive = row.directive or "unknown"
+                by_directive[directive] = row.cnt
+                total += row.cnt
 
-        # Get recent violations (last 10)
-        recent_raw = cache_manager.redis.lrange("security:csp_violations", 0, 9)
-        recent_violations = []
-        for violation_json in recent_raw:
-            try:
-                violation = json.loads(violation_json)
+            # Recent 10 violations
+            recent_logs = (
+                session.query(SecurityLog)
+                .filter(
+                    SecurityLog.event_type == "CSP_VIOLATION",
+                    SecurityLog.created_at >= since,
+                )
+                .order_by(SecurityLog.created_at.desc())
+                .limit(10)
+                .all()
+            )
+
+            recent_violations = []
+            for log in recent_logs:
+                violation = {
+                    "timestamp": log.created_at.isoformat() if log.created_at else "",
+                    "blocked_uri": (log.details or {}).get("blocked_uri", "unknown"),
+                    "violated_directive": (log.details or {}).get("violated_directive", "unknown"),
+                    "document_uri": (log.details or {}).get("document_uri", "unknown"),
+                    "source_file": (log.details or {}).get("source_file", ""),
+                    "line_number": (log.details or {}).get("line_number", 0),
+                    "client_ip": log.ip_address or "unknown",
+                }
                 recent_violations.append(violation)
-            except json.JSONDecodeError:
-                continue
 
         return {
             "total_violations": total,
@@ -203,7 +188,7 @@ async def get_recent_csp_violations(
     limit: int = 50
 ):
     """
-    Get recent CSP violations
+    Get recent CSP violations from PostgreSQL
 
     Args:
         limit: Maximum number of violations to return (default: 50, max: 200)
@@ -215,22 +200,30 @@ async def get_recent_csp_violations(
         # Validate limit
         limit = min(max(1, limit), 200)
 
-        if not cache_manager or not cache_manager.redis:
-            return {
-                "error": "Redis not available",
-                "violations": []
-            }
+        from ..database.connection import SyncSessionFactory
+        from ..database.models.security_log import SecurityLog
 
-        # Get recent violations
-        recent_raw = cache_manager.redis.lrange("security:csp_violations", 0, limit - 1)
-        violations = []
+        with SyncSessionFactory() as session:
+            recent_logs = (
+                session.query(SecurityLog)
+                .filter(SecurityLog.event_type == "CSP_VIOLATION")
+                .order_by(SecurityLog.created_at.desc())
+                .limit(limit)
+                .all()
+            )
 
-        for violation_json in recent_raw:
-            try:
-                violation = json.loads(violation_json)
+            violations = []
+            for log in recent_logs:
+                violation = {
+                    "timestamp": log.created_at.isoformat() if log.created_at else "",
+                    "blocked_uri": (log.details or {}).get("blocked_uri", "unknown"),
+                    "violated_directive": (log.details or {}).get("violated_directive", "unknown"),
+                    "document_uri": (log.details or {}).get("document_uri", "unknown"),
+                    "source_file": (log.details or {}).get("source_file", ""),
+                    "line_number": (log.details or {}).get("line_number", 0),
+                    "client_ip": log.ip_address or "unknown",
+                }
                 violations.append(violation)
-            except json.JSONDecodeError:
-                continue
 
         return {
             "count": len(violations),

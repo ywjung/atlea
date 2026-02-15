@@ -62,12 +62,11 @@ class CSRFProtectionMiddleware(BaseHTTPMiddleware):
     3. Allowing bypass for Authorization header-based requests
 
     Usage:
-        app.add_middleware(CSRFProtectionMiddleware, redis_client=redis)
+        app.add_middleware(CSRFProtectionMiddleware)
     """
 
-    def __init__(self, app, redis_client=None, enabled: bool = True):
+    def __init__(self, app, enabled: bool = True):
         super().__init__(app)
-        self.redis = redis_client
         self.enabled = enabled
 
     async def dispatch(

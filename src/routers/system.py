@@ -99,8 +99,8 @@ async def status():
             except Exception:
                 pass
 
-        # System is ready if documents are indexed (LLM loads on first use)
-        is_ready = (chunk_count > 0) or (_rag_system is not None)
+        # System is ready if vector_db is initialized (LLM loads on first use)
+        is_ready = _vector_db is not None
 
         # Check if reindexing is in progress
         is_reindexing = _reindex_service.is_reindexing() if _reindex_service else False
@@ -167,16 +167,12 @@ async def get_public_system_prompt(
         저장된 시스템 프롬프트 또는 기본값
     """
     try:
-        redis_client = request.app.state.cache_manager.redis
+        from ..services.config_service import config_get_sync
 
-        # Redis에서 조회
-        system_prompt = redis_client.get("system:default_prompt")
+        # PostgreSQL에서 조회
+        system_prompt = config_get_sync("system:default_prompt")
 
-        if system_prompt:
-            # bytes를 str로 변환
-            if isinstance(system_prompt, bytes):
-                system_prompt = system_prompt.decode('utf-8')
-        else:
+        if not system_prompt:
             # 기본값
             system_prompt = """당신은 문서 기반 질의응답 전문 AI 어시스턴트입니다.
 
@@ -241,7 +237,7 @@ async def get_system_metrics(
     """시스템 메트릭 조회 (관리자 및 로그인한 사용자)
 
     시스템 전체의 성능 및 상태 메트릭을 조회합니다:
-    - Redis 메모리 사용량 및 통계
+
     - 캐시 히트율 및 검색 통계
     - 슬로우 쿼리 성능 통계
 
@@ -275,25 +271,12 @@ async def get_system_metrics(
 async def health_check():
     """
     Health check endpoint for load balancers and monitoring systems.
-    Returns detailed system status including Redis, models, and cache.
+    Returns detailed system status including models and cache.
     Optimized for fast response (<10ms).
     """
     try:
         import psutil
         from datetime import datetime
-
-        # Check Redis connectivity (fast PING only)
-        redis_healthy = False
-        redis_info = {}
-        try:
-            _vector_db.client.ping()
-            redis_healthy = True
-            # Minimal info for performance - avoid expensive INFO command
-            redis_info = {
-                "connected": True
-            }
-        except Exception as e:
-            logger.error(f"Redis health check failed: {e}")
 
         # Check cache stats (lightweight)
         cache_stats = {}
@@ -313,15 +296,11 @@ async def health_check():
         }
 
         # Overall health status
-        is_healthy = redis_healthy and all(models_loaded.values())
+        is_healthy = all(models_loaded.values())
 
         return {
             "status": "healthy" if is_healthy else "unhealthy",
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "redis": {
-                "healthy": redis_healthy,
-                "info": redis_info
-            },
             "cache": {
                 "entries": cache_stats.get("total_entries", 0),
                 "hit_rate": (cache_stats.get("cache_hits", 0) / max(cache_stats.get("total_queries", 1), 1)) * 100
@@ -354,18 +333,6 @@ async def metrics():
         # Get cache stats
         cache_stats = _cache_manager.get_cache_stats() if _cache_manager else {}
 
-        # Get Redis stats
-        redis_info = {}
-        try:
-            info = _vector_db.client.info()
-            redis_info = {
-                "connected_clients": info.get("connected_clients", 0),
-                "used_memory": info.get("used_memory", 0),
-                "total_commands": info.get("total_commands_processed", 0)
-            }
-        except Exception:
-            pass
-
         # System metrics
         cpu_percent = psutil.cpu_percent(interval=0.1)
         memory = psutil.virtual_memory()
@@ -382,14 +349,6 @@ cache_queries_total {cache_stats.get('total_queries', 0)}
 # HELP cache_hits_total Total number of cache hits
 # TYPE cache_hits_total counter
 cache_hits_total {cache_stats.get('cache_hits', 0)}
-
-# HELP redis_connected_clients Number of Redis client connections
-# TYPE redis_connected_clients gauge
-redis_connected_clients {redis_info.get('connected_clients', 0)}
-
-# HELP redis_memory_used_bytes Redis memory usage in bytes
-# TYPE redis_memory_used_bytes gauge
-redis_memory_used_bytes {redis_info.get('used_memory', 0)}
 
 # HELP system_cpu_percent CPU usage percentage
 # TYPE system_cpu_percent gauge

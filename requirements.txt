@@ -32,9 +32,13 @@ langchain-community>=0.3.6
 # Web Search for Hybrid RAG
 tavily-python>=0.3.0
 
-# Redis
-redis>=5.0.0
-redis-om>=0.2.1
+# PostgreSQL & ORM
+sqlalchemy[asyncio]>=2.0.36
+asyncpg>=0.30.0
+psycopg2-binary>=2.9.9
+alembic>=1.14.0
+greenlet>=3.0.0
+pgvector>=0.3.6
 
 # Utilities
 python-dotenv>=1.0.0
@@ -59,7 +63,11 @@ Pillow>=10.4.0  # CAPTCHA image generation - Updated for security
 pyotp>=2.9.0  # TOTP (Google Authenticator) support
 qrcode>=7.4.0  # QR code generation for 2FA setup
 ecdsa>=0.19.0  # Explicit version for python-jose dependency - CVE-2024-23342 mitigation
+edge-tts>=7.0.0  # Microsoft Edge TTS for text-to-speech
 clamd>=1.0.2  # ClamAV antivirus integration for file scanning
+
+# Document Parsing
+olefile>=0.47  # OLE2 compound file parsing (HWP, legacy MS Office)
 
 # Audio Processing (for TTS mixed-language support)
 pydub>=0.25.0

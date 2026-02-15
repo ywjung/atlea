@@ -15,7 +15,6 @@ from pydantic import BaseModel
 from typing import Optional
 from loguru import logger
 from ..auth.middleware import get_current_active_user
-from ..routers.admin import require_admin
 from ..utils.error_handling import get_safe_error_message
 
 # Create router with prefix and tags
@@ -26,20 +25,18 @@ router = APIRouter(prefix="/api", tags=["Cache"])
 # ============================================================================
 
 cache_manager = None
-redis_client = None
 
 
-def inject_dependencies(cache_mgr, redis):
+def inject_dependencies(cache_mgr):
     """
     Inject dependencies from main application
 
     Args:
         cache_mgr: CacheManager instance for cache operations
-        redis: Redis client for admin validation
+        
     """
-    global cache_manager, redis_client
+    global cache_manager
     cache_manager = cache_mgr
-    redis_client = redis
 
 
 # ============================================================================
@@ -123,7 +120,8 @@ async def clear_cache(
     """
     try:
         # 관리자 권한 확인
-        require_admin(request, redis_client)
+        if current_user.get("role") != "admin":
+            raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다")
 
         if not cache_manager:
             raise HTTPException(status_code=503, detail="Cache manager not initialized")

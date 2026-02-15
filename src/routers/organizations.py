@@ -82,7 +82,7 @@ async def create_organization(
         HTTPException: 조직 생성 실패 시
     """
     cache_manager = request.app.state.cache_manager
-    org_manager = OrganizationManager(cache_manager.redis)
+    org_manager = OrganizationManager()
 
     try:
         org_id = org_manager.create_organization(
@@ -121,7 +121,7 @@ async def list_organizations(
         조직 목록
     """
     cache_manager = request.app.state.cache_manager
-    org_manager = OrganizationManager(cache_manager.redis)
+    org_manager = OrganizationManager()
 
     # 시스템 관리자는 모든 조직 조회
     if current_user.get("role") == "admin":
@@ -161,7 +161,7 @@ async def get_organization(
         HTTPException: 조직을 찾을 수 없을 경우 404
     """
     cache_manager = request.app.state.cache_manager
-    org_manager = OrganizationManager(cache_manager.redis)
+    org_manager = OrganizationManager()
 
     org = org_manager.get_organization(org_id)
 
@@ -200,7 +200,7 @@ async def update_organization(
         HTTPException: 조직 업데이트 실패 시
     """
     cache_manager = request.app.state.cache_manager
-    org_manager = OrganizationManager(cache_manager.redis)
+    org_manager = OrganizationManager()
 
     try:
         success = org_manager.update_organization(
@@ -241,7 +241,7 @@ async def delete_organization(
         HTTPException: 조직 삭제 실패 시
     """
     cache_manager = request.app.state.cache_manager
-    org_manager = OrganizationManager(cache_manager.redis)
+    org_manager = OrganizationManager()
 
     try:
         # 기본 조직은 삭제 불가
@@ -289,14 +289,14 @@ async def get_organization_members(
         멤버 목록
     """
     cache_manager = request.app.state.cache_manager
-    org_manager = OrganizationManager(cache_manager.redis)
+    org_manager = OrganizationManager()
 
     members = org_manager.get_members(org_id)
     admins = org_manager.get_org_admins(org_id)
 
     # 멤버 정보 배치 조회 (Pipeline 사용으로 N+1 쿼리 제거)
     from ..auth.service import AuthService
-    auth_service = AuthService(cache_manager.redis)
+    auth_service = AuthService()
 
     # 모든 멤버 정보를 한 번의 Pipeline으로 조회
     users_dict = await auth_service.get_users_by_ids(list(members))
@@ -347,7 +347,7 @@ async def add_organization_member(
         HTTPException: 권한 없음 또는 멤버 추가/이동 실패 시
     """
     cache_manager = request.app.state.cache_manager
-    org_manager = OrganizationManager(cache_manager.redis)
+    org_manager = OrganizationManager()
     
     # 권한 확인: 자기 자신을 이동하는 경우는 누구나 가능, 다른 사람을 추가하는 경우는 관리자만 가능
     is_self_transfer = member_data.user_id == current_user["user_id"]
@@ -367,17 +367,16 @@ async def add_organization_member(
     try:
         # 사용자 존재 확인
         from ..auth.service import AuthService
-        auth_service = AuthService(cache_manager.redis)
+        auth_service = AuthService()
         user = await auth_service.get_user_by_id(member_data.user_id)
 
         if not user:
             raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다")
 
         # 사용자의 현재 조직 확인
-        user_key = f'user:{member_data.user_id}'
-        current_org_id = cache_manager.redis.hget(user_key, 'org_id')
-        current_org_id = current_org_id.decode('utf-8') if current_org_id else None
-        
+        from ..auth.utils import get_user_field, update_user_fields
+        current_org_id = get_user_field(member_data.user_id, 'org_id')
+
         was_transferred = False
         old_org_name = None
 
@@ -386,7 +385,7 @@ async def add_organization_member(
             # 이전 조직 이름 가져오기 (메시지용)
             old_org = org_manager.get_organization(current_org_id)
             old_org_name = old_org.get('name') if old_org else current_org_id
-            
+
             # 이전 조직에서 제거
             org_manager.remove_member(current_org_id, member_data.user_id)
             was_transferred = True
@@ -396,10 +395,7 @@ async def add_organization_member(
 
         # 사용자의 org_id 업데이트
         if success or was_transferred:
-            cache_manager.redis.hset(user_key, 'org_id', org_id)
-            
-            # 일반 사용자로 초기화 (이전 조직에서 관리자였을 수 있음)
-            cache_manager.redis.hset(user_key, 'org_role', 'user')
+            update_user_fields(member_data.user_id, org_id=org_id, org_role='user')
 
         # 응답 메시지 생성
         if was_transferred:
@@ -454,7 +450,7 @@ async def remove_organization_member(
         HTTPException: 권한 없음 또는 멤버 제거 실패 시
     """
     cache_manager = request.app.state.cache_manager
-    org_manager = OrganizationManager(cache_manager.redis)
+    org_manager = OrganizationManager()
 
     # 권한 확인: 자기 자신을 제거하는 경우는 누구나 가능, 다른 사람을 제거하는 경우는 관리자만 가능
     is_self_removal = user_id == current_user["user_id"]
@@ -484,9 +480,8 @@ async def remove_organization_member(
             org_manager.add_member("default", user_id)
             
             # 사용자의 org_id를 기본 조직으로 업데이트
-            user_key = f'user:{user_id}'
-            cache_manager.redis.hset(user_key, 'org_id', 'default')
-            cache_manager.redis.hset(user_key, 'org_role', 'user')
+            from ..auth.utils import update_user_fields
+            update_user_fields(user_id, org_id='default', org_role='user')
 
         # 응답 메시지
         if is_self_removal:
@@ -530,8 +525,8 @@ async def get_organization_groups(
         logger = logging.getLogger(__name__)
 
         cache_manager = request.app.state.cache_manager
-        group_manager = GroupManager(cache_manager.redis)
-        org_manager = OrganizationManager(cache_manager.redis)
+        group_manager = GroupManager()
+        org_manager = OrganizationManager()
 
         # Permission check
         is_system_admin = current_user.get("role") == "admin"
@@ -567,22 +562,23 @@ async def get_organization_groups(
             group['org_count'] = counts['org_count']
 
         # Get root group IDs (groups explicitly assigned to this organization as top-level)
-        # Get all root group IDs using SSCAN to avoid blocking
-        root_group_ids_bytes = []
-        cursor = 0
+        from ..database.connection import SyncSessionFactory
+        from ..database.models.group_organization import GroupOrganization
+        from sqlalchemy import select
+        import uuid as _uuid
 
-        while True:
-            cursor, ids = cache_manager.redis.sscan(
-                f'org:groups:root:{org_id}',
-                cursor=cursor,
-                count=100
-            )
-            root_group_ids_bytes.extend(ids)
-
-            if cursor == 0:
-                break
-
-        root_group_ids = [gid.decode('utf-8') for gid in root_group_ids_bytes]
+        root_group_ids = []
+        try:
+            org_uuid = _uuid.UUID(org_id)
+            with SyncSessionFactory() as db_session:
+                stmt = (
+                    select(GroupOrganization.group_id)
+                    .where(GroupOrganization.org_id == org_uuid, GroupOrganization.is_root == True)
+                )
+                result = db_session.execute(stmt)
+                root_group_ids = [str(row[0]) for row in result.all()]
+        except Exception:
+            root_group_ids = []
         logger.info(f"📂 [최상위 그룹] {org['name']}의 최상위 그룹 개수: {len(root_group_ids)}")
 
         return {
@@ -621,8 +617,8 @@ async def assign_group_to_organization(
         logger = logging.getLogger(__name__)
 
         cache_manager = request.app.state.cache_manager
-        group_manager = GroupManager(cache_manager.redis)
-        org_manager = OrganizationManager(cache_manager.redis)
+        group_manager = GroupManager()
+        org_manager = OrganizationManager()
 
         # Validate organization exists
         org = org_manager.get_organization(org_id)
@@ -699,8 +695,8 @@ async def remove_group_from_organization(
         from ..group_manager import GroupManager
 
         cache_manager = request.app.state.cache_manager
-        group_manager = GroupManager(cache_manager.redis)
-        org_manager = OrganizationManager(cache_manager.redis)
+        group_manager = GroupManager()
+        org_manager = OrganizationManager()
 
         # Validate organization exists
         org = org_manager.get_organization(org_id)
@@ -770,7 +766,7 @@ async def promote_to_org_admin(
         HTTPException: 승격 실패 시
     """
     cache_manager = request.app.state.cache_manager
-    org_manager = OrganizationManager(cache_manager.redis)
+    org_manager = OrganizationManager()
 
     try:
         # 조직 관리자로 승격
@@ -778,8 +774,8 @@ async def promote_to_org_admin(
 
         # 사용자의 org_role 업데이트
         if success:
-            user_key = f'user:{user_id}'
-            cache_manager.redis.hset(user_key, 'org_role', 'org_admin')
+            from ..auth.utils import update_user_fields
+            update_user_fields(user_id, org_role='org_admin')
 
         return {
             "success": success,
@@ -816,15 +812,15 @@ async def demote_from_org_admin(
         HTTPException: 해제 실패 시
     """
     cache_manager = request.app.state.cache_manager
-    org_manager = OrganizationManager(cache_manager.redis)
+    org_manager = OrganizationManager()
 
     try:
         success = org_manager.remove_org_admin(org_id, user_id)
 
         # 사용자의 org_role 업데이트
         if success:
-            user_key = f'user:{user_id}'
-            cache_manager.redis.hset(user_key, 'org_role', 'user')
+            from ..auth.utils import update_user_fields
+            update_user_fields(user_id, org_role='user')
 
         return {
             "success": success,
@@ -852,7 +848,7 @@ async def cleanup_stale_org_references(
         Cleanup statistics including groups scanned, stale refs removed, etc.
     """
     cache_manager = request.app.state.cache_manager
-    org_manager = OrganizationManager(cache_manager.redis)
+    org_manager = OrganizationManager()
 
     try:
         result = org_manager.cleanup_stale_group_org_references()

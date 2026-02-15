@@ -7,7 +7,7 @@ Hybrid RAG Orchestrator - 다중 소스 RAG 시스템
 - 2026-01-22: RAG 품질 개선 기능 추가
   - Cross-encoder 기반 재랭킹 (Jina Reranker)
   - LLM 기반 쿼리 재작성 (검색 친화적 쿼리 변환)
-  - Redis 설정 기반 기능 활성화/비활성화
+  - PostgreSQL 설정 기반 기능 활성화/비활성화
 - 2026-01-20: Crawl4AI 통합으로 SearXNG 콘텐츠 품질 개선
   - SearXNG 검색 결과 URL에서 Crawl4AI로 전체 콘텐츠 추출
   - 짧은 스니펫 대신 풍부한 페이지 콘텐츠 제공
@@ -31,7 +31,8 @@ Hybrid RAG Orchestrator - 다중 소스 RAG 시스템
 import os
 import time
 import asyncio
-from typing import List, Dict, Optional
+import dataclasses
+from typing import List, Dict, Optional, Any
 from datetime import datetime
 from loguru import logger
 
@@ -41,6 +42,209 @@ from .performance_utils import log_slow_query
 from .reranker import get_reranker
 from .query_rewriter import HybridQueryRewriter
 from .config.prompts import get_hybrid_rag_priority_prompt
+
+
+@dataclasses.dataclass
+class TrajectoryStep:
+    """파이프라인 각 단계의 실행 기록"""
+    step_name: str
+    input_data: Any
+    output_data: Any
+    duration_ms: float
+    timestamp: str = dataclasses.field(default_factory=lambda: datetime.now().isoformat())
+    metadata: Dict = dataclasses.field(default_factory=dict)
+
+
+class QueryExecutionContext:
+    """
+    쿼리 실행 컨텍스트 — A-RAG의 AgentContext 패턴 적용
+
+    기능:
+    - 읽은 청크 ID 추적 (중복 방지)
+    - 검색 이력 기록
+    - 토큰 사용량 추적
+    - 파이프라인 궤적 기록 (Trajectory)
+    - 비용 추적 (모델별 가격 기반)
+    """
+
+    # 모델별 토큰당 비용 (USD per 1K tokens) — 주요 모델만
+    # 로컬 모델은 비용 0, API 모델만 실제 비용 발생
+    MODEL_PRICING = {
+        # OpenAI
+        'gpt-4o': {'input': 0.0025, 'output': 0.01},
+        'gpt-4o-mini': {'input': 0.00015, 'output': 0.0006},
+        'gpt-4-turbo': {'input': 0.01, 'output': 0.03},
+        # Anthropic
+        'claude-sonnet-4-5': {'input': 0.003, 'output': 0.015},
+        'claude-haiku-3-5': {'input': 0.0008, 'output': 0.004},
+        # Local (free)
+        'ollama': {'input': 0.0, 'output': 0.0},
+        'local': {'input': 0.0, 'output': 0.0},
+    }
+
+    def __init__(self, query: str, user_id: str = "", model_name: str = "local"):
+        self.query = query
+        self.user_id = user_id
+        self.model_name = model_name
+        self.created_at = time.time()
+
+        # 읽은 청크 추적 (중복 방지)
+        self.read_chunk_ids: set = set()
+
+        # 검색 이력
+        self.search_history: List[Dict] = []
+
+        # 토큰 사용량 추적
+        self.total_retrieved_tokens: int = 0
+        self.total_generated_tokens: int = 0
+
+        # 비용 추적
+        self._input_tokens: int = 0
+        self._output_tokens: int = 0
+
+        # 파이프라인 궤적 기록
+        self.trajectory: List[TrajectoryStep] = []
+
+        # 소스별 결과 카운트
+        self.source_counts: Dict[str, int] = {
+            'local': 0, 'web': 0, 'docs': 0
+        }
+
+    def record_step(
+        self,
+        step_name: str,
+        input_data: Any,
+        output_data: Any,
+        duration_ms: float,
+        **metadata
+    ):
+        """파이프라인 단계 기록"""
+        step = TrajectoryStep(
+            step_name=step_name,
+            input_data=self._truncate(input_data),
+            output_data=self._truncate(output_data),
+            duration_ms=round(duration_ms, 2),
+            metadata=metadata
+        )
+        self.trajectory.append(step)
+
+    def track_chunks(self, chunks: List[Dict]) -> List[Dict]:
+        """
+        청크 중복 추적 — 이미 읽은 청크는 제외
+
+        Returns:
+            새로운(중복되지 않은) 청크 목록
+        """
+        new_chunks = []
+        for chunk in chunks:
+            chunk_id = self._get_chunk_id(chunk)
+            if chunk_id not in self.read_chunk_ids:
+                self.read_chunk_ids.add(chunk_id)
+                new_chunks.append(chunk)
+
+        dedup_count = len(chunks) - len(new_chunks)
+        if dedup_count > 0:
+            logger.info(f"🔁 Deduped {dedup_count} already-read chunks ({len(new_chunks)} remaining)")
+
+        return new_chunks
+
+    def record_search(self, query: str, source: str, result_count: int, duration_ms: float):
+        """검색 이력 기록"""
+        self.search_history.append({
+            'query': query,
+            'source': source,
+            'result_count': result_count,
+            'duration_ms': round(duration_ms, 2),
+            'timestamp': datetime.now().isoformat()
+        })
+        self.source_counts[source] = self.source_counts.get(source, 0) + result_count
+
+    def add_retrieved_tokens(self, token_count: int):
+        """검색된 토큰 수 누적 (= LLM 입력 토큰의 일부)"""
+        self.total_retrieved_tokens += token_count
+        self._input_tokens += token_count
+
+    def add_generated_tokens(self, token_count: int):
+        """생성된 토큰 수 누적"""
+        self.total_generated_tokens += token_count
+        self._output_tokens += token_count
+
+    def add_input_tokens(self, token_count: int):
+        """LLM 입력 토큰 추가 (시스템 프롬프트, 대화 이력 등)"""
+        self._input_tokens += token_count
+
+    def estimate_cost_usd(self) -> float:
+        """현재까지의 추정 비용 (USD)"""
+        pricing = self._get_pricing()
+        input_cost = (self._input_tokens / 1000) * pricing['input']
+        output_cost = (self._output_tokens / 1000) * pricing['output']
+        return round(input_cost + output_cost, 6)
+
+    def _get_pricing(self) -> Dict[str, float]:
+        """모델명으로 가격표 조회"""
+        model = self.model_name.lower()
+        # 정확한 매치 먼저
+        if model in self.MODEL_PRICING:
+            return self.MODEL_PRICING[model]
+        # 부분 매치 (e.g., "gpt-4o-2024-11-20" → "gpt-4o")
+        for key in self.MODEL_PRICING:
+            if key in model:
+                return self.MODEL_PRICING[key]
+        # 기본값: 로컬 모델 (무료)
+        return {'input': 0.0, 'output': 0.0}
+
+    def get_summary(self) -> Dict:
+        """실행 컨텍스트 요약 반환"""
+        total_duration = (time.time() - self.created_at) * 1000
+        estimated_cost = self.estimate_cost_usd()
+        return {
+            'query': self.query,
+            'total_duration_ms': round(total_duration, 2),
+            'unique_chunks_read': len(self.read_chunk_ids),
+            'total_retrieved_tokens': self.total_retrieved_tokens,
+            'total_generated_tokens': self.total_generated_tokens,
+            'search_count': len(self.search_history),
+            'source_counts': dict(self.source_counts),
+            'pipeline_steps': len(self.trajectory),
+            'cost': {
+                'model': self.model_name,
+                'input_tokens': self._input_tokens,
+                'output_tokens': self._output_tokens,
+                'estimated_usd': estimated_cost
+            },
+            'trajectory': [
+                {
+                    'step': s.step_name,
+                    'duration_ms': s.duration_ms,
+                    'metadata': s.metadata
+                }
+                for s in self.trajectory
+            ]
+        }
+
+    @staticmethod
+    def _get_chunk_id(chunk: Dict) -> str:
+        """청크의 고유 ID 생성"""
+        meta = chunk.get('metadata', {})
+        filename = meta.get('filename', '')
+        chunk_index = meta.get('chunk_index', 0)
+        url = meta.get('url', '')
+        if filename:
+            return f"local:{filename}:{chunk_index}"
+        elif url:
+            return f"web:{url[:100]}"
+        return f"hash:{hash(chunk.get('content', '')[:200])}"
+
+    @staticmethod
+    def _truncate(data: Any, max_len: int = 200) -> Any:
+        """로그용 데이터 축약"""
+        if isinstance(data, str):
+            return data[:max_len] + "..." if len(data) > max_len else data
+        if isinstance(data, list):
+            return f"[{len(data)} items]"
+        if isinstance(data, dict):
+            return {k: "..." for k in list(data.keys())[:5]}
+        return str(data)[:max_len]
 
 
 class HybridRAGOrchestrator:
@@ -54,13 +258,20 @@ class HybridRAGOrchestrator:
     # 지원하는 웹 검색 프로바이더
     WEB_SEARCH_PROVIDERS = ['tavily', 'searxng']
 
+    # 기본 토큰 예산 (검색 컨텍스트용)
+    DEFAULT_MAX_CONTEXT_TOKENS = 4000
+
     def __init__(
         self,
         local_rag,
         cache_manager,
         enable_web_search: bool = True,
         enable_doc_search: bool = False,
-        web_search_provider: str = 'tavily'
+        web_search_provider: str = 'tavily',
+        *,
+        tavily_api_key: str | None = None,
+        context7_api_key: str | None = None,
+        max_context_tokens: int | None = None,
     ):
         """
         하이브리드 RAG 오케스트레이터 초기화
@@ -71,13 +282,21 @@ class HybridRAGOrchestrator:
             enable_web_search: 웹 검색 활성화 여부
             enable_doc_search: 공식 문서 검색 활성화 여부
             web_search_provider: 웹 검색 프로바이더 ('tavily' 또는 'searxng')
+            tavily_api_key: PostgreSQL에서 사전 조회한 Tavily API 키
+            context7_api_key: PostgreSQL에서 사전 조회한 Context7 API 키
         """
+        # PostgreSQL에서 사전 조회한 API 키 저장
+        self._prefetched_tavily_key = tavily_api_key
+        self._prefetched_context7_key = context7_api_key
         self.local_rag = local_rag
         self.cache = cache_manager
         self.analyzer = QueryAnalyzer()
 
+        # 토큰 예산 관리
+        self.max_context_tokens = max_context_tokens or self.DEFAULT_MAX_CONTEXT_TOKENS
+
         # 성능 모니터링
-        self.metrics = MetricsCollector(cache_manager.redis)
+        self.metrics = MetricsCollector()
 
         # MCP 클라이언트 초기화
         self.web_search_enabled = enable_web_search
@@ -117,32 +336,40 @@ class HybridRAGOrchestrator:
         logger.info(f"  - Doc Search: {self.doc_search_enabled}")
         logger.info(f"  - Reranking: {self.reranking_enabled}")
         logger.info(f"  - Query Rewrite: {self.query_rewrite_enabled}")
+        logger.info(f"  - Max Context Tokens: {self.max_context_tokens}")
 
     def _init_tavily(self):
-        """Tavily 웹 검색 클라이언트 초기화 (Redis 우선, 환경 변수 대체)"""
+        """Tavily 웹 검색 클라이언트 초기화 (PostgreSQL → 환경 변수)"""
         try:
             from tavily import TavilyClient
 
-            # API 키 가져오기: Redis 우선, 환경 변수 대체
+            # API 키 가져오기: PostgreSQL → 환경 변수
             api_key = None
 
-            # 1. Redis에서 확인
-            try:
-                redis_key = self.cache.redis.get("config:tavily_api_key")
-                if redis_key:
-                    api_key = redis_key.decode()
-                    logger.info("🔑 Using Tavily API key from Redis")
-            except Exception as e:
-                logger.debug(f"Failed to get Tavily key from Redis: {e}")
+            # 1. PostgreSQL에서 사전 조회한 값 확인
+            if self._prefetched_tavily_key:
+                api_key = self._prefetched_tavily_key
+                logger.info("🔑 Using Tavily API key from PostgreSQL")
 
-            # 2. 환경 변수 확인
+            # 2. PostgreSQL에서 직접 조회
+            if not api_key:
+                try:
+                    from .services.config_service import config_get_sync
+                    pg_key = config_get_sync("config:tavily_api_key")
+                    if pg_key:
+                        api_key = pg_key
+                        logger.info("🔑 Using Tavily API key from PostgreSQL (sync)")
+                except Exception as e:
+                    logger.debug(f"Failed to get Tavily key from PostgreSQL: {e}")
+
+            # 3. 환경 변수 확인
             if not api_key:
                 api_key = os.getenv('TAVILY_API_KEY')
                 if api_key:
                     logger.info("🔑 Using Tavily API key from environment variable")
 
             if not api_key:
-                logger.warning("⚠️  TAVILY_API_KEY not found in Redis or environment, web search disabled")
+                logger.warning("⚠️  TAVILY_API_KEY not found in PostgreSQL/environment, web search disabled")
                 self.web_search_enabled = False
                 return None
 
@@ -160,21 +387,22 @@ class HybridRAGOrchestrator:
             return None
 
     def _init_searxng(self):
-        """SearXNG 웹 검색 클라이언트 초기화 (Redis 우선, 환경 변수 대체)"""
+        """SearXNG 웹 검색 클라이언트 초기화 (PostgreSQL → 환경 변수)"""
         try:
             import httpx
 
-            # SearXNG URL 가져오기: Redis 우선, 환경 변수 대체
+            # SearXNG URL 가져오기: PostgreSQL 우선, 환경 변수 대체
             searxng_url = None
 
-            # 1. Redis에서 확인
+            # 1. PostgreSQL에서 확인
             try:
-                redis_url = self.cache.redis.get("config:searxng_url")
-                if redis_url:
-                    searxng_url = redis_url.decode()
-                    logger.info("🔑 Using SearXNG URL from Redis")
+                from .services.config_service import config_get_sync
+                pg_url = config_get_sync("config:searxng_url")
+                if pg_url:
+                    searxng_url = pg_url
+                    logger.info("🔑 Using SearXNG URL from PostgreSQL")
             except Exception as e:
-                logger.debug(f"Failed to get SearXNG URL from Redis: {e}")
+                logger.debug(f"Failed to get SearXNG URL from PostgreSQL: {e}")
 
             # 2. 환경 변수 확인
             if not searxng_url:
@@ -211,17 +439,18 @@ class HybridRAGOrchestrator:
         try:
             import httpx
 
-            # Crawl4AI URL 가져오기: Redis 우선, 환경 변수 대체
+            # Crawl4AI URL 가져오기: PostgreSQL 우선, 환경 변수 대체
             crawl4ai_url = None
 
-            # 1. Redis에서 확인
+            # 1. PostgreSQL에서 확인
             try:
-                redis_url = self.cache.redis.get("config:crawl4ai_url")
-                if redis_url:
-                    crawl4ai_url = redis_url.decode()
-                    logger.info("🔑 Using Crawl4AI URL from Redis")
+                from .services.config_service import config_get_sync
+                pg_url = config_get_sync("config:crawl4ai_url")
+                if pg_url:
+                    crawl4ai_url = pg_url
+                    logger.info("🔑 Using Crawl4AI URL from PostgreSQL")
             except Exception as e:
-                logger.debug(f"Failed to get Crawl4AI URL from Redis: {e}")
+                logger.debug(f"Failed to get Crawl4AI URL from PostgreSQL: {e}")
 
             # 2. 환경 변수 확인
             if not crawl4ai_url:
@@ -257,30 +486,37 @@ class HybridRAGOrchestrator:
             return None
 
     def _init_context7(self):
-        """Context7 공식 문서 클라이언트 초기화 (REST API)"""
+        """Context7 공식 문서 클라이언트 초기화 (PostgreSQL → 환경 변수)"""
         try:
             import httpx
 
-            # API 키 가져오기: Redis 우선, 환경 변수 대체
+            # API 키 가져오기: PostgreSQL → 환경 변수
             api_key = None
 
-            # 1. Redis에서 확인
-            try:
-                redis_key = self.cache.redis.get("config:context7_api_key")
-                if redis_key:
-                    api_key = redis_key.decode()
-                    logger.info("🔑 Using Context7 API key from Redis")
-            except Exception as e:
-                logger.debug(f"Failed to get Context7 key from Redis: {e}")
+            # 1. PostgreSQL에서 사전 조회한 값 확인
+            if self._prefetched_context7_key:
+                api_key = self._prefetched_context7_key
+                logger.info("🔑 Using Context7 API key from PostgreSQL")
 
-            # 2. 환경 변수 확인
+            # 2. PostgreSQL에서 직접 조회
+            if not api_key:
+                try:
+                    from .services.config_service import config_get_sync
+                    pg_key = config_get_sync("config:context7_api_key")
+                    if pg_key:
+                        api_key = pg_key
+                        logger.info("🔑 Using Context7 API key from PostgreSQL (sync)")
+                except Exception as e:
+                    logger.debug(f"Failed to get Context7 key from PostgreSQL: {e}")
+
+            # 3. 환경 변수 확인
             if not api_key:
                 api_key = os.getenv('CONTEXT7_API_KEY')
                 if api_key:
                     logger.info("🔑 Using Context7 API key from environment variable")
 
             if not api_key:
-                logger.warning("⚠️  CONTEXT7_API_KEY not found in Redis or environment, docs search disabled")
+                logger.warning("⚠️  CONTEXT7_API_KEY not found in PostgreSQL/environment, docs search disabled")
                 self.doc_search_enabled = False
                 return None
 
@@ -311,33 +547,27 @@ class HybridRAGOrchestrator:
 
     def _init_rag_quality_features(self):
         """RAG 품질 개선 기능 초기화 (재랭킹, 쿼리 재작성)"""
-        # Redis에서 설정 로드
         self.reranking_enabled = False
         self.query_rewrite_enabled = False
         self.reranker = None
         self.query_rewriter = None
 
         try:
-            # Redis에서 설정 확인
-            reranking_setting = self.cache.redis.get("config:reranking_enabled")
-            query_rewrite_setting = self.cache.redis.get("config:query_rewrite_enabled")
+            # PostgreSQL에서 설정 확인
+            from .services.config_service import config_get_sync
+            reranking_setting = config_get_sync("config:reranking_enabled")
+            query_rewrite_setting = config_get_sync("config:query_rewrite_enabled")
 
-            self.reranking_enabled = (
-                reranking_setting.decode() == "true" if reranking_setting else False
-            )
-            self.query_rewrite_enabled = (
-                query_rewrite_setting.decode() == "true" if query_rewrite_setting else False
-            )
+            self.reranking_enabled = reranking_setting == "true" if reranking_setting else False
+            self.query_rewrite_enabled = query_rewrite_setting == "true" if query_rewrite_setting else False
 
             # 재랭킹 활성화 시 Reranker 초기화 (지연 로딩)
             if self.reranking_enabled:
                 try:
-                    # Redis에서 reranker 모델 설정 로드
-                    reranker_model_setting = self.cache.redis.get("config:reranker_model")
+                    # PostgreSQL에서 reranker 모델 설정 로드
                     reranker_model = (
-                        reranker_model_setting.decode()
-                        if reranker_model_setting
-                        else "dengcao/Qwen3-Reranker-8B:Q4_K_M"
+                        config_get_sync("config:reranker_model")
+                        or "dengcao/Qwen3-Reranker-8B:Q4_K_M"
                     )
 
                     self.reranker = get_reranker(
@@ -407,6 +637,90 @@ class HybridRAGOrchestrator:
             logger.error(f"❌ Reranking failed: {e}")
             return results
 
+
+    async def contextualize_query(
+        self,
+        query: str,
+        conversation_history: List[Dict]
+    ) -> str:
+        """
+        대화 히스토리를 기반으로 후속 질문을 독립적인 질문으로 변환
+
+        예: "그것의 장점은?" → "Redis의 장점은 무엇인가요?"
+
+        Args:
+            query: 현재 사용자 질문
+            conversation_history: 이전 대화 히스토리
+
+        Returns:
+            컨텍스트가 포함된 독립적 질문
+        """
+        if not conversation_history or len(conversation_history) < 2:
+            return query
+
+        # 이미 충분히 구체적인 질문은 컨텍스트화 불필요
+        if len(query) > 80:
+            return query
+
+        try:
+            llm_client = getattr(self.local_rag, 'llm', None)
+            if not llm_client or not hasattr(llm_client, '_generate_response'):
+                return query
+
+            # 최근 대화 컨텍스트 구성 (최대 4개 메시지)
+            recent_history = conversation_history[-5:-1]  # 현재 질문 제외, 최근 4개
+            history_text = ""
+            for msg in recent_history:
+                role = msg.get("role", "user")
+                content = msg.get("content", "")
+                # 너무 긴 내용은 잘라냄
+                if len(content) > 200:
+                    content = content[:200] + "..."
+                history_text += f"{role}: {content}\n"
+
+            prompt = (
+                "아래 대화 히스토리와 후속 질문이 주어졌습니다.\n"
+                "후속 질문이 대명사(그것, 이것, 그, 그녀 등)나 생략된 주어를 포함하고 있다면, "
+                "대화 히스토리를 참고하여 독립적으로 이해할 수 있는 완전한 질문으로 재작성해주세요.\n"
+                "이미 독립적인 질문이라면 그대로 반환하세요.\n"
+                "재작성된 질문만 출력하세요. 설명이나 부가적인 텍스트는 포함하지 마세요.\n\n"
+                "## 예시\n"
+                "GOOD: 대화에서 'PostgreSQL 성능 튜닝'을 논의 중이고 후속 질문이 '장점은?' → 'PostgreSQL 성능 튜닝의 장점은 무엇인가요?'\n"
+                "GOOD: 대화에서 '인덱스 최적화'를 논의 중이고 후속 질문이 '어떻게 적용해?' → '인덱스 최적화를 어떻게 적용하나요?'\n"
+                "BAD: '장점은?' → '장점은 무엇인가요?' (주어 누락 — 무엇의 장점인지 불명확)\n"
+                "BAD: '그것의 장점은?' → '그것의 장점은 무엇인가요?' (대명사 미해소)\n\n"
+                f"대화 히스토리:\n{history_text}\n"
+                f"후속 질문: {query}\n\n"
+                "독립적 질문:"
+            )
+
+            loop = asyncio.get_event_loop()
+            contextualized = await loop.run_in_executor(
+                None,
+                lambda: llm_client._generate_response(
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=150,
+                    temperature=0.1
+                )
+            )
+
+            contextualized = contextualized.strip()
+
+            # 유효성 검사
+            if not contextualized or len(contextualized) < 3:
+                return query
+
+            # 너무 길면 원본 사용
+            if len(contextualized) > 300:
+                return query
+
+            logger.info(f"🔄 Query contextualized: '{query}' → '{contextualized}'")
+            return contextualized
+
+        except Exception as e:
+            logger.warning(f"⚠️ Query contextualization failed: {e}")
+            return query
+
     async def _rewrite_query(self, query: str) -> str:
         """
         쿼리 재작성
@@ -452,7 +766,8 @@ class HybridRAGOrchestrator:
         document_ids: Optional[List[str]] = None,
         query_embedding=None,
         stream: bool = False,
-        conversation_history: Optional[List[Dict]] = None
+        conversation_history: Optional[List[Dict]] = None,
+        pre_contextualized: bool = False
     ) -> Dict:
         """
         하이브리드 검색 및 답변 생성
@@ -484,17 +799,50 @@ class HybridRAGOrchestrator:
         # 성능 측정 시작
         start_time = time.time()
 
+        # 실행 컨텍스트 생성
+        # 모델명 추출 (비용 추적용)
+        model_name = "local"
+        llm = getattr(self.local_rag, 'llm', None)
+        if llm:
+            model_name = getattr(llm, 'model', getattr(llm, 'model_name', 'local'))
+
+        ctx = QueryExecutionContext(query=query, user_id=user_id, model_name=model_name)
+
         # 1. 질문 분석
+        step_start = time.time()
         analysis = self.analyzer.analyze(query)
+        ctx.record_step(
+            "query_analysis", query, analysis,
+            duration_ms=(time.time() - step_start) * 1000,
+            time_sensitivity=analysis['time_sensitivity'],
+            is_internal=analysis['is_internal']
+        )
         logger.info(f"📊 Query analysis: time={analysis['time_sensitivity']}, "
                    f"internal={analysis['is_internal']}, "
                    f"fresh={analysis['needs_fresh_info']}, "
                    f"web_beneficial={analysis.get('benefits_from_web', False)}")
 
-        # 1.5. 쿼리 재작성 (검색 최적화)
+        # 1.5. 대화 컨텍스트 기반 쿼리 보완 (후속 질문 처리)
         search_query = query
+        if not pre_contextualized and conversation_history and len(conversation_history) > 1:
+            step_start = time.time()
+            search_query = await self.contextualize_query(query, conversation_history)
+            ctx.record_step(
+                "contextualize", query, search_query,
+                duration_ms=(time.time() - step_start) * 1000,
+                changed=(search_query != query)
+            )
+
+        # 1.6. 쿼리 재작성 (검색 최적화)
         if self.query_rewrite_enabled:
-            search_query = await self._rewrite_query(query)
+            step_start = time.time()
+            prev_query = search_query
+            search_query = await self._rewrite_query(search_query)
+            ctx.record_step(
+                "query_rewrite", prev_query, search_query,
+                duration_ms=(time.time() - step_start) * 1000,
+                changed=(search_query != prev_query)
+            )
 
         # 2. 검색 소스 결정
         sources_to_use = self._select_sources(analysis, search_mode)
@@ -522,10 +870,36 @@ class HybridRAGOrchestrator:
             search_tasks.append(asyncio.sleep(0, result=[]))
 
         # 병렬 실행
+        search_start = time.time()
         local_results, web_results, doc_results = await asyncio.gather(*search_tasks)
+        search_duration = (time.time() - search_start) * 1000
+
+        # 검색 이력 기록
+        if local_results:
+            ctx.record_search(search_query, 'local', len(local_results), search_duration)
+        if web_results:
+            ctx.record_search(search_query, 'web', len(web_results), search_duration)
+        if doc_results:
+            ctx.record_search(search_query, 'docs', len(doc_results), search_duration)
+
+        ctx.record_step(
+            "parallel_search", search_query,
+            f"local={len(local_results)}, web={len(web_results)}, docs={len(doc_results)}",
+            duration_ms=search_duration,
+            sources=sources_to_use
+        )
 
         logger.info(f"🔍 Search results: local={len(local_results)}, "
                    f"web={len(web_results)}, docs={len(doc_results)}")
+
+        # 청크 중복 추적 (실행 컨텍스트에 등록)
+        local_results = ctx.track_chunks(local_results)
+        web_results = ctx.track_chunks(web_results)
+        doc_results = ctx.track_chunks(doc_results)
+
+        # 검색된 토큰 수 추정 (글자수 / 2 ≈ 토큰 수)
+        total_content_len = sum(len(r.get('content', '')) for r in local_results + web_results + doc_results)
+        ctx.add_retrieved_tokens(total_content_len // 2)
 
         # 4. 결과 통합 및 랭킹
         merged_results = self._merge_and_rank(
@@ -537,17 +911,44 @@ class HybridRAGOrchestrator:
 
         # 4.5. 재랭킹 (Cross-encoder 기반)
         if self.reranking_enabled and merged_results:
+            step_start = time.time()
             merged_results = await self._rerank_results(query, merged_results, top_k=10)
+            ctx.record_step(
+                "reranking", f"{len(merged_results)} results", f"{len(merged_results)} reranked",
+                duration_ms=(time.time() - step_start) * 1000
+            )
+
+        # 4.7. 토큰 예산 적용 — 컨텍스트 토큰 초과 시 하위 점수 청크 제거
+        merged_results = self._enforce_token_budget(merged_results, ctx)
 
         # 5. LLM 답변 생성 (스트리밍 또는 일반)
+        # 대화 히스토리 입력 토큰 추정
+        if conversation_history:
+            history_len = sum(len(m.get('content', '')) for m in conversation_history)
+            ctx.add_input_tokens(history_len // 2)
+        if system_prompt:
+            ctx.add_input_tokens(len(system_prompt) // 2)
+
         generator = None
+        step_start = time.time()
         if stream:
             generator = self._generate_answer_stream(query, merged_results, analysis, system_prompt, conversation_history)
             answer = ""  # 스트리밍 모드에서는 generator로 전달
+            ctx.record_step(
+                "llm_generate", f"stream=True, {len(merged_results)} sources", "(streaming)",
+                duration_ms=0, mode="stream"
+            )
         else:
             answer = await self._generate_answer(query, merged_results, analysis, system_prompt, conversation_history)
+            gen_duration = (time.time() - step_start) * 1000
+            ctx.add_generated_tokens(len(answer) // 2)
+            ctx.record_step(
+                "llm_generate", f"{len(merged_results)} sources", f"{len(answer)} chars",
+                duration_ms=gen_duration, mode="sync"
+            )
 
         # 6. 검색 요약 정보
+        execution_summary = ctx.get_summary()
         search_summary = {
             'local_count': len(local_results),
             'web_count': len(web_results),
@@ -563,8 +964,9 @@ class HybridRAGOrchestrator:
             'quality_features': {
                 'reranking_enabled': self.reranking_enabled,
                 'query_rewrite_enabled': self.query_rewrite_enabled,
-                'rewritten_query': search_query if self.query_rewrite_enabled and search_query != query else None
-            }
+                'contextualized_query': search_query if search_query != query else None
+            },
+            'execution_context': execution_summary
         }
 
         # 7. 성능 메트릭 기록
@@ -580,7 +982,15 @@ class HybridRAGOrchestrator:
             cache_hit=False,
             user_id=user_id
         )
-        logger.info(f"⏱️ Hybrid RAG completed in {response_time:.3f}s")
+
+        # 궤적 로그 출력
+        logger.info(f"⏱️ Hybrid RAG completed in {response_time:.3f}s | "
+                    f"chunks={execution_summary['unique_chunks_read']}, "
+                    f"tokens_in≈{execution_summary['total_retrieved_tokens']}, "
+                    f"steps={execution_summary['pipeline_steps']}")
+        if logger.level("DEBUG").no <= logger.level("DEBUG").no:
+            for step in execution_summary['trajectory']:
+                logger.debug(f"  📍 {step['step']}: {step['duration_ms']:.0f}ms {step.get('metadata', {})}")
 
         return {
             'answer': answer,
@@ -589,7 +999,8 @@ class HybridRAGOrchestrator:
             'search_summary': search_summary,
             'rewritten_query': search_query if search_query != query else None,
             'query_rewrite_enabled': self.query_rewrite_enabled,
-            'reranking_enabled': self.reranking_enabled
+            'reranking_enabled': self.reranking_enabled,
+            'execution_context': execution_summary
         }
 
     def _select_sources(self, analysis: Dict, mode: str) -> List[str]:
@@ -702,16 +1113,40 @@ class HybridRAGOrchestrator:
 
             formatted_results = []
             for r in results:
-                # Create metadata from search result
+                filename = r.get('filename', 'Unknown')
+                chunk_index = r.get('chunk_index', 0)
+
+                # 인접 청크 컨텍스트 확장 (앞뒤 1개)
+                content = r['text']
+                try:
+                    neighbors = self.local_rag.vector_db.get_neighboring_chunks(
+                        filename=filename,
+                        chunk_index=chunk_index,
+                        window=1
+                    )
+                    if neighbors:
+                        # chunk_index 오름차순: [이전, 다음]
+                        parts = []
+                        for nb in neighbors:
+                            if nb['chunk_index'] < chunk_index:
+                                parts.insert(0, nb['text'][:200])  # 이전 청크 앞부분
+                        parts.append(content)  # 원본 청크 (전체)
+                        for nb in neighbors:
+                            if nb['chunk_index'] > chunk_index:
+                                parts.append(nb['text'][:200])  # 다음 청크 앞부분
+                        content = "\n...\n".join(parts)
+                except Exception:
+                    pass  # 실패 시 원본 content 유지
+
                 metadata = {
-                    'filename': r.get('filename', 'Unknown'),
+                    'filename': filename,
                     'source': r.get('source', ''),
-                    'chunk_index': r.get('chunk_index', 0),
+                    'chunk_index': chunk_index,
                     'group_id': r.get('group_id', '')
                 }
 
                 formatted_results.append({
-                    'content': r['text'],
+                    'content': content,
                     'source_type': 'local',
                     'metadata': metadata,
                     'score': r['score'],
@@ -1244,6 +1679,49 @@ class HybridRAGOrchestrator:
 
         return unique_results
 
+    def _enforce_token_budget(
+        self,
+        results: List[Dict],
+        ctx: QueryExecutionContext
+    ) -> List[Dict]:
+        """
+        토큰 예산 적용 — 컨텍스트 토큰이 예산 초과 시 하위 점수 청크 제거
+
+        결과는 이미 final_score 기준 내림차순 정렬되어 있으므로,
+        상위 청크부터 예산 내에서 포함시키고 나머지는 잘라냄.
+        """
+        if not results:
+            return results
+
+        budget = self.max_context_tokens
+        accumulated_tokens = 0
+        kept = []
+
+        for result in results:
+            content = result.get('content', '')
+            # 한국어 기준: 글자수 ≈ 토큰수 (영어는 /4이지만 한국어는 /2 ~ /1)
+            estimated_tokens = len(content) // 2
+            if accumulated_tokens + estimated_tokens > budget and kept:
+                # 최소 1개는 포함
+                break
+            accumulated_tokens += estimated_tokens
+            kept.append(result)
+
+        trimmed = len(results) - len(kept)
+        if trimmed > 0:
+            logger.info(
+                f"✂️ Token budget: kept {len(kept)}/{len(results)} chunks "
+                f"(~{accumulated_tokens} tokens, budget={budget})"
+            )
+            ctx.record_step(
+                "token_budget", f"{len(results)} chunks",
+                f"{len(kept)} kept, {trimmed} trimmed",
+                duration_ms=0,
+                budget=budget, used=accumulated_tokens
+            )
+
+        return kept
+
     async def _generate_answer(
         self,
         query: str,
@@ -1452,13 +1930,12 @@ class HybridRAGOrchestrator:
         # 답변 작성 지침 (시스템 프롬프트와 중복 제거 — 핵심만 유지)
         prompt += "\n# 지침\n"
 
-        # 우선순위 결정: Redis에서 관리되는 프롬프트 사용
+        # 우선순위 결정: PG 설정 기반 프롬프트
         needs_fresh = analysis.get('needs_fresh_info', False)
         benefits_web = analysis.get('benefits_from_web', False)
 
-        # Redis 기반 우선순위 프롬프트 가져오기
+        # PG 기반 우선순위 프롬프트 가져오기
         priority_prompt = get_hybrid_rag_priority_prompt(
-            redis_client=self.cache.redis,
             needs_fresh=needs_fresh,
             benefits_web=benefits_web,
             has_web=bool(web),

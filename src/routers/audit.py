@@ -38,7 +38,7 @@ def inject_dependencies(audit_log, cache_mgr):
 
     Args:
         audit_log: AuditLogger instance for logging operations
-        cache_mgr: CacheManager instance for Redis access
+        cache_mgr: CacheManager instance
     """
     global audit_logger, cache_manager
     audit_logger = audit_log
@@ -82,8 +82,7 @@ async def get_audit_logs(
         if not cache_manager:
             raise_service_unavailable("캐시 관리자", "get audit logs")
 
-        redis_client = cache_manager.redis
-        require_admin(request, redis_client)
+        require_admin(request)
 
         # Audit logger 가져오기
         if not audit_logger:
@@ -149,8 +148,7 @@ async def get_audit_stats(
         if not cache_manager:
             raise_service_unavailable("캐시 관리자", "get audit stats")
 
-        redis_client = cache_manager.redis
-        require_admin(request, redis_client)
+        require_admin(request)
 
         # Audit logger 가져오기
         if not audit_logger:
@@ -193,8 +191,7 @@ async def get_user_audit_logs(
         if not cache_manager:
             raise_service_unavailable("캐시 관리자", "get user audit logs")
 
-        redis_client = cache_manager.redis
-        require_admin(request, redis_client)
+        require_admin(request)
 
         # Audit logger 가져오기
         if not audit_logger:
@@ -231,8 +228,7 @@ async def get_audit_actions(request: Request):
         if not cache_manager:
             raise_service_unavailable("캐시 관리자", "get audit actions")
 
-        redis_client = cache_manager.redis
-        require_admin(request, redis_client)
+        require_admin(request)
 
         # 작업 유형 목록
         actions = [

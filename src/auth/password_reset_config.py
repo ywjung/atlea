@@ -1,26 +1,23 @@
 """Password Reset Configuration
 
-비밀번호 재설정 방식 설정 관리
+비밀번호 재설정 방식 설정 관리 (PostgreSQL)
 """
-from redis import Redis
 from typing import Literal, Dict
 from loguru import logger
+
+from ..services.config_service import config_get_sync, config_set_sync
 
 PasswordResetMethod = Literal["email", "otp", "admin"]
 
 
-def get_password_reset_config(redis_client: Redis) -> Dict[str, any]:
-    """비밀번호 재설정 설정 조회
-
-    Args:
-        redis_client: Redis 클라이언트
+def get_password_reset_config() -> Dict[str, any]:
+    """비밀번호 재설정 설정 조회 (PostgreSQL)
 
     Returns:
         설정 정보 딕셔너리
     """
-    # Redis에서 설정 조회 (기본값: admin)
-    method_bytes = redis_client.get("config:password_reset:method")
-    method = method_bytes.decode() if method_bytes else "admin"
+    # PostgreSQL에서 설정 조회 (기본값: admin)
+    method = config_get_sync("config:password_reset:method") or "admin"
 
     # 이메일 방식 사용 가능 여부 확인
     from ..email_service import get_email_service
@@ -38,14 +35,10 @@ def get_password_reset_config(redis_client: Redis) -> Dict[str, any]:
     }
 
 
-def set_password_reset_method(
-    redis_client: Redis,
-    method: PasswordResetMethod
-) -> bool:
-    """비밀번호 재설정 방식 설정
+def set_password_reset_method(method: PasswordResetMethod) -> bool:
+    """비밀번호 재설정 방식 설정 (PostgreSQL)
 
     Args:
-        redis_client: Redis 클라이언트
         method: 재설정 방식 ("email", "otp", 또는 "admin")
 
     Returns:
@@ -67,7 +60,7 @@ def set_password_reset_method(
             # 그래도 설정은 저장 (나중에 SMTP 설정 후 사용 가능)
 
     try:
-        redis_client.set("config:password_reset:method", method)
+        config_set_sync("config:password_reset:method", method, "string")
         logger.info(f"비밀번호 재설정 방식 설정: {method}")
         return True
     except Exception as e:

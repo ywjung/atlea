@@ -28,11 +28,12 @@ from .feedback_analyzer import feedback_analyzer
 from .hybrid_rag import HybridRAGOrchestrator
 from .audit import AuditLogger
 from .config import config
+from .database.connection import check_db_connection, close_db
 
 # Import routers for dependency injection
 from .routers import (
     documents, cache, conversations, feedback, settings,
-    groups, audit, models, prompts, query, redis_backup,
+    groups, audit, models, prompts, query, db_backup,
     questions, tts, security, system, search, websocket_alerts,
     static_files, validation, conversion
 )
@@ -66,8 +67,6 @@ backup_scheduler_task = None
 audit_cleanup_scheduler_task = None
 
 # Configuration from environment
-REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
-REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "nlpai-lab/KURE-v1")
 LLM_MODEL = os.getenv("LLM_MODEL", "mlx-community/Qwen3-30B-A3B-4bit")
 MODEL_DIR = os.getenv("MODEL_DIR", "./model")
@@ -127,10 +126,10 @@ _hybrid_rag_config_cache = {
 
 
 async def get_hybrid_rag_orchestrator():
-    """Get Hybrid RAG orchestrator instance, initializing it lazily based on Redis config"""
+    """Get Hybrid RAG orchestrator instance, initializing it lazily based on PG config"""
     global hybrid_rag_orchestrator
 
-    # 인메모리 캐시에서 설정 조회 (TTL 기반, Redis 호출 최소화)
+    # 인메모리 캐시에서 설정 조회 (TTL 기반)
     import time as _time
     now = _time.time()
     if (_hybrid_rag_config_cache["data"] is not None and
@@ -141,17 +140,19 @@ async def get_hybrid_rag_orchestrator():
         enable_docs = cached["enable_docs"]
         web_search_provider = cached["web_search_provider"]
     else:
-        # Redis에서 설정 조회 (캐시 만료 또는 첫 호출)
-        hybrid_rag_enabled = cache_manager.redis.get("config:hybrid_rag_enabled")
-        web_search_enabled = cache_manager.redis.get("config:hybrid_rag_web_search")
-        doc_search_enabled = cache_manager.redis.get("config:hybrid_rag_doc_search")
-        web_search_provider_raw = cache_manager.redis.get("config:web_search_provider")
+        # PostgreSQL에서 설정 조회
+        from .services.config_service import config_get_multi
+        cfg = await config_get_multi([
+            "config:hybrid_rag_enabled",
+            "config:hybrid_rag_web_search",
+            "config:hybrid_rag_doc_search",
+            "config:web_search_provider",
+        ])
 
-        # Decode Redis values (they're stored as bytes)
-        is_enabled = hybrid_rag_enabled and hybrid_rag_enabled.decode() == "true"
-        enable_web = web_search_enabled and web_search_enabled.decode() == "true"
-        enable_docs = doc_search_enabled and doc_search_enabled.decode() == "true"
-        web_search_provider = web_search_provider_raw.decode() if web_search_provider_raw else 'tavily'
+        is_enabled = cfg.get("config:hybrid_rag_enabled") == "true"
+        enable_web = cfg.get("config:hybrid_rag_web_search") == "true"
+        enable_docs = cfg.get("config:hybrid_rag_doc_search") == "true"
+        web_search_provider = cfg.get("config:web_search_provider") or 'tavily'
 
         # 캐시 갱신
         _hybrid_rag_config_cache["data"] = {
@@ -183,12 +184,20 @@ async def get_hybrid_rag_orchestrator():
     if hybrid_rag_orchestrator is None or needs_reinit:
         logger.info("⚡ Initializing Hybrid RAG orchestrator...")
         rag_instance = await get_rag_system()
+
+        # PostgreSQL에서 API 키 사전 조회 (sync init에 전달)
+        from .services.config_service import config_get
+        tavily_key = await config_get("config:tavily_api_key") if enable_web else None
+        context7_key = await config_get("config:context7_api_key") if enable_docs else None
+
         hybrid_rag_orchestrator = HybridRAGOrchestrator(
             local_rag=rag_instance,
             cache_manager=cache_manager,
             enable_web_search=enable_web,
             enable_doc_search=enable_docs,
-            web_search_provider=web_search_provider
+            web_search_provider=web_search_provider,
+            tavily_api_key=tavily_key,
+            context7_api_key=context7_key,
         )
         logger.success(f"✅ Hybrid RAG ready! (Web: {enable_web}, Provider: {web_search_provider}, Docs: {enable_docs})")
 
@@ -197,7 +206,7 @@ async def get_hybrid_rag_orchestrator():
 
 # ==================== Admin Creation ====================
 
-async def create_default_admin(redis_client):
+async def create_default_admin():
     """Create default admin user if no admin exists
 
     비밀번호 설정 우선순위:
@@ -208,7 +217,7 @@ async def create_default_admin(redis_client):
     from .auth.models import UserCreate
 
     try:
-        auth_service = AuthService(redis_client)
+        auth_service = AuthService()
 
         # Check if any admin exists
         users_result = await auth_service.get_all_users(page=1, page_size=1000)
@@ -228,14 +237,22 @@ async def create_default_admin(redis_client):
                 default_password = ''.join(secrets.choice(alphabet) for _ in range(16))
                 password_auto_generated = True
 
-            # Check if user already exists
-            existing_user_id = redis_client.get(f"user:email:{default_email}")
+            # Check if user already exists (PG)
+            from .database.connection import SyncSessionFactory
+            from .database.models.user import User as PgUser
+            from sqlalchemy import select
 
-            if existing_user_id:
+            with SyncSessionFactory() as db_session:
+                stmt = select(PgUser).where(PgUser.email == default_email)
+                existing_user = db_session.execute(stmt).scalar_one_or_none()
+
+            if existing_user:
                 # User exists, just upgrade to admin
-                user_id = existing_user_id.decode() if isinstance(existing_user_id, bytes) else existing_user_id
-                redis_client.hset(f"user:{user_id}", "role", "admin")
-                logger.info(f"✅ Upgraded existing user {default_email} to admin")
+                with SyncSessionFactory() as db_session:
+                    user = db_session.get(PgUser, existing_user.id)
+                    user.role = "admin"
+                    db_session.commit()
+                logger.info(f"Upgraded existing user {default_email} to admin")
             else:
                 # Create new admin user
                 user_data = UserCreate(
@@ -245,8 +262,14 @@ async def create_default_admin(redis_client):
                 )
                 user = await auth_service.create_user(user_data)
 
-                # Set as admin
-                redis_client.hset(f"user:{user.user_id}", "role", "admin")
+                # Set as admin (PG)
+                with SyncSessionFactory() as db_session:
+                    pg_user = db_session.execute(
+                        select(PgUser).where(PgUser.email == default_email)
+                    ).scalar_one_or_none()
+                    if pg_user:
+                        pg_user.role = "admin"
+                        db_session.commit()
 
                 logger.success(f"✅ Created default admin user: {default_email}")
 
@@ -332,8 +355,6 @@ def create_model_reload_callback():
 
                 # Vector DB 재초기화
                 vector_db = VectorDB(
-                    host=REDIS_HOST,
-                    port=REDIS_PORT,
                     embedding_dim=embedding_model.get_embedding_dim()
                 )
 
@@ -421,38 +442,34 @@ async def startup_event(app):
                 model_dir=MODEL_DIR
             )
 
-        # Initialize vector database with production-ready Redis configuration
-        logger.info("🔌 Connecting to Redis...")
-
-        # Production Redis configuration
-        redis_max_connections = int(os.getenv("REDIS_MAX_CONNECTIONS", 50))
-        redis_socket_timeout = int(os.getenv("REDIS_SOCKET_TIMEOUT", 5))
-        redis_socket_keepalive = os.getenv("REDIS_SOCKET_KEEPALIVE", "true").lower() == "true"
+        # Initialize vector database (PostgreSQL)
+        logger.info("🔌 Initializing vector database...")
 
         vector_db = VectorDB(
-            host=REDIS_HOST,
-            port=REDIS_PORT,
             embedding_dim=embedding_model.get_embedding_dim(),
-            # Production Redis connection pool settings
-            max_connections=redis_max_connections,
-            socket_timeout=redis_socket_timeout,
-            socket_keepalive=redis_socket_keepalive,
-            socket_keepalive_options={},
-            health_check_interval=30  # Check connection health every 30s
         )
 
-        logger.info(f"Redis configured: max_connections={redis_max_connections}, timeout={redis_socket_timeout}s")
+        logger.info(f"VectorDB initialized (embedding_dim={embedding_model.get_embedding_dim()})")
+
+        # Verify PostgreSQL connection
+        logger.info("🐘 Checking PostgreSQL connection...")
+        pg_ok = await check_db_connection()
+        if pg_ok:
+            logger.success("✅ PostgreSQL connection verified")
+        else:
+            logger.warning("⚠️  PostgreSQL not available")
 
         # Clean up stale reindexing state from previous abnormal shutdown
         reindex_service.cleanup_stale_reindex_state()
 
-        # Set rate limit configuration in Redis
+        # Set rate limit configuration in PostgreSQL
         try:
+            from .services.config_service import config_set
             rate_limit_enabled = os.getenv("RATE_LIMIT_ENABLED", "false").lower()
-            vector_db.client.set("config:rate_limit_enabled", rate_limit_enabled)
+            await config_set("config:rate_limit_enabled", rate_limit_enabled, "boolean")
             logger.info(f"⚙️  Rate limiting: {rate_limit_enabled}")
         except Exception as e:
-            logger.warning(f"Failed to set rate limit config in Redis: {e}")
+            logger.warning(f"Failed to set rate limit config: {e}")
 
         # Initialize cache manager with production settings
         logger.info("💾 Initializing cache manager...")
@@ -463,7 +480,6 @@ async def startup_event(app):
         memory_cache_size = int(os.getenv("MEMORY_CACHE_SIZE", 200))
 
         cache_manager = CacheManager(
-            redis_client=vector_db.client,
             embedding_model=embedding_model.model,
             similarity_threshold=cache_similarity_threshold,
             cache_ttl=cache_ttl,
@@ -476,38 +492,32 @@ async def startup_event(app):
         app.state.cache_manager = cache_manager
         logger.info(f"✅ Stored cache_manager in app.state")
 
-        # Initialize SecurityLogger with Redis
+        # Initialize SecurityLogger (PG-based)
         from .auth.security_logger import SecurityLogger
-        SecurityLogger.set_redis(cache_manager.redis)
-        logger.info("✅ SecurityLogger initialized with Redis")
+        SecurityLogger.initialize()
+        logger.info("✅ SecurityLogger initialized")
 
-        # Inject Redis into FeedbackAnalyzer
-        feedback_analyzer.redis = cache_manager.redis
-        feedback_analyzer._load_from_redis()
+        # FeedbackAnalyzer loads from PG on init
         logger.info(f"✅ FeedbackAnalyzer initialized ({len(feedback_analyzer.feedback_history)} feedbacks)")
 
         # Initialize audit logger
-        audit_logger = AuditLogger(
-            redis_client=cache_manager.redis,
-            retention_days=90
-        )
+        audit_logger = AuditLogger(retention_days=90)
         app.state.audit_logger = audit_logger
         logger.info("✅ AuditLogger initialized (retention=90 days)")
 
         # Create default admin user
-        await create_default_admin(cache_manager.redis)
+        await create_default_admin()
 
         # Initialize managers
         logger.info("📁 Initializing group manager...")
-        group_manager = GroupManager(redis_client=vector_db.client)
+        group_manager = GroupManager()
 
         logger.info("💬 Initializing conversation manager...")
-        conversation_manager = ConversationManager(redis_client=vector_db.client)
+        conversation_manager = ConversationManager()
 
         logger.info("📋 Initializing document version manager...")
         max_versions = int(os.getenv("DOCUMENT_MAX_VERSIONS", 10))
         document_version = DocumentVersion(
-            redis_client=vector_db.client,
             data_dir=DATA_DIR,
             max_versions=max_versions
         )
@@ -535,7 +545,7 @@ async def startup_event(app):
         logger.info("✅ Documents router dependencies injected (19 endpoints)")
 
         # Inject into other routers
-        cache.inject_dependencies(cache_mgr=cache_manager, redis=vector_db.client)
+        cache.inject_dependencies(cache_mgr=cache_manager)
         logger.info("✅ Cache router dependencies injected (4 endpoints)")
 
         conversations.inject_dependencies(conv_manager=conversation_manager)
@@ -591,8 +601,8 @@ async def startup_event(app):
         )
         logger.info("✅ Query router dependencies injected (3 endpoints)")
 
-        redis_backup.inject_dependencies(cache_mgr=cache_manager)
-        logger.info("✅ Redis backup router dependencies injected (7 endpoints)")
+        db_backup.inject_dependencies()
+        logger.info("✅ DB backup router initialized")
 
         # Inject into services
         question_generation.inject_dependencies(
@@ -676,15 +686,16 @@ async def startup_event(app):
                         except Exception:
                             pass
 
-                        # Get chunk count from Redis
+                        # Get chunk count from PostgreSQL
                         chunk_count = 0
                         try:
-                            cursor = 0
-                            while True:
-                                cursor, keys = vector_db.client.scan(cursor, match=f"chunk:{filename}:*", count=100)
-                                chunk_count += len(keys)
-                                if cursor == 0:
-                                    break
+                            from .database.connection import SyncSessionFactory as _SyncSF
+                            from .database.models.document_chunk import DocumentChunk
+                            from sqlalchemy import func as sa_func
+                            with _SyncSF() as _db:
+                                chunk_count = _db.query(sa_func.count(DocumentChunk.id)).filter(
+                                    DocumentChunk.filename == filename
+                                ).scalar() or 0
                         except Exception:
                             pass
 
@@ -749,6 +760,12 @@ async def startup_event(app):
 async def shutdown_event():
     """Cleanup on application shutdown"""
     global backup_scheduler_task, audit_cleanup_scheduler_task
+
+    # Close PostgreSQL connection pool
+    try:
+        await close_db()
+    except Exception as e:
+        logger.warning(f"PostgreSQL cleanup error: {e}")
 
     # Stop backup scheduler
     if backup_scheduler_task:

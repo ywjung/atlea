@@ -1,39 +1,41 @@
 """Persona Service
 
-사용자별 페르소나 관리 서비스
+사용자별 페르소나 관리 서비스 (PostgreSQL 기반)
 """
 
 from typing import Optional
-from redis import Redis
 from loguru import logger
-import json
 
 from src.models.persona import PersonaCreate, PersonaUpdate, PersonaResponse
+from src.database.connection import AsyncSessionFactory
+from src.database.models.user_persona import UserPersona
+from src.repositories.persona_repository import PersonaRepository
 
 
 class PersonaService:
     """페르소나 관리 서비스"""
 
-    def __init__(self, redis_client: Redis):
+    def __init__(self):
         """
         초기화
 
         Args:
-            redis_client: Redis 클라이언트
         """
-        self.redis = redis_client
+        pass
 
-    def _get_persona_key(self, user_id: str) -> str:
-        """
-        페르소나 Redis 키 생성
-
-        Args:
-            user_id: 사용자 ID
-
-        Returns:
-            Redis 키
-        """
-        return f"user:persona:{user_id}"
+    def _to_response(self, persona: UserPersona) -> PersonaResponse:
+        """Convert ORM model to Pydantic response."""
+        return PersonaResponse(
+            user_id=persona.user_id,
+            role=persona.role,
+            expertise_level=persona.expertise_level,
+            expertise_domains=persona.expertise_domains,
+            tone=persona.tone,
+            language_style=persona.language_style,
+            response_format_preference=persona.response_format_preference,
+            additional_context=persona.additional_context,
+            enabled=persona.enabled,
+        )
 
     async def save_persona(
         self,
@@ -50,19 +52,25 @@ class PersonaService:
         Returns:
             저장된 페르소나
         """
-        persona_key = self._get_persona_key(user_id)
+        async with AsyncSessionFactory() as session:
+            repo = PersonaRepository(session)
 
-        # 페르소나 데이터 준비
-        persona_dict = persona_data.model_dump(exclude_none=True)
-        persona_dict['user_id'] = user_id
-        persona_dict['enabled'] = True
+            persona = UserPersona(
+                user_id=user_id,
+                role=persona_data.role,
+                expertise_level=persona_data.expertise_level,
+                expertise_domains=persona_data.expertise_domains,
+                tone=persona_data.tone,
+                language_style=persona_data.language_style,
+                response_format_preference=persona_data.response_format_preference,
+                additional_context=persona_data.additional_context,
+                enabled=True,
+            )
+            await repo.create(persona)
+            await session.commit()
 
-        # Redis에 JSON으로 저장
-        self.redis.set(persona_key, json.dumps(persona_dict, ensure_ascii=False))
-
-        logger.info(f"✅ Persona saved for user {user_id}")
-
-        return PersonaResponse(**persona_dict)
+            logger.info(f"Persona saved for user {user_id}")
+            return self._to_response(persona)
 
     async def get_persona(self, user_id: str) -> Optional[PersonaResponse]:
         """
@@ -74,18 +82,14 @@ class PersonaService:
         Returns:
             페르소나 (없으면 None)
         """
-        persona_key = self._get_persona_key(user_id)
+        async with AsyncSessionFactory() as session:
+            repo = PersonaRepository(session)
+            persona = await repo.get_by_user_id(user_id)
 
-        persona_json = self.redis.get(persona_key)
-        if not persona_json:
-            return None
+            if persona is None:
+                return None
 
-        try:
-            persona_dict = json.loads(persona_json)
-            return PersonaResponse(**persona_dict)
-        except Exception as e:
-            logger.error(f"❌ Failed to parse persona for user {user_id}: {e}")
-            return None
+            return self._to_response(persona)
 
     async def update_persona(
         self,
@@ -102,25 +106,23 @@ class PersonaService:
         Returns:
             업데이트된 페르소나 (없으면 None)
         """
-        # 기존 페르소나 조회
-        existing_persona = await self.get_persona(user_id)
-        if not existing_persona:
-            return None
+        async with AsyncSessionFactory() as session:
+            repo = PersonaRepository(session)
+            persona = await repo.get_by_user_id(user_id)
 
-        # 업데이트할 필드만 병합
-        update_dict = persona_update.model_dump(exclude_none=True)
-        existing_dict = existing_persona.model_dump()
+            if persona is None:
+                return None
 
-        for key, value in update_dict.items():
-            existing_dict[key] = value
+            # Update only non-None fields
+            update_dict = persona_update.model_dump(exclude_none=True)
+            for key, value in update_dict.items():
+                setattr(persona, key, value)
 
-        # 저장
-        persona_key = self._get_persona_key(user_id)
-        self.redis.set(persona_key, json.dumps(existing_dict, ensure_ascii=False))
+            await session.flush()
+            await session.commit()
 
-        logger.info(f"✅ Persona updated for user {user_id}")
-
-        return PersonaResponse(**existing_dict)
+            logger.info(f"Persona updated for user {user_id}")
+            return self._to_response(persona)
 
     async def delete_persona(self, user_id: str) -> bool:
         """
@@ -132,16 +134,17 @@ class PersonaService:
         Returns:
             삭제 성공 여부
         """
-        persona_key = self._get_persona_key(user_id)
+        async with AsyncSessionFactory() as session:
+            repo = PersonaRepository(session)
+            deleted = await repo.delete_by_user_id(user_id)
+            await session.commit()
 
-        result = self.redis.delete(persona_key)
+            if deleted:
+                logger.info(f"Persona deleted for user {user_id}")
+            else:
+                logger.warning(f"No persona found to delete for user {user_id}")
 
-        if result > 0:
-            logger.info(f"✅ Persona deleted for user {user_id}")
-            return True
-        else:
-            logger.warning(f"⚠️ No persona found to delete for user {user_id}")
-            return False
+            return deleted
 
     async def toggle_persona(self, user_id: str, enabled: bool) -> Optional[PersonaResponse]:
         """
@@ -154,16 +157,16 @@ class PersonaService:
         Returns:
             업데이트된 페르소나 (없으면 None)
         """
-        existing_persona = await self.get_persona(user_id)
-        if not existing_persona:
-            return None
+        async with AsyncSessionFactory() as session:
+            repo = PersonaRepository(session)
+            persona = await repo.get_by_user_id(user_id)
 
-        persona_dict = existing_persona.model_dump()
-        persona_dict['enabled'] = enabled
+            if persona is None:
+                return None
 
-        persona_key = self._get_persona_key(user_id)
-        self.redis.set(persona_key, json.dumps(persona_dict, ensure_ascii=False))
+            persona.enabled = enabled
+            await session.flush()
+            await session.commit()
 
-        logger.info(f"✅ Persona {'enabled' if enabled else 'disabled'} for user {user_id}")
-
-        return PersonaResponse(**persona_dict)
+            logger.info(f"Persona {'enabled' if enabled else 'disabled'} for user {user_id}")
+            return self._to_response(persona)

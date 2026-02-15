@@ -65,6 +65,89 @@ function safeSetInnerHTML(element, html, config = {}) {
 }
 
 // ========================================
+// Custom Modal (confirm / alert replacement)
+// ========================================
+
+/**
+ * Show a modal dialog as a replacement for window.confirm()
+ * @param {Object} options - { title, message, icon, confirmText, cancelText, confirmClass }
+ * @returns {Promise<boolean>} - true if confirmed, false if cancelled
+ */
+function showConfirmModal({ title = '확인', message = '', icon = '❓', confirmText = '확인', cancelText = '취소', confirmClass = '' } = {}) {
+    return new Promise((resolve) => {
+        const modal = document.getElementById('customModal');
+        const modalTitle = document.getElementById('customModalTitle');
+        const modalIcon = document.getElementById('customModalIcon');
+        const modalMessage = document.getElementById('customModalMessage');
+        const confirmBtn = document.getElementById('customModalConfirm');
+        const cancelBtn = document.getElementById('customModalCancel');
+        const closeBtn = document.getElementById('closeCustomModal');
+
+        modalTitle.textContent = title;
+        modalIcon.textContent = icon;
+        modalMessage.textContent = message;
+        confirmBtn.textContent = confirmText;
+        cancelBtn.textContent = cancelText;
+        cancelBtn.style.display = '';
+        confirmBtn.classList.toggle('danger', confirmClass === 'danger');
+
+        modal.classList.add('active');
+
+        function cleanup(result) {
+            modal.classList.remove('active');
+            confirmBtn.classList.remove('danger');
+            confirmBtn.removeEventListener('click', onConfirm);
+            cancelBtn.removeEventListener('click', onCancel);
+            closeBtn.removeEventListener('click', onCancel);
+            resolve(result);
+        }
+        function onConfirm() { cleanup(true); }
+        function onCancel() { cleanup(false); }
+
+        confirmBtn.addEventListener('click', onConfirm);
+        cancelBtn.addEventListener('click', onCancel);
+        closeBtn.addEventListener('click', onCancel);
+    });
+}
+
+/**
+ * Show a modal dialog as a replacement for window.alert()
+ * @param {Object} options - { title, message, icon, buttonText }
+ * @returns {Promise<void>}
+ */
+function showAlertModal({ title = '알림', message = '', icon = 'ℹ️', buttonText = '확인' } = {}) {
+    return new Promise((resolve) => {
+        const modal = document.getElementById('customModal');
+        const modalTitle = document.getElementById('customModalTitle');
+        const modalIcon = document.getElementById('customModalIcon');
+        const modalMessage = document.getElementById('customModalMessage');
+        const confirmBtn = document.getElementById('customModalConfirm');
+        const cancelBtn = document.getElementById('customModalCancel');
+        const closeBtn = document.getElementById('closeCustomModal');
+
+        modalTitle.textContent = title;
+        modalIcon.textContent = icon;
+        modalMessage.textContent = message;
+        confirmBtn.textContent = buttonText;
+        cancelBtn.style.display = 'none';
+        confirmBtn.classList.remove('danger');
+
+        modal.classList.add('active');
+
+        function cleanup() {
+            modal.classList.remove('active');
+            confirmBtn.removeEventListener('click', onOk);
+            closeBtn.removeEventListener('click', onOk);
+            resolve();
+        }
+        function onOk() { cleanup(); }
+
+        confirmBtn.addEventListener('click', onOk);
+        closeBtn.addEventListener('click', onOk);
+    });
+}
+
+// ========================================
 // ASCII art detection function (shared between renderer and highlighter)
 // ========================================
 function isAsciiArt(code, language) {
@@ -678,14 +761,18 @@ function setupEventListeners() {
     const cancelReindexBtn = document.getElementById('cancelReindexBtn');
     if (cancelReindexBtn) {
         cancelReindexBtn.addEventListener('click', async () => {
-            // Show confirmation dialog
-            const confirmed = confirm('재색인을 중지하시겠습니까?\n\n진행 중인 작업이 취소되고, 이미 처리된 데이터는 손실될 수 있습니다.');
+            const confirmed = await showConfirmModal({
+                title: '재색인 중지',
+                message: '재색인을 중지하시겠습니까?\n\n진행 중인 작업이 취소되고, 이미 처리된 데이터는 손실될 수 있습니다.',
+                icon: '🛑',
+                confirmText: '중지',
+                confirmClass: 'danger'
+            });
 
             if (confirmed) {
                 try {
                     devLog('🛑 Requesting reindex cancellation...');
 
-                    // Disable cancel button to prevent multiple clicks
                     cancelReindexBtn.disabled = true;
                     cancelReindexBtn.textContent = '🛑 취소 중...';
 
@@ -700,17 +787,15 @@ function setupEventListeners() {
                         devLog('✅ Cancellation request sent successfully');
                     } else {
                         logger.error('❌ Failed to cancel reindex:', result.detail);
-                        alert('재색인 취소에 실패했습니다: ' + result.detail);
+                        await showAlertModal({ title: '취소 실패', message: '재색인 취소에 실패했습니다: ' + result.detail, icon: '❌' });
 
-                        // Re-enable button on error
                         cancelReindexBtn.disabled = false;
                         cancelReindexBtn.textContent = '🛑 재색인 중지';
                     }
                 } catch (error) {
                     logger.error('❌ Error cancelling reindex:', error);
-                    alert('재색인 취소 중 오류가 발생했습니다: ' + error.message);
+                    await showAlertModal({ title: '오류', message: '재색인 취소 중 오류가 발생했습니다: ' + error.message, icon: '❌' });
 
-                    // Re-enable button on error
                     cancelReindexBtn.disabled = false;
                     cancelReindexBtn.textContent = '🛑 재색인 중지';
                 }
@@ -1056,6 +1141,11 @@ async function checkStatus() {
             docCountEl.textContent = `📄 문서 ${data.pdf_count}개 (청크 ${data.chunk_count}개)`;
             sendBtn.disabled = false;  // Allow queries during reindex
             setTimeout(checkStatus, 2000);  // Check again in 2 seconds
+        } else if (data.status === 'error') {
+            statusEl.textContent = '시스템 오류';
+            statusEl.style.color = '#ef4444';
+            sendBtn.disabled = false;  // Allow retry
+            setTimeout(checkStatus, 5000);
         } else {
             statusEl.textContent = '초기화 중...';
             statusEl.style.color = '#fbbf24';
@@ -2362,11 +2452,11 @@ async function reindexDocuments() {
         const checkResponse = await fetch('/api/reindex/progress');
         if (checkResponse.ok) {
             const currentProgress = await checkResponse.json();
-            const inProgressSteps = ['문서 처리 중', '임베딩 생성 중', '데이터베이스 저장 중', '메타데이터 저장 중'];
+            const inProgressSteps = ['문서 처리 중', '임베딩 생성 중', '문장 임베딩 생성 중', '데이터베이스 저장 중', '메타데이터 저장 중'];
 
             if (inProgressSteps.includes(currentProgress.step)) {
                 // Already in progress - just show the modal
-                alert('⚠️ 재색인이 이미 진행 중입니다.\n\n진행 상황을 확인하세요.');
+                await showAlertModal({ title: '재색인 진행 중', message: '재색인이 이미 진행 중입니다.\n\n진행 상황을 확인하세요.', icon: '⚠️' });
 
                 // Show modal with current progress
                 modal.style.display = 'flex';
@@ -2393,7 +2483,13 @@ async function reindexDocuments() {
     }
 
     // Not in progress - ask for confirmation
-    if (!confirm('문서를 재색인하시겠습니까?\n\n⏳ 재색인은 수 분이 걸릴 수 있습니다.\n✓ 진행 상황을 확인할 수 있습니다.')) {
+    const userConfirmed = await showConfirmModal({
+        title: '문서 재색인',
+        message: '문서를 재색인하시겠습니까?\n\n⏳ 재색인은 수 분이 걸릴 수 있습니다.\n✓ 진행 상황을 확인할 수 있습니다.',
+        icon: '🔄',
+        confirmText: '재색인 시작'
+    });
+    if (!userConfirmed) {
         return;
     }
 
@@ -2473,9 +2569,10 @@ async function reindexDocuments() {
 
                     // Update stats if available
                     if (progressData.current_item && progressData.total_items) {
-                        progressStats.textContent = `${progressData.current_item} / ${progressData.total_items} 문서`;
+                        const unit = progressData.step === '문장 임베딩 생성 중' ? '청크' : '문서';
+                        progressStats.textContent = `${progressData.current_item} / ${progressData.total_items} ${unit}`;
                     } else {
-                        progressStats.textContent = '0 / 0 문서';
+                        progressStats.textContent = '';
                     }
 
                     // Check for completion
@@ -2493,7 +2590,7 @@ async function reindexDocuments() {
 
                         // Success message
                         const docCount = vector_db ? vector_db.count_documents() : 'unknown';
-                        alert(`✅ 재색인이 완료되었습니다!`);
+                        await showAlertModal({ title: '재색인 완료', message: '재색인이 완료되었습니다!', icon: '✅' });
                         await checkStatus();
                     } else if (progressData.step === '오류 발생') {
                         clearInterval(progressInterval);
@@ -2505,7 +2602,7 @@ async function reindexDocuments() {
                         progressBar.style.background = '';
                         reindexBtn.disabled = false;
 
-                        alert(`❌ 재색인 실패\n\n로그를 확인해주세요.`);
+                        await showAlertModal({ title: '재색인 실패', message: '재색인에 실패했습니다.\n\n로그를 확인해주세요.', icon: '❌' });
                     } else if (progressData.step === '취소됨' || progressData.step === '취소 중...') {
                         clearInterval(progressInterval);
                         progressBar.style.background = 'linear-gradient(90deg, #f59e0b, #f97316)';
@@ -2516,7 +2613,7 @@ async function reindexDocuments() {
                         progressBar.style.background = '';
                         reindexBtn.disabled = false;
 
-                        alert(`🛑 재색인이 취소되었습니다.`);
+                        await showAlertModal({ title: '재색인 취소', message: '재색인이 취소되었습니다.', icon: '🛑' });
                         await checkStatus();
                     }
                 } else {
@@ -2572,7 +2669,7 @@ async function reindexDocuments() {
         modal.style.display = 'none';
         progressBar.style.background = '';
 
-        alert(`❌ 재색인 실패\n\n오류: ${error.message}\n\n로그를 확인해주세요.`);
+        await showAlertModal({ title: '재색인 실패', message: `오류: ${error.message}\n\n로그를 확인해주세요.`, icon: '❌' });
     } finally {
         reindexBtn.disabled = false;
     }
@@ -8906,7 +9003,7 @@ function setTheme(theme, skipTransition = false) {
 loadSettings();
 
 // Load conversation history on startup
-// loadHistory();  // Disabled: Now using Redis-based conversation history instead of localStorage
+// loadHistory();  // Disabled: Now using server-side conversation history instead of localStorage
 
 // Load draft on startup
 loadDraft();
@@ -9039,21 +9136,39 @@ function renderFilterDocumentList() {
         return;
     }
 
-    if (availableDocuments.length === 0) {
+    // Filter documents by selected groups (if any groups are selected in the group filter)
+    let filteredDocuments = availableDocuments;
+    if (groupFilter) {
+        const selectedGroups = groupFilter.getSelectedGroups();
+        if (selectedGroups && selectedGroups.length > 0) {
+            filteredDocuments = availableDocuments.filter(doc =>
+                doc.group_id && selectedGroups.includes(doc.group_id)
+            );
+        }
+    }
+
+    if (filteredDocuments.length === 0) {
         documentList.innerHTML = '<div class="loading-documents">📭 등록된 문서가 없습니다.</div>';
         updateFilterTabCounts();
         return;
     }
 
-    documentList.innerHTML = availableDocuments.map(doc => `
+    documentList.innerHTML = filteredDocuments.map(doc => {
+        // Find group info for this document
+        const group = doc.group_id && groupManager ? groupManager.findGroup(doc.group_id) : null;
+        const groupLabel = group ? `<span class="doc-group-badge" style="color: ${group.color}">${group.icon} ${escapeHtml(group.name)}</span>` : '';
+
+        return `
         <div class="document-item">
             <input type="checkbox"
                    id="doc-${doc.id}"
                    value="${doc.id}"
+                   ${window.selectedDocumentIds && window.selectedDocumentIds.has(doc.id) ? 'checked' : ''}
                    onchange="handleDocumentSelection(this)">
             <label for="doc-${doc.id}">
                 <div class="document-name">${doc.name}</div>
                 <div class="document-meta">
+                    ${groupLabel}
                     <span>📄 ${doc.chunk_count || 0}개 청크</span>
                     <span>📅 ${formatDate(doc.created_at)}</span>
                 </div>
@@ -9073,7 +9188,7 @@ function renderFilterDocumentList() {
                 </button>
             </div>
         </div>
-    `).join('');
+    `}).join('');
 
     // Update counts after rendering
     updateFilterTabCounts();
@@ -9497,6 +9612,8 @@ function setupGroupFilterHandlers() {
             if (tabType === 'documents') {
                 documentPanel.style.display = 'block';
                 groupPanel.style.display = 'none';
+                // Re-render document list filtered by selected groups
+                renderFilterDocumentList();
             } else if (tabType === 'groups') {
                 documentPanel.style.display = 'none';
                 groupPanel.style.display = 'block';
@@ -9646,7 +9763,8 @@ async function loadGroupsIntoFilter() {
 
                 // Update tab counts
                 updateFilterTabCounts();
-                // Filter will be applied when user sends a query
+                // Re-render document list filtered by selected groups
+                renderFilterDocumentList();
             };
 
             // Update counts after loading groups

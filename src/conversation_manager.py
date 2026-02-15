@@ -1,16 +1,21 @@
 """
 Conversation History Manager
-Manages chat conversation sessions and message history using Redis
+Manages chat conversation sessions and message history using PostgreSQL
 """
 
 import json
 import uuid
-import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Dict, Optional
 from contextlib import contextmanager
-from redis import Redis
 from loguru import logger
+
+from sqlalchemy import select, func, update, delete
+from sqlalchemy.orm import Session as SaSession
+
+from .database.connection import SyncSessionFactory
+from .database.models.conversation import Conversation
+from .database.models.conversation_message import ConversationMessage
 
 
 class ConversationManager:
@@ -19,60 +24,21 @@ class ConversationManager:
     # 대화 세션 기본 TTL: 30일 (초)
     SESSION_TTL = 30 * 24 * 60 * 60
 
-    def __init__(self, redis_client: Redis):
+    def __init__(self):
         """
         Initialize conversation manager
 
         Args:
-            redis_client: Redis client instance
         """
-        self.client = redis_client
+        pass
 
     @contextmanager
     def _acquire_lock(self, lock_key: str, timeout: int = 10, retry_delay: float = 0.1):
         """
-        Distributed lock using Redis SETNX
-
-        Args:
-            lock_key: Unique key for the lock
-            timeout: Lock expiration timeout in seconds
-            retry_delay: Delay between retry attempts in seconds
-
-        Yields:
-            True if lock acquired, raises RuntimeError if timeout
+        Context manager kept for backward compatibility.
+        PG transactions provide the needed atomicity, so this is a no-op wrapper.
         """
-        lock_id = str(uuid.uuid4())
-        acquired = False
-        start_time = time.time()
-
-        try:
-            # Try to acquire lock
-            while time.time() - start_time < timeout:
-                # SET NX (set if not exists) with expiration
-                acquired = self.client.set(lock_key, lock_id, nx=True, ex=timeout)
-                if acquired:
-                    logger.debug(f"🔒 Lock acquired: {lock_key}")
-                    break
-                time.sleep(retry_delay)
-
-            if not acquired:
-                raise RuntimeError(f"Failed to acquire lock: {lock_key} after {timeout}s")
-
-            yield True
-
-        finally:
-            # Release lock only if we own it
-            if acquired:
-                # Use Lua script for atomic check-and-delete
-                lua_script = """
-                if redis.call("get", KEYS[1]) == ARGV[1] then
-                    return redis.call("del", KEYS[1])
-                else
-                    return 0
-                end
-                """
-                self.client.eval(lua_script, 1, lock_key, lock_id)
-                logger.debug(f"🔓 Lock released: {lock_key}")
+        yield True
 
     def create_session(self, title: str = None) -> str:
         """
@@ -84,28 +50,24 @@ class ConversationManager:
         Returns:
             Session ID
         """
-        session_id = str(uuid.uuid4())
-        now = datetime.now().isoformat()
+        session_id = uuid.uuid4()
+        now = datetime.now(timezone.utc)
 
-        session_data = {
-            'id': session_id,
-            'title': title or '새 대화',
-            'created_at': now,
-            'updated_at': now,
-            'message_count': '0'
-        }
+        conv = Conversation(
+            id=session_id,
+            title=title or "새 대화",
+            created_at=now,
+            updated_at=now,
+            message_count=0,
+            is_bookmarked=False,
+        )
 
-        # Store session metadata
-        self.client.hset(f'conversation:{session_id}', mapping=session_data)
-
-        # TTL 설정 (30일)
-        self.client.expire(f'conversation:{session_id}', self.SESSION_TTL)
-
-        # Add to sessions list (sorted set by updated_at timestamp)
-        self.client.zadd('conversations:list', {session_id: datetime.now().timestamp()})
+        with SyncSessionFactory() as db:
+            db.add(conv)
+            db.commit()
 
         logger.info(f"Created conversation session: {session_id}")
-        return session_id
+        return str(session_id)
 
     def add_message(self, session_id: str, role: str, content: str, metadata: Dict = None) -> bool:
         """
@@ -120,46 +82,38 @@ class ConversationManager:
         Returns:
             True if successful
         """
-        if not self.client.exists(f'conversation:{session_id}'):
-            logger.warning(f"Session {session_id} does not exist")
+        try:
+            sid = uuid.UUID(session_id)
+        except ValueError:
+            logger.warning(f"Invalid session ID: {session_id}")
             return False
 
-        message = {
-            'role': role,
-            'content': content,
-            'timestamp': datetime.now().isoformat()
-        }
+        with SyncSessionFactory() as db:
+            conv = db.get(Conversation, sid)
+            if conv is None:
+                logger.warning(f"Session {session_id} does not exist")
+                return False
 
-        if metadata:
-            message['metadata'] = metadata
+            now = datetime.now(timezone.utc)
 
-        # Append message to session's message list
-        self.client.rpush(
-            f'conversation:{session_id}:messages',
-            json.dumps(message, ensure_ascii=False)
-        )
+            msg = ConversationMessage(
+                conversation_id=sid,
+                role=role,
+                content=content,
+                metadata_json=metadata,
+                created_at=now,
+            )
+            db.add(msg)
 
-        # Update session metadata
-        now = datetime.now()
-        pipe = self.client.pipeline()
-        pipe.hset(f'conversation:{session_id}', 'updated_at', now.isoformat())
-        pipe.hincrby(f'conversation:{session_id}', 'message_count', 1)
+            # Update session metadata
+            conv.updated_at = now
+            conv.message_count = conv.message_count + 1
 
-        # Update title with first user message if still "새 대화"
-        current_title = self.client.hget(f'conversation:{session_id}', 'title')
-        if current_title and current_title.decode('utf-8') == '새 대화' and role == 'user':
-            # Use first 30 characters of user message as title
-            title = content[:30] + '...' if len(content) > 30 else content
-            pipe.hset(f'conversation:{session_id}', 'title', title)
+            # Update title with first user message if still default
+            if conv.title == "새 대화" and role == "user":
+                conv.title = content[:30] + "..." if len(content) > 30 else content
 
-        # Update sorted set timestamp
-        pipe.zadd('conversations:list', {session_id: now.timestamp()})
-
-        # TTL 갱신 (활동 시 연장)
-        pipe.expire(f'conversation:{session_id}', self.SESSION_TTL)
-        pipe.expire(f'conversation:{session_id}:messages', self.SESSION_TTL)
-
-        pipe.execute()
+            db.commit()
 
         return True
 
@@ -175,25 +129,39 @@ class ConversationManager:
         Returns:
             List of message dictionaries
         """
-        if not self.client.exists(f'conversation:{session_id}'):
-            logger.warning(f"Session {session_id} does not exist")
+        try:
+            sid = uuid.UUID(session_id)
+        except ValueError:
             return []
 
-        messages_key = f'conversation:{session_id}:messages'
+        with SyncSessionFactory() as db:
+            conv = db.get(Conversation, sid)
+            if conv is None:
+                logger.warning(f"Session {session_id} does not exist")
+                return []
 
-        if limit:
-            end = offset + limit - 1
-            raw_messages = self.client.lrange(messages_key, offset, end)
-        else:
-            raw_messages = self.client.lrange(messages_key, offset, -1)
+            stmt = (
+                select(ConversationMessage)
+                .where(ConversationMessage.conversation_id == sid)
+                .order_by(ConversationMessage.created_at)
+                .offset(offset)
+            )
+            if limit is not None:
+                stmt = stmt.limit(limit)
+
+            result = db.execute(stmt)
+            rows = result.scalars().all()
 
         messages = []
-        for raw in raw_messages:
-            try:
-                msg = json.loads(raw.decode('utf-8'))
-                messages.append(msg)
-            except Exception as e:
-                logger.error(f"Failed to parse message: {e}")
+        for row in rows:
+            msg = {
+                "role": row.role,
+                "content": row.content,
+                "timestamp": row.created_at.isoformat() if row.created_at else None,
+            }
+            if row.metadata_json:
+                msg["metadata"] = row.metadata_json
+            messages.append(msg)
 
         return messages
 
@@ -207,15 +175,24 @@ class ConversationManager:
         Returns:
             Session data dictionary or None
         """
-        session_data = self.client.hgetall(f'conversation:{session_id}')
-
-        if not session_data:
+        try:
+            sid = uuid.UUID(session_id)
+        except ValueError:
             return None
 
-        return {
-            k.decode('utf-8'): v.decode('utf-8')
-            for k, v in session_data.items()
-        }
+        with SyncSessionFactory() as db:
+            conv = db.get(Conversation, sid)
+            if conv is None:
+                return None
+
+            return {
+                "id": str(conv.id),
+                "title": conv.title,
+                "created_at": conv.created_at.isoformat() if conv.created_at else None,
+                "updated_at": conv.updated_at.isoformat() if conv.updated_at else None,
+                "message_count": str(conv.message_count),
+                "is_bookmarked": "1" if conv.is_bookmarked else "0",
+            }
 
     def session_exists(self, session_id: str) -> bool:
         """
@@ -227,7 +204,14 @@ class ConversationManager:
         Returns:
             True if session exists, False otherwise
         """
-        return self.client.exists(f'conversation:{session_id}') > 0
+        try:
+            sid = uuid.UUID(session_id)
+        except ValueError:
+            return False
+
+        with SyncSessionFactory() as db:
+            conv = db.get(Conversation, sid)
+            return conv is not None
 
     def list_sessions(self, limit: int = 50, offset: int = 0) -> List[Dict]:
         """
@@ -240,35 +224,26 @@ class ConversationManager:
         Returns:
             List of session dictionaries
         """
-        # Get session IDs from sorted set (most recent first)
-        session_ids = self.client.zrevrange(
-            'conversations:list',
-            offset,
-            offset + limit - 1
-        )
-
-        if not session_ids:
-            return []
-
-        # Batch fetch all sessions using Pipeline (eliminates N+1 query)
-        pipe = self.client.pipeline()
-        decoded_ids = []
-        for session_id in session_ids:
-            sid = session_id.decode('utf-8') if isinstance(session_id, bytes) else session_id
-            decoded_ids.append(sid)
-            pipe.hgetall(f'conversation:{sid}')
-
-        results = pipe.execute()
+        with SyncSessionFactory() as db:
+            stmt = (
+                select(Conversation)
+                .order_by(Conversation.updated_at.desc())
+                .offset(offset)
+                .limit(limit)
+            )
+            result = db.execute(stmt)
+            rows = result.scalars().all()
 
         sessions = []
-        for session_id, session_data in zip(decoded_ids, results):
-            if session_data:
-                session = {
-                    k.decode('utf-8'): v.decode('utf-8')
-                    for k, v in session_data.items()
-                }
-                session['id'] = session_id
-                sessions.append(session)
+        for conv in rows:
+            sessions.append({
+                "id": str(conv.id),
+                "title": conv.title,
+                "created_at": conv.created_at.isoformat() if conv.created_at else None,
+                "updated_at": conv.updated_at.isoformat() if conv.updated_at else None,
+                "message_count": str(conv.message_count),
+                "is_bookmarked": "1" if conv.is_bookmarked else "0",
+            })
 
         return sessions
 
@@ -282,22 +257,19 @@ class ConversationManager:
         Returns:
             True if successful
         """
-        if not self.client.exists(f'conversation:{session_id}'):
-            logger.warning(f"Session {session_id} does not exist")
+        try:
+            sid = uuid.UUID(session_id)
+        except ValueError:
             return False
 
-        pipe = self.client.pipeline()
+        with SyncSessionFactory() as db:
+            conv = db.get(Conversation, sid)
+            if conv is None:
+                logger.warning(f"Session {session_id} does not exist")
+                return False
 
-        # Delete session metadata
-        pipe.delete(f'conversation:{session_id}')
-
-        # Delete session messages
-        pipe.delete(f'conversation:{session_id}:messages')
-
-        # Remove from sessions list
-        pipe.zrem('conversations:list', session_id)
-
-        pipe.execute()
+            db.delete(conv)  # CASCADE deletes messages
+            db.commit()
 
         logger.info(f"Deleted conversation session: {session_id}")
         return True
@@ -305,28 +277,21 @@ class ConversationManager:
     def clear_all_sessions(self) -> int:
         """
         Delete all conversation sessions (use with caution)
-        Pipeline 최적화로 모든 세션을 한 번에 삭제
 
         Returns:
             Number of sessions deleted
         """
-        session_ids_bytes = self.client.zrange('conversations:list', 0, -1)
+        with SyncSessionFactory() as db:
+            count_stmt = select(func.count()).select_from(Conversation)
+            count = db.execute(count_stmt).scalar_one()
 
-        if not session_ids_bytes:
-            logger.info("No conversation sessions to delete")
-            return 0
+            if count == 0:
+                logger.info("No conversation sessions to delete")
+                return 0
 
-        session_ids = [sid.decode('utf-8') for sid in session_ids_bytes]
+            db.execute(delete(Conversation))
+            db.commit()
 
-        # 단일 Pipeline으로 모든 세션 삭제 (N+1 쿼리 제거)
-        pipe = self.client.pipeline()
-        for session_id in session_ids:
-            pipe.delete(f'conversation:{session_id}')
-            pipe.delete(f'conversation:{session_id}:messages')
-            pipe.zrem('conversations:list', session_id)
-        pipe.execute()
-
-        count = len(session_ids)
         logger.info(f"Deleted {count} conversation sessions (batch)")
         return count
 
@@ -337,7 +302,9 @@ class ConversationManager:
         Returns:
             Number of sessions
         """
-        return self.client.zcard('conversations:list')
+        with SyncSessionFactory() as db:
+            stmt = select(func.count()).select_from(Conversation)
+            return db.execute(stmt).scalar_one()
 
     def toggle_bookmark(self, session_id: str) -> bool:
         """
@@ -349,29 +316,24 @@ class ConversationManager:
         Returns:
             New bookmark status (True if bookmarked, False if unbookmarked)
         """
-        if not self.client.exists(f'conversation:{session_id}'):
-            logger.warning(f"Session {session_id} does not exist")
+        try:
+            sid = uuid.UUID(session_id)
+        except ValueError:
             return False
 
-        # Get current bookmark status
-        current_status = self.client.hget(f'conversation:{session_id}', 'is_bookmarked')
-        is_bookmarked = current_status and current_status.decode('utf-8') == '1'
+        with SyncSessionFactory() as db:
+            conv = db.get(Conversation, sid)
+            if conv is None:
+                logger.warning(f"Session {session_id} does not exist")
+                return False
 
-        # Toggle bookmark status
-        new_status = '0' if is_bookmarked else '1'
-        self.client.hset(f'conversation:{session_id}', 'is_bookmarked', new_status)
+            conv.is_bookmarked = not conv.is_bookmarked
+            new_status = conv.is_bookmarked
+            db.commit()
 
-        # Update bookmarks sorted set
-        if new_status == '1':
-            # Add to bookmarks set
-            self.client.zadd('conversations:bookmarked', {session_id: datetime.now().timestamp()})
-            logger.info(f"Bookmarked conversation: {session_id}")
-        else:
-            # Remove from bookmarks set
-            self.client.zrem('conversations:bookmarked', session_id)
-            logger.info(f"Unbookmarked conversation: {session_id}")
-
-        return new_status == '1'
+        action = "Bookmarked" if new_status else "Unbookmarked"
+        logger.info(f"{action} conversation: {session_id}")
+        return new_status
 
     def list_bookmarked_sessions(self, limit: int = 50, offset: int = 0) -> List[Dict]:
         """
@@ -384,19 +346,27 @@ class ConversationManager:
         Returns:
             List of bookmarked session dictionaries
         """
-        # Get bookmarked session IDs from sorted set (most recent first)
-        session_ids = self.client.zrevrange(
-            'conversations:bookmarked',
-            offset,
-            offset + limit - 1
-        )
+        with SyncSessionFactory() as db:
+            stmt = (
+                select(Conversation)
+                .where(Conversation.is_bookmarked == True)
+                .order_by(Conversation.updated_at.desc())
+                .offset(offset)
+                .limit(limit)
+            )
+            result = db.execute(stmt)
+            rows = result.scalars().all()
 
         sessions = []
-        for session_id in session_ids:
-            session_id = session_id.decode('utf-8')
-            session = self.get_session(session_id)
-            if session:
-                sessions.append(session)
+        for conv in rows:
+            sessions.append({
+                "id": str(conv.id),
+                "title": conv.title,
+                "created_at": conv.created_at.isoformat() if conv.created_at else None,
+                "updated_at": conv.updated_at.isoformat() if conv.updated_at else None,
+                "message_count": str(conv.message_count),
+                "is_bookmarked": "1",
+            })
 
         return sessions
 
@@ -407,7 +377,13 @@ class ConversationManager:
         Returns:
             Number of bookmarked sessions
         """
-        return self.client.zcard('conversations:bookmarked')
+        with SyncSessionFactory() as db:
+            stmt = (
+                select(func.count())
+                .select_from(Conversation)
+                .where(Conversation.is_bookmarked == True)
+            )
+            return db.execute(stmt).scalar_one()
 
     def get_last_message(self, session_id: str) -> Optional[Dict]:
         """
@@ -419,15 +395,32 @@ class ConversationManager:
         Returns:
             Last message as dict, or None if not found
         """
-        messages_key = f'conversation:{session_id}:messages'
-        last_message_raw = self.client.lindex(messages_key, -1)
-        if not last_message_raw:
+        try:
+            sid = uuid.UUID(session_id)
+        except ValueError:
             return None
 
-        try:
-            return json.loads(last_message_raw.decode('utf-8'))
-        except (json.JSONDecodeError, AttributeError):
-            return None
+        with SyncSessionFactory() as db:
+            stmt = (
+                select(ConversationMessage)
+                .where(ConversationMessage.conversation_id == sid)
+                .order_by(ConversationMessage.created_at.desc())
+                .limit(1)
+            )
+            result = db.execute(stmt)
+            row = result.scalar_one_or_none()
+
+            if row is None:
+                return None
+
+            msg = {
+                "role": row.role,
+                "content": row.content,
+                "timestamp": row.created_at.isoformat() if row.created_at else None,
+            }
+            if row.metadata_json:
+                msg["metadata"] = row.metadata_json
+            return msg
 
     def update_last_message_metadata(self, session_id: str, metadata_update: Dict) -> bool:
         """
@@ -440,39 +433,38 @@ class ConversationManager:
         Returns:
             True if successful, False otherwise
         """
-        if not self.client.exists(f'conversation:{session_id}'):
-            logger.warning(f"Session {session_id} does not exist")
-            return False
-
-        messages_key = f'conversation:{session_id}:messages'
-
-        # Get the last message
-        last_message_raw = self.client.lindex(messages_key, -1)
-        if not last_message_raw:
-            logger.warning(f"No messages in session {session_id}")
-            return False
-
         try:
-            last_message = json.loads(last_message_raw.decode('utf-8'))
-
-            # Update metadata (merge with existing)
-            if 'metadata' not in last_message:
-                last_message['metadata'] = {}
-            last_message['metadata'].update(metadata_update)
-
-            # Replace the last message with updated version
-            self.client.lset(
-                messages_key,
-                -1,
-                json.dumps(last_message, ensure_ascii=False)
-            )
-
-            logger.debug(f"Updated last message metadata in session {session_id}")
-            return True
-
-        except Exception as e:
-            logger.error(f"Failed to update last message metadata: {e}")
+            sid = uuid.UUID(session_id)
+        except ValueError:
             return False
+
+        with SyncSessionFactory() as db:
+            conv = db.get(Conversation, sid)
+            if conv is None:
+                logger.warning(f"Session {session_id} does not exist")
+                return False
+
+            stmt = (
+                select(ConversationMessage)
+                .where(ConversationMessage.conversation_id == sid)
+                .order_by(ConversationMessage.created_at.desc())
+                .limit(1)
+            )
+            result = db.execute(stmt)
+            last_msg = result.scalar_one_or_none()
+
+            if last_msg is None:
+                logger.warning(f"No messages in session {session_id}")
+                return False
+
+            # Merge metadata
+            existing = last_msg.metadata_json or {}
+            existing.update(metadata_update)
+            last_msg.metadata_json = existing
+            db.commit()
+
+        logger.debug(f"Updated last message metadata in session {session_id}")
+        return True
 
     # --- Async wrappers (이벤트 루프 블로킹 방지) ---
 

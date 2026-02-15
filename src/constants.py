@@ -103,47 +103,6 @@ class Limits:
     DEFAULT_WEBHOOK_RETRY_COUNT: Final[int] = 3
 
 
-# ==================== Redis Key Prefixes ====================
-
-class RedisKeys:
-    """Redis key prefixes for consistent key naming"""
-
-    # User related
-    USER: Final[str] = "user:"
-    USER_EMAIL: Final[str] = "user:email:"
-    USER_SESSIONS: Final[str] = "user:sessions:"
-    USERS_ALL: Final[str] = "users:all"
-
-    # Session
-    SESSION: Final[str] = "session:"
-
-    # Config
-    CONFIG: Final[str] = "config:"
-
-    # Cache
-    CACHE: Final[str] = "cache:"
-    QUERY_CACHE: Final[str] = "cache:query:"
-
-    # Backup
-    BACKUP_SCHEDULE: Final[str] = "backup:schedule"
-
-    # Rate limiting
-    RATE_LIMIT: Final[str] = "ratelimit:"
-
-    # Webhook
-    WEBHOOK: Final[str] = "webhook:"
-    WEBHOOK_DELIVERY: Final[str] = "webhook:delivery:"
-
-    # Token blacklist
-    TOKEN_BLACKLIST: Final[str] = "blacklist:token:"
-
-    # Brute force protection
-    BRUTE_FORCE: Final[str] = "bf:"
-
-    # Audit
-    AUDIT_LOG: Final[str] = "audit:log:"
-
-
 # ==================== HTTP Status Messages ====================
 
 class ErrorMessages:

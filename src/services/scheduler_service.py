@@ -3,25 +3,24 @@ Scheduler Service
 
 Background schedulers for maintenance tasks:
 - Audit log cleanup (daily at 3 AM)
-- Redis backup (configurable interval: hourly/daily/weekly)
+- TTL cleanup (every 5 minutes for expired PG rows)
+- PostgreSQL backup (configurable interval: hourly/daily/weekly)
 """
 
 import json
 import shutil
 import asyncio
-import subprocess
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional
 import logging
-
-from ..security_validators import SubprocessValidator
 
 logger = logging.getLogger(__name__)
 
 # Global dependencies (injected from web_server.py)
 cache_manager = None
 audit_logger = None
+_ttl_cleanup_task: Optional[asyncio.Task] = None
 
 
 def inject_dependencies(cache_mgr, audit_log):
@@ -29,12 +28,13 @@ def inject_dependencies(cache_mgr, audit_log):
     Inject dependencies from web_server.py
 
     Args:
-        cache_mgr: Cache manager instance with Redis client
+        cache_mgr: Cache manager instance
         audit_log: Audit logger instance
     """
     global cache_manager, audit_logger
     cache_manager = cache_mgr
     audit_logger = audit_log
+
 
 
 async def audit_cleanup_scheduler():
@@ -63,7 +63,7 @@ async def audit_cleanup_scheduler():
             if audit_logger:
                 logger.info("🗑️ Starting audit log cleanup...")
                 deleted_count = audit_logger.cleanup_old_logs()
-                logger.success(f"✅ Audit log cleanup completed: {deleted_count} logs deleted")
+                logger.info(f"✅ Audit log cleanup completed: {deleted_count} logs deleted")
             else:
                 logger.warning("⚠️ Audit logger not initialized, skipping cleanup")
 
@@ -82,9 +82,9 @@ async def backup_scheduler():
 
     while True:
         try:
-            # Redis에서 백업 스케줄 확인
-            redis_client = cache_manager.redis
-            schedule_data = redis_client.get("backup:schedule")
+            # PostgreSQL에서 백업 스케줄 확인
+            from .config_service import config_get_sync
+            schedule_data = config_get_sync("backup:schedule")
 
             if schedule_data:
                 schedule = json.loads(schedule_data)
@@ -121,98 +121,37 @@ async def backup_scheduler():
                         logger.info(f"⏰ Next backup scheduled at {next_run.strftime('%Y-%m-%d %H:%M:%S')} (in {int(wait_seconds)} seconds)")
                         await asyncio.sleep(wait_seconds)
 
-                    # 백업 실행
+                    # 백업 실행 (PostgreSQL pg_dump)
                     try:
                         logger.info(f"🔄 Executing scheduled backup (interval: {interval})")
 
-                        # 백업 파일명 생성
                         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                        filename = f"dump_auto_{timestamp}.rdb"
-
-                        # Redis BGSAVE 명령 실행
-                        redis_client.bgsave()
-
-                        # BGSAVE 완료 대기 (최대 60초)
-                        for _ in range(60):
-                            await asyncio.sleep(1)
-                            info = redis_client.info("persistence")
-                            if info.get("rdb_bgsave_in_progress") == 0:
-                                break
-
-                        # dump.rdb 파일을 백업 디렉토리로 복사
                         backup_dir = Path("backups")
                         backup_dir.mkdir(exist_ok=True)
+                        filename = f"pg_backup_{timestamp}.sql"
                         backup_path = backup_dir / filename
 
-                        # Get Redis data directory and filename
-                        redis_config = redis_client.config_get("dir")
-                        redis_dir = redis_config.get("dir", "/data")
-                        redis_dbfilename = redis_client.config_get("dbfilename").get("dbfilename", "dump.rdb")
+                        import subprocess
+                        import os
+                        pg_host = os.getenv("POSTGRES_HOST", "localhost")
+                        pg_port = os.getenv("POSTGRES_PORT", "5432")
+                        pg_user = os.getenv("POSTGRES_USER", "chatbot_user")
+                        pg_db = os.getenv("POSTGRES_DB", "chatbot")
+                        pg_password = os.getenv("POSTGRES_PASSWORD", "")
 
-                        # Check if Redis is running in Docker
-                        docker_container = None
-                        try:
-                            # Check if Redis container exists
-                            result = subprocess.run(
-                                ["docker", "ps", "--filter", "name=chatbot_redis", "--format", "{{.Names}}"],
-                                capture_output=True,
-                                text=True,
-                                timeout=5
-                            )
-                            if result.returncode == 0 and result.stdout.strip():
-                                # 컨테이너 이름 검증 및 정제
-                                container_name = result.stdout.strip()
-                                sanitized_name = SubprocessValidator.sanitize_for_shell(container_name)
-                                is_valid, error = SubprocessValidator.validate_docker_container_name(sanitized_name)
-                                if is_valid:
-                                    docker_container = sanitized_name
-                                    logger.debug(f"📦 Detected Redis in Docker: {docker_container}")
-                                else:
-                                    logger.error(f"❌ Invalid Docker container name: {error}")
-                        except Exception as e:
-                            logger.debug(f"Docker check skipped: {e}")
+                        env = os.environ.copy()
+                        if pg_password:
+                            env["PGPASSWORD"] = pg_password
 
-                        # Copy dump file from Docker or local filesystem
-                        backup_success = False
-                        if docker_container:
-                            # Copy from Docker container
-                            # 경로 검증
-                            is_dir_valid, dir_error = SubprocessValidator.validate_path_for_subprocess(redis_dir)
-                            is_file_valid, file_error = SubprocessValidator.validate_path_for_subprocess(redis_dbfilename)
-                            if not is_dir_valid or not is_file_valid:
-                                logger.error(f"❌ Invalid Redis path: {dir_error or file_error}")
-                            else:
-                                source_path = f"{redis_dir}/{redis_dbfilename}"
-                                docker_source = f"{docker_container}:{source_path}"
-
-                                try:
-                                    result = subprocess.run(
-                                        ["docker", "cp", docker_source, str(backup_path)],
-                                        capture_output=True,
-                                        text=True,
-                                        timeout=30
-                                    )
-
-                                    if result.returncode == 0:
-                                        logger.success(f"✅ Scheduled backup completed: {filename} (from Docker: {docker_source})")
-                                        backup_success = True
-                                    else:
-                                        logger.error(f"❌ Docker copy failed: {result.stderr}")
-
-                                except Exception as e:
-                                    logger.error(f"❌ Docker copy error: {e}")
+                        result = subprocess.run(
+                            ["pg_dump", "-h", pg_host, "-p", pg_port, "-U", pg_user, pg_db],
+                            capture_output=True, text=True, timeout=300, env=env
+                        )
+                        if result.returncode == 0:
+                            backup_path.write_text(result.stdout)
+                            logger.info(f"✅ Scheduled PG backup completed: {filename}")
                         else:
-                            # Copy from local filesystem
-                            source_dump = Path(redis_dir) / redis_dbfilename
-                            if source_dump.exists():
-                                shutil.copy2(source_dump, backup_path)
-                                logger.success(f"✅ Scheduled backup completed: {filename} (from {source_dump})")
-                                backup_success = True
-                            else:
-                                logger.warning(f"⚠️ Redis dump file not found at: {source_dump}")
-
-                        if not backup_success:
-                            logger.error("❌ Scheduled backup failed: Could not copy dump file")
+                            logger.error(f"❌ pg_dump failed: {result.stderr}")
 
                     except Exception as e:
                         logger.error(f"❌ Scheduled backup failed: {e}")
@@ -232,3 +171,22 @@ async def backup_scheduler():
             logger.error(f"❌ Backup scheduler error: {e}")
             # 에러 발생 시 1분 후 재시도
             await asyncio.sleep(60)
+
+
+def start_ttl_cleanup():
+    """Start the TTL cleanup background task."""
+    global _ttl_cleanup_task
+    try:
+        from .ttl_cleanup_service import ttl_cleanup_scheduler
+        _ttl_cleanup_task = asyncio.create_task(ttl_cleanup_scheduler(300))
+        logger.info("TTL cleanup scheduler registered (every 5 min)")
+    except Exception as e:
+        logger.error(f"Failed to start TTL cleanup scheduler: {e}")
+
+
+def stop_ttl_cleanup():
+    """Cancel the TTL cleanup background task."""
+    global _ttl_cleanup_task
+    if _ttl_cleanup_task and not _ttl_cleanup_task.done():
+        _ttl_cleanup_task.cancel()
+        logger.info("TTL cleanup scheduler stopped")

@@ -1,24 +1,24 @@
 # 완전 통합 Docker Compose 설정
 # RAG 챗봇 시스템의 모든 구성 요소를 포함
-# 사용법: docker-compose -f docker-compose.full.yml up -d
-
-version: '3.8'
+# 사용법: docker compose -f docker-compose.full.yml up -d
 
 services:
-  # Redis Vector Database
-  redis:
-    image: redis/redis-stack:latest
-    container_name: rag_chatbot_redis
+  # PostgreSQL Database
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: rag_chatbot_postgres
     ports:
-      - "6379:6379"      # Redis 포트
-      - "8001:8001"      # RedisInsight 웹 UI
-    volumes:
-      - redis_data:/data
+      - "${POSTGRES_PORT:-5433}:5432"
     environment:
-      - REDIS_ARGS=--save 60 1 --loglevel warning
+      - POSTGRES_DB=chatbot
+      - POSTGRES_USER=chatbot_user
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-chatbot_secret}
+      - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "pg_isready -U chatbot_user -d chatbot"]
       interval: 10s
       timeout: 3s
       retries: 5
@@ -47,6 +47,27 @@ services:
     networks:
       - chatbot_network
 
+  # ClamAV 바이러스 스캔 서비스
+  clamav:
+    image: clamav/clamav:latest
+    platform: linux/amd64
+    container_name: rag_chatbot_clamav
+    ports:
+      - "3310:3310"      # ClamAV daemon 포트
+    volumes:
+      - clamav_data:/var/lib/clamav
+    environment:
+      - CLAMAV_NO_FRESHCLAM=false
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "sh", "-c", "clamdscan --ping || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 180s
+    networks:
+      - chatbot_network
+
   # Python RAG 챗봇 애플리케이션
   chatbot-app:
     build:
@@ -54,59 +75,43 @@ services:
       dockerfile: Dockerfile
     container_name: rag_chatbot_app
     ports:
-      - "8000:8000"      # 웹 UI 및 API
-    volumes:
-      - ./data:/app/data                    # 문서 저장소
-      - ./model:/app/model                  # AI 모델 저장소
-      - ./logs:/app/logs                    # 로그 파일
-      - ./.env:/app/.env                    # 환경 설정
+      - "${PORT:-8085}:${PORT:-8085}"
+    env_file:
+      - .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
-      # Redis 연결
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - REDIS_DB=0
-      # 문서 서비스 연결
+      # Docker 내부 서비스 연결 (env_file 값을 오버라이드)
       - DOCUMENT_SERVICE_URL=http://document-service:8081
       - HWP_SERVICE_URL=http://document-service:8081
-      # 모델 설정
-      - EMBEDDING_MODEL=nlpai-lab/KURE-v1
-      - LLM_MODEL=mlx-community/Qwen3-30B-A3B-4bit
-      - MODEL_DIR=/app/model
-      # 애플리케이션 설정
-      - DATA_DIR=/app/data
-      - CHUNK_SIZE=512
-      - CHUNK_OVERLAP=50
-      - MAX_FILE_SIZE_MB=100
-      - ENABLE_QUESTION_GENERATION=false
-      # 서버 설정
-      - HOST=0.0.0.0
-      - PORT=8000
-      # 보안 설정 (프로덕션에서는 반드시 변경!)
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-CHANGE_THIS_IN_PRODUCTION}
-      - JWT_ALGORITHM=HS256
-      - JWT_ACCESS_TOKEN_EXPIRE_MINUTES=60
-      - JWT_REFRESH_TOKEN_EXPIRE_DAYS=7
-      # 성능 설정
-      - RATE_LIMIT_ENABLED=true
-      - RATE_LIMIT_PER_MINUTE=60
-      - RATE_LIMIT_BURST=10
+      - CLAMAV_HOST=clamav
+      - CLAMAV_PORT=3310
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      - DATABASE_URL=postgresql+asyncpg://chatbot_user:${POSTGRES_PASSWORD:-chatbot_secret}@postgres:5432/chatbot
+    volumes:
+      - ./data:/app/data
+      - ./model:/app/model
+      - ./logs:/app/logs
+      - ./backups:/app/backups
     depends_on:
-      redis:
+      postgres:
         condition: service_healthy
       document-service:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD-SHELL", "curl -f http://localhost:${PORT:-8085}/health || exit 1"]
       interval: 30s
-      timeout: 5s
-      retries: 3
+      timeout: 10s
+      retries: 5
       start_period: 60s
     networks:
       - chatbot_network
 
 volumes:
-  redis_data:
+  postgres_data:
+    driver: local
+  clamav_data:
     driver: local
 
 networks:

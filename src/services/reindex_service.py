@@ -25,7 +25,7 @@ def inject_dependencies(vector_db_instance):
     Inject dependencies from web_server.py
 
     Args:
-        vector_db_instance: Vector database instance with Redis client
+        vector_db_instance: Vector database instance
     """
     global vector_db
     vector_db = vector_db_instance
@@ -46,33 +46,15 @@ def initialize_reindex_event():
 
 def cleanup_stale_reindex_state():
     """
-    Clean up stale reindexing state from previous abnormal shutdown
+    Clean up stale reindexing state from previous abnormal shutdown.
 
-    Clears Redis reindex progress if:
-    - Error state detected
-    - Stuck for more than 1 hour
+    Reindex progress is now stored in-memory (documents router _reindex_progress dict),
+    so on startup we just reset the reindex event to ensure clean state.
     """
     try:
-        progress_data = vector_db.client.hgetall("reindex:progress")
-        if progress_data:
-            in_progress = progress_data.get(b'in_progress', b'false').decode() == 'true'
-            step = progress_data.get(b'step', b'').decode()
-            elapsed_seconds = int(progress_data.get(b'elapsed_seconds', 0))
-
-            # Clear if: (1) error state, or (2) stuck for >1 hour
-            should_clear = (
-                in_progress and (
-                    '오류' in step or
-                    'error' in step.lower() or
-                    elapsed_seconds > 3600  # 1 hour
-                )
-            )
-
-            if should_clear:
-                vector_db.client.delete("reindex:progress")
-                logger.warning(f"🧹 Cleared stale reindex state (step: {step}, elapsed: {elapsed_seconds}s)")
-            elif in_progress:
-                logger.info(f"ℹ️  Found active reindex state (step: {step}, elapsed: {elapsed_seconds}s)")
+        if reindex_event and not reindex_event.is_set():
+            reindex_event.set()
+            logger.warning("🧹 Cleared stale reindex state from previous shutdown")
     except Exception as e:
         logger.debug(f"Failed to check reindex state (non-critical): {e}")
 

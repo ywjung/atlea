@@ -1,12 +1,12 @@
 """Password Reset Service
 
-비밀번호 재설정 토큰 생성 및 검증.
+비밀번호 재설정 토큰 생성 및 검증. PostgreSQL 기반.
 """
 
+import hashlib
 from typing import Optional
 from datetime import datetime, timedelta, timezone
 from jose import jwt, JWTError
-from redis import Redis
 
 from .utils import SECRET_KEY, ALGORITHM
 
@@ -14,14 +14,7 @@ RESET_TOKEN_EXPIRE_MINUTES = 30  # 30분
 
 
 def create_password_reset_token(email: str) -> str:
-    """비밀번호 재설정 토큰 생성
-
-    Args:
-        email: 사용자 이메일
-
-    Returns:
-        JWT 재설정 토큰
-    """
+    """비밀번호 재설정 토큰 생성"""
     expire = datetime.now(timezone.utc) + timedelta(minutes=RESET_TOKEN_EXPIRE_MINUTES)
     to_encode = {
         "sub": email,
@@ -33,18 +26,10 @@ def create_password_reset_token(email: str) -> str:
 
 
 def verify_password_reset_token(token: str) -> Optional[str]:
-    """비밀번호 재설정 토큰 검증
-
-    Args:
-        token: JWT 재설정 토큰
-
-    Returns:
-        이메일 주소 (검증 실패 시 None)
-    """
+    """비밀번호 재설정 토큰 검증"""
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
 
-        # 토큰 타입 확인
         if payload.get("type") != "password_reset":
             return None
 
@@ -61,57 +46,43 @@ def verify_password_reset_token(token: str) -> Optional[str]:
 class PasswordResetService:
     """비밀번호 재설정 서비스 클래스"""
 
-    def __init__(self, redis_client: Redis):
+    def __init__(self):
         """초기화
 
         Args:
-            redis_client: Redis 클라이언트
         """
-        self.redis = redis_client
+        pass
 
     async def create_reset_token(self, user_id: str, email: str) -> str:
-        """재설정 토큰 생성
-
-        Args:
-            user_id: 사용자 ID
-            email: 이메일 주소
-
-        Returns:
-            재설정 토큰
-        """
+        """재설정 토큰 생성"""
         token = create_password_reset_token(email)
 
-        # Redis에 토큰과 user_id 매핑 저장 (30분 TTL)
-        self.redis.setex(
-            f"password_reset:{token}",
-            RESET_TOKEN_EXPIRE_MINUTES * 60,
-            user_id
-        )
+        # PostgreSQL에 토큰과 user_id 매핑 저장 (30분 TTL)
+        from ..database.connection import AsyncSessionFactory
+        from ..repositories.password_reset_repository import PasswordResetRepository
+
+        expires_at = datetime.now(timezone.utc) + timedelta(minutes=RESET_TOKEN_EXPIRE_MINUTES)
+        async with AsyncSessionFactory() as session:
+            repo = PasswordResetRepository(session)
+            await repo.store_token(token, user_id, expires_at)
+            await session.commit()
 
         return token
 
     async def verify_reset_token(self, token: str) -> Optional[str]:
-        """재설정 토큰 검증
-
-        Args:
-            token: 재설정 토큰
-
-        Returns:
-            사용자 ID (검증 실패 시 None)
-        """
+        """재설정 토큰 검증"""
         # JWT 검증
         email = verify_password_reset_token(token)
         if not email:
             return None
 
-        # Redis에서 user_id 조회
-        user_id = self.redis.get(f"password_reset:{token}")
-        if not user_id:
-            return None
+        # PostgreSQL에서 user_id 조회 및 토큰 소비
+        from ..database.connection import AsyncSessionFactory
+        from ..repositories.password_reset_repository import PasswordResetRepository
 
-        user_id_str = user_id.decode() if isinstance(user_id, bytes) else user_id
+        async with AsyncSessionFactory() as session:
+            repo = PasswordResetRepository(session)
+            user_id = await repo.verify_and_consume(token)
+            await session.commit()
 
-        # 토큰 사용 후 삭제 (일회용)
-        self.redis.delete(f"password_reset:{token}")
-
-        return user_id_str
+        return user_id

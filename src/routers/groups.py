@@ -168,7 +168,7 @@ async def create_group(
 
         # Automatically assign to default organization (home for all groups)
         from ..organization_manager import OrganizationManager
-        org_manager = OrganizationManager(group_manager.client)
+        org_manager = OrganizationManager()
         default_org_id = org_manager.get_default_organization_id()
 
         try:

@@ -9,7 +9,7 @@
 [![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![Java](https://img.shields.io/badge/Java-21-orange.svg)](https://openjdk.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-green.svg)](https://fastapi.tiangolo.com/)
-[![Redis](https://img.shields.io/badge/Redis-Stack-red.svg)](https://redis.io/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-blue.svg)](https://www.postgresql.org/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/Version-2.5.1-brightgreen.svg)]()
 [![PyPI](https://img.shields.io/badge/pip%20install-atlea--chatbot-blue.svg)]()
@@ -59,7 +59,7 @@ ATLEA는 **Retrieval-Augmented Generation (RAG)** 기술을 활용하여 다양�
 
 ### 🔍 하이브리드 RAG
 
-- **로컬 문서 검색**: Redis Vector DB 기반 시맨틱 검색
+- **로컬 문서 검색**: PostgreSQL pgvector 기반 시맨틱 검색
 - **웹 검색 통합**: SearXNG 자체 호스팅 메타 검색 (Google, Bing, DuckDuckGo 등)
 - **Crawl4AI 콘텐츠 추출**: 검색 스니펫을 전체 페이지 콘텐츠로 확장 (27-125배)
 - **프로바이더 선택**: 관리자 페이지에서 Tavily/SearXNG 전환 가능
@@ -80,7 +80,7 @@ ATLEA는 **Retrieval-Augmented Generation (RAG)** 기술을 활용하여 다양�
 - **브루트포스 방어**: 5회 실패 시 계정 잠금 (30분)
 - **CSRF 보호**: 토큰 기반 CSRF 방어
 - **CSP 헤더**: Content Security Policy로 XSS 차단
-- **Rate Limiting**: Redis 기반 요청 속도 제한
+- **Rate Limiting**: 인메모리 요청 속도 제한
 - **PII 탐지**: 개인정보 자동 탐지 및 마스킹
 
 ### 🏢 조직 관리 (멀티테넌트)
@@ -134,7 +134,7 @@ ATLEA는 **Retrieval-Augmented Generation (RAG)** 기술을 활용하여 다양�
 | **인증** | JWT + TOTP + bcrypt | 토큰 인증, 2FA, 비밀번호 해싱 |
 | **보안** | CSRF, CSP, Rate Limiting, ClamAV | 보안 미들웨어 스택 |
 | **AI/ML** | MLX, Sentence Transformers, PyTorch | GPU 가속, 임베딩, LLM |
-| **Vector DB** | Redis Stack (RediSearch, RedisJSON) | 벡터 검색, 캐시, 세션 |
+| **Vector DB** | PostgreSQL (pgvector, tsvector) | 벡터 검색, 캐시, 세션 |
 | **문서 추출** | Spring Boot + Apache POI + PDFBox | Java 마이크로서비스 |
 | **웹 검색** | SearXNG + Crawl4AI | 자체 호스팅 메타 검색 |
 
@@ -185,10 +185,9 @@ ATLEA는 **Retrieval-Augmented Generation (RAG)** 기술을 활용하여 다양�
 | 포트 | 서비스 | 용도 |
 |------|--------|------|
 | 8000 | FastAPI | 웹 UI, API |
-| 6379 | Redis | Vector DB, Cache |
+| 5432 | PostgreSQL | Vector DB, Cache, 세션 |
 | 8080 | Java Service | 문서 추출 (선택) |
 | 8888 | SearXNG | 웹 검색 (선택) |
-| 8001 | RedisInsight | Redis 관리 (선택) |
 
 ---
 
@@ -208,7 +207,7 @@ chmod +x setup.sh
 ./setup.sh
 ```
 
-설치 스크립트가 Python 가상환경, Redis, 환경 설정, AI 모델 다운로드를 자동으로 처리합니다.
+설치 스크립트가 Python 가상환경, PostgreSQL, 환경 설정, AI 모델 다운로드를 자동으로 처리합니다.
 
 ### 3단계: 문서 추가
 
@@ -270,8 +269,8 @@ pip install -e ".[dev]"            # + 테스트/린트 도구
 # 4. 환경 설정
 cp .env.example .env && nano .env
 
-# 5. Redis 시작
-docker compose up -d redis
+# 5. PostgreSQL 시작
+docker compose up -d postgres
 
 # 6. 서버 시작
 atlea                              # 기본 (0.0.0.0:8000)
@@ -292,8 +291,8 @@ python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 
-# 2. Redis 시작
-docker compose up -d redis
+# 2. PostgreSQL 시작
+docker compose up -d postgres
 
 # 3. 환경 설정
 cp .env.example .env
@@ -443,7 +442,7 @@ atlea/
 │   ├── middleware/                # 미들웨어 (6개)
 │   │   ├── csrf_protection.py    # CSRF 보호
 │   │   ├── csp_nonce.py          # CSP 논스
-│   │   ├── rate_limiter_redis.py # Redis Rate Limiter
+│   │   ├── rate_limiter_middleware.py # Rate Limiter 미들웨어
 │   │   ├── audit_middleware.py   # 감사 미들웨어
 │   │   └── exception_handlers.py # 예외 처리
 │   ├── services/                 # 비즈니스 서비스 (7개)
@@ -468,7 +467,7 @@ atlea/
 │   ├── models/                   # 데이터 모델
 │   │   └── persona.py
 │   ├── hybrid_rag.py             # 하이브리드 RAG 파이프라인
-│   ├── vector_db.py              # Redis Vector DB
+│   ├── vector_db.py              # PostgreSQL Vector DB
 │   ├── embeddings.py             # KURE-v1 임베딩
 │   ├── llm.py                    # LLM 통합 (MLX/Ollama)
 │   ├── document_processor.py     # 문서 처리
@@ -555,10 +554,8 @@ HOST=0.0.0.0
 PORT=8000
 ENVIRONMENT=production
 
-# Redis
-REDIS_HOST=localhost
-REDIS_PORT=6379
-REDIS_MAX_CONNECTIONS=50
+# PostgreSQL
+DATABASE_URL=postgresql+asyncpg://atlea:password@localhost:5432/atlea
 
 # AI 모델
 EMBEDDING_MODEL=nlpai-lab/KURE-v1
@@ -609,7 +606,7 @@ docker compose -f docker-compose.searxng.yml up -d
 
 | 파일 | 용도 |
 |------|------|
-| `docker-compose.yml` | 기본 (Redis + Document Service) |
+| `docker-compose.yml` | 기본 (PostgreSQL + Document Service) |
 | `docker-compose.full.yml` | 전체 서비스 |
 | `docker-compose.gpu.yml` | NVIDIA GPU 지원 |
 | `docker-compose.production.yml` | 프로덕션 최적화 |
@@ -625,7 +622,7 @@ docker compose -f docker-compose.searxng.yml up -d
 - **TOTP 2FA**: Google Authenticator 호환
 - **CSRF 보호**: 토큰 기반 방어
 - **CSP 헤더**: XSS 공격 차단
-- **Rate Limiting**: Redis 기반 요청 제한
+- **Rate Limiting**: 인메모리 요청 제한
 - **브루트포스 방어**: 5회 실패 시 계정 잠금
 - **ClamAV 바이러스 스캔**: 업로드 파일 검사
 - **PII 탐지**: 개인정보 자동 탐지
@@ -644,7 +641,7 @@ docker compose -f docker-compose.searxng.yml up -d
 - [x] PII 탐지
 - [x] 감사 로그
 - [ ] HTTPS (배포 환경에서 Nginx + Let's Encrypt 설정)
-- [ ] Redis 비밀번호 설정 (프로덕션 권장)
+- [ ] PostgreSQL 비밀번호 강화 (프로덕션 권장)
 
 자세한 내용은 [docs/AUTHENTICATION.md](docs/AUTHENTICATION.md)와 [docs/CLAMAV_INTEGRATION.md](docs/CLAMAV_INTEGRATION.md)를 참조하세요.
 
@@ -654,10 +651,10 @@ docker compose -f docker-compose.searxng.yml up -d
 
 ### 일반적인 문제
 
-#### Redis 연결 오류
+#### PostgreSQL 연결 오류
 ```bash
-docker compose restart redis
-docker exec -it redis redis-cli ping
+docker compose restart postgres
+docker exec -it postgres psql -U atlea -c "SELECT 1"
 ```
 
 #### 모델 다운로드 실패
@@ -728,7 +725,7 @@ ENVIRONMENT=development LOG_LEVEL=debug python -m src.web_server
 #### v2.1.0 - 프로덕션 최적화 및 그룹 관리
 - ✅ 문서 그룹 시스템 (계층 구조, 그룹별 검색)
 - ✅ Multi-worker 서버, Health check, Prometheus 메트릭
-- ✅ Redis 연결 풀 최적화
+- ✅ 데이터베이스 연결 풀 최적화
 
 #### v2.0.0 - 멀티 포맷 및 마이크로서비스
 - ✅ 11가지 문서 형식 지원
@@ -774,7 +771,8 @@ ENVIRONMENT=development LOG_LEVEL=debug python -m src.web_server
 ### 사용된 오픈소스
 
 - [FastAPI](https://github.com/tiangolo/fastapi) - MIT License
-- [Redis](https://github.com/redis/redis) - BSD 3-Clause License
+- [PostgreSQL](https://www.postgresql.org/) - PostgreSQL License
+- [pgvector](https://github.com/pgvector/pgvector) - PostgreSQL License
 - [MLX](https://github.com/ml-explore/mlx) - MIT License
 - [Sentence Transformers](https://github.com/UKPLab/sentence-transformers) - Apache 2.0
 - [Apache PDFBox](https://pdfbox.apache.org/) / [Apache POI](https://poi.apache.org/) - Apache 2.0
@@ -789,7 +787,7 @@ ENVIRONMENT=development LOG_LEVEL=debug python -m src.web_server
 - **[nlpai-lab KURE](https://huggingface.co/nlpai-lab/KURE-v1)** - 한국어 특화 임베딩 모델
 - **[Qwen Team](https://github.com/QwenLM/Qwen)** - 다국어 LLM
 - **[MLX Team](https://github.com/ml-explore/mlx)** - Apple Silicon GPU 가속
-- **[Redis Labs](https://redis.io/)** - 벡터 검색 기능
+- **[PostgreSQL](https://www.postgresql.org/)** - 관계형 데이터베이스 + pgvector 벡터 검색
 - **[FastAPI](https://fastapi.tiangolo.com/)** - 웹 프레임워크
 - **[SearXNG](https://searxng.org/)** - 프라이버시 보호 메타 검색
 - **Apache Software Foundation** - PDFBox, POI 문서 처리

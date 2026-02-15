@@ -35,6 +35,7 @@ from ..config.prompts import (
     DEFAULT_HYBRID_LOCAL_PRIORITY_PROMPT
 )
 from ..utils.error_handling import get_safe_error_message
+from ..services.config_service import config_get_sync, config_set_sync
 
 # Create router with prefix and tags
 router = APIRouter(prefix="/api/admin", tags=["Admin", "Settings"])
@@ -51,7 +52,7 @@ def inject_dependencies(cache_mgr):
     Inject dependencies from main application
 
     Args:
-        cache_mgr: CacheManager instance for Redis access
+        cache_mgr: CacheManager instance (kept for backward compatibility)
     """
     global cache_manager
     cache_manager = cache_mgr
@@ -93,11 +94,7 @@ async def save_system_prompt(request: Request):
         # 관리자 권한 확인
         from ..auth.utils import require_admin, extract_token_from_request, verify_token
 
-        if not cache_manager:
-            raise HTTPException(status_code=500, detail="Cache manager not initialized")
-
-        redis_client = cache_manager.redis
-        require_admin(request, redis_client)
+        require_admin(request)
 
         # Request body 파싱
         body = await request.json()
@@ -110,8 +107,8 @@ async def save_system_prompt(request: Request):
         if len(system_prompt) > 10000:
             raise HTTPException(status_code=400, detail="시스템 프롬프트가 너무 깁니다 (최대 10,000자)")
 
-        # Redis에 저장
-        redis_client.set("system:default_prompt", system_prompt)
+        # PostgreSQL에 저장
+        config_set_sync("system:default_prompt", system_prompt)
 
         # 로깅
         token = extract_token_from_request(request)
@@ -141,21 +138,12 @@ async def get_system_prompt(request: Request):
         # 관리자 권한 확인
         from ..auth.utils import require_admin
 
-        if not cache_manager:
-            raise HTTPException(status_code=500, detail="Cache manager not initialized")
+        require_admin(request)
 
-        redis_client = cache_manager.redis
-        require_admin(request, redis_client)
+        # PostgreSQL에서 조회
+        system_prompt = config_get_sync("system:default_prompt")
 
-        # Redis에서 조회
-        system_prompt = redis_client.get("system:default_prompt")
-
-        if system_prompt:
-            # bytes를 str로 변환
-            if isinstance(system_prompt, bytes):
-                system_prompt = system_prompt.decode('utf-8')
-        else:
-            # 기본값 사용
+        if not system_prompt:
             system_prompt = DEFAULT_BASIC_PROMPT
 
         return {
@@ -192,40 +180,35 @@ async def get_all_prompts(request: Request):
         # 관리자 권한 확인
         from ..auth.utils import require_admin
 
-        if not cache_manager:
-            raise HTTPException(status_code=500, detail="Cache manager not initialized")
+        require_admin(request)
 
-        redis_client = cache_manager.redis
-        require_admin(request, redis_client)
+        # PostgreSQL에서 각 프롬프트 가져오기
+        prompt_keys = [
+            PROMPT_KEY_BASIC, PROMPT_KEY_HYBRID, PROMPT_KEY_TOOLS_ONLY,
+            PROMPT_KEY_HYBRID_WEB_PRIORITY, PROMPT_KEY_HYBRID_BALANCED,
+            PROMPT_KEY_HYBRID_WEB_ONLY, PROMPT_KEY_HYBRID_LOCAL_ONLY,
+            PROMPT_KEY_HYBRID_LOCAL_PRIORITY,
+        ]
+        defaults = [
+            DEFAULT_BASIC_PROMPT, DEFAULT_HYBRID_PROMPT, DEFAULT_TOOLS_ONLY_PROMPT,
+            DEFAULT_HYBRID_WEB_PRIORITY_PROMPT, DEFAULT_HYBRID_BALANCED_PROMPT,
+            DEFAULT_HYBRID_WEB_ONLY_PROMPT, DEFAULT_HYBRID_LOCAL_ONLY_PROMPT,
+            DEFAULT_HYBRID_LOCAL_PRIORITY_PROMPT,
+        ]
+        names = [
+            'basic', 'hybrid', 'tools_only',
+            'hybrid_web_priority', 'hybrid_balanced',
+            'hybrid_web_only', 'hybrid_local_only', 'hybrid_local_priority',
+        ]
 
-        # 각 프롬프트 가져오기
-        basic_prompt = redis_client.get(PROMPT_KEY_BASIC)
-        hybrid_prompt = redis_client.get(PROMPT_KEY_HYBRID)
-        tools_only_prompt = redis_client.get(PROMPT_KEY_TOOLS_ONLY)
-        hybrid_web_priority = redis_client.get(PROMPT_KEY_HYBRID_WEB_PRIORITY)
-        hybrid_balanced = redis_client.get(PROMPT_KEY_HYBRID_BALANCED)
-        hybrid_web_only = redis_client.get(PROMPT_KEY_HYBRID_WEB_ONLY)
-        hybrid_local_only = redis_client.get(PROMPT_KEY_HYBRID_LOCAL_ONLY)
-        hybrid_local_priority = redis_client.get(PROMPT_KEY_HYBRID_LOCAL_PRIORITY)
-
-        # bytes to str 변환 및 기본값 적용 헬퍼 함수
-        def decode_and_default(value, default):
-            if isinstance(value, bytes):
-                return value.decode('utf-8')
-            return value if value else default
+        prompts = {}
+        for key, default, name in zip(prompt_keys, defaults, names):
+            value = config_get_sync(key)
+            prompts[name] = value if value else default
 
         return {
             'success': True,
-            'prompts': {
-                'basic': decode_and_default(basic_prompt, DEFAULT_BASIC_PROMPT),
-                'hybrid': decode_and_default(hybrid_prompt, DEFAULT_HYBRID_PROMPT),
-                'tools_only': decode_and_default(tools_only_prompt, DEFAULT_TOOLS_ONLY_PROMPT),
-                'hybrid_web_priority': decode_and_default(hybrid_web_priority, DEFAULT_HYBRID_WEB_PRIORITY_PROMPT),
-                'hybrid_balanced': decode_and_default(hybrid_balanced, DEFAULT_HYBRID_BALANCED_PROMPT),
-                'hybrid_web_only': decode_and_default(hybrid_web_only, DEFAULT_HYBRID_WEB_ONLY_PROMPT),
-                'hybrid_local_only': decode_and_default(hybrid_local_only, DEFAULT_HYBRID_LOCAL_ONLY_PROMPT),
-                'hybrid_local_priority': decode_and_default(hybrid_local_priority, DEFAULT_HYBRID_LOCAL_PRIORITY_PROMPT)
-            }
+            'prompts': prompts
         }
 
     except HTTPException:
@@ -261,11 +244,7 @@ async def update_prompts(data: PromptsUpdateRequest, request: Request):
         # 관리자 권한 확인
         from ..auth.utils import require_admin, extract_token_from_request, verify_token
 
-        if not cache_manager:
-            raise HTTPException(status_code=500, detail="Cache manager not initialized")
-
-        redis_client = cache_manager.redis
-        require_admin(request, redis_client)
+        require_admin(request)
 
         updated = []
 
@@ -277,9 +256,9 @@ async def update_prompts(data: PromptsUpdateRequest, request: Request):
                         status_code=400,
                         detail=f"{prompt_name} 프롬프트가 너무 깁니다 (최대 {max_length:,}자)"
                     )
-                redis_client.set(prompt_key, prompt_value)
+                config_set_sync(prompt_key, prompt_value)
                 if legacy_key:
-                    redis_client.set(legacy_key, prompt_value)
+                    config_set_sync(legacy_key, prompt_value)
                 updated.append(prompt_name)
 
         # 기존 프롬프트 업데이트

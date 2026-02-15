@@ -1,7 +1,7 @@
 """Middleware module"""
 
-# Redis 기반 Rate Limiter 사용 (분산 환경 지원)
-from .rate_limiter_redis import RateLimitMiddleware, RedisRateLimiter
+# 인메모리 Rate Limiter
+from .rate_limiter_middleware import RateLimitMiddleware, InMemoryRateLimiter
 from .audit_middleware import AuditMiddleware
 from .csrf_protection import CSRFProtectionMiddleware, get_csrf_token_endpoint
 
@@ -10,7 +10,7 @@ from .rate_limiter import RateLimiter as MemoryRateLimiter
 
 __all__ = [
     'RateLimitMiddleware',
-    'RedisRateLimiter',
+    'InMemoryRateLimiter',
     'AuditMiddleware',
     'MemoryRateLimiter',
     'CSRFProtectionMiddleware',

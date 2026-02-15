@@ -7,7 +7,6 @@ from jose import JWTError, jwt
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict
 from fastapi import Request, HTTPException
-from redis import Redis
 import os
 
 # JWT 설정 (환경 변수에서 읽기)
@@ -109,27 +108,25 @@ def create_refresh_token(data: Dict) -> str:
 def verify_token(
     token: str,
     expected_type: str = "access",
-    redis_client: Optional[Redis] = None
+
 ) -> Optional[Dict]:
     """토큰 검증 및 디코딩
 
     Args:
         token: JWT 토큰
         expected_type: 예상되는 토큰 타입 ("access" 또는 "refresh")
-        redis_client: Redis 클라이언트 (블랙리스트 확인용, 선택적)
 
     Returns:
         토큰 페이로드 딕셔너리 (검증 실패 시 None)
     """
     try:
-        # 블랙리스트 확인 (Redis 사용 가능한 경우)
-        if redis_client:
-            from .token_blacklist import TokenBlacklist
-            blacklist = TokenBlacklist(redis_client)
-            if blacklist.is_blacklisted(token):
-                from loguru import logger
-                logger.warning(f"Attempt to use blacklisted token")
-                return None
+        # 블랙리스트 확인 (PostgreSQL 기반)
+        from .token_blacklist import TokenBlacklist
+        blacklist = TokenBlacklist()
+        if blacklist.is_blacklisted(token):
+            from loguru import logger
+            logger.warning("Attempt to use blacklisted token")
+            return None
 
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
 
@@ -167,29 +164,91 @@ def create_token_pair(user_id: str, username: Optional[str] = None) -> Dict[str,
     }
 
 
-def get_user(user_id: str, redis_client) -> Optional[Dict]:
-    """Redis에서 사용자 정보 조회
+def get_user(user_id: str) -> Optional[Dict]:
+    """PostgreSQL에서 사용자 정보 조회
 
     Args:
         user_id: 사용자 ID
-        redis_client: Redis 클라이언트 인스턴스
 
     Returns:
         사용자 정보 딕셔너리 (사용자 없으면 None)
     """
     try:
-        user_data = redis_client.hgetall(f"user:{user_id}")
-        if not user_data:
-            return None
+        from ..database.connection import SyncSessionFactory
+        from ..database.models.user import User
+        from sqlalchemy import select
 
-        # bytes를 문자열로 변환
-        user_dict = {}
-        for key, value in user_data.items():
-            key_str = key.decode('utf-8') if isinstance(key, bytes) else key
-            value_str = value.decode('utf-8') if isinstance(value, bytes) else value
-            user_dict[key_str] = value_str
+        with SyncSessionFactory() as session:
+            stmt = select(User).where(User.id == user_id)
+            result = session.execute(stmt)
+            user = result.scalar_one_or_none()
 
-        return user_dict
+            if not user:
+                return None
+
+            return {
+                "user_id": str(user.id),
+                "email": user.email or "",
+                "username": user.username or "",
+                "hashed_password": user.hashed_password or "",
+                "role": user.role or "user",
+                "is_active": str(user.is_active) if user.is_active is not None else "true",
+                "org_id": str(user.org_id) if user.org_id else "default",
+                "org_role": user.org_role or "user",
+                "created_at": user.created_at.isoformat() if user.created_at else "",
+                "updated_at": user.updated_at.isoformat() if user.updated_at else "",
+            }
+    except Exception:
+        return None
+
+
+def update_user_fields(user_id: str, **fields) -> bool:
+    """PostgreSQL에서 사용자 필드 업데이트
+
+    Args:
+        user_id: 사용자 ID
+        **fields: 업데이트할 필드 (예: org_id="abc", org_role="admin")
+
+    Returns:
+        업데이트 성공 여부
+    """
+    if not fields:
+        return False
+
+    try:
+        from ..database.connection import SyncSessionFactory
+        from ..database.models.user import User
+        from sqlalchemy import update
+
+        with SyncSessionFactory() as session:
+            stmt = update(User).where(User.id == user_id).values(**fields)
+            result = session.execute(stmt)
+            session.commit()
+            return result.rowcount > 0
+    except Exception:
+        return False
+
+
+def get_user_field(user_id: str, field: str) -> Optional[str]:
+    """PostgreSQL에서 사용자 특정 필드 조회
+
+    Args:
+        user_id: 사용자 ID
+        field: 필드 이름 (예: "org_id", "org_role")
+
+    Returns:
+        필드 값 (문자열) 또는 None
+    """
+    try:
+        from ..database.connection import SyncSessionFactory
+        from ..database.models.user import User
+        from sqlalchemy import select
+
+        with SyncSessionFactory() as session:
+            stmt = select(getattr(User, field)).where(User.id == user_id)
+            result = session.execute(stmt)
+            val = result.scalar_one_or_none()
+            return str(val) if val is not None else None
     except Exception:
         return None
 
@@ -214,12 +273,11 @@ def extract_token_from_request(request: Request) -> Optional[str]:
     return request.cookies.get("access_token")
 
 
-def get_current_user_from_request(request: Request, redis_client) -> Dict:
+def get_current_user_from_request(request: Request) -> Dict:
     """Request에서 현재 사용자 정보 추출 및 검증
 
     Args:
         request: FastAPI Request 객체
-        redis_client: Redis 클라이언트 인스턴스
 
     Returns:
         사용자 정보 딕셔너리
@@ -233,24 +291,23 @@ def get_current_user_from_request(request: Request, redis_client) -> Dict:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     # 토큰 검증 (블랙리스트 확인 포함)
-    user_data = verify_token(token, redis_client=redis_client)
+    user_data = verify_token(token)
     if not user_data:
         raise HTTPException(status_code=401, detail="Invalid token")
 
     # 사용자 정보 조회
-    user = get_user(user_data["user_id"], redis_client)
+    user = get_user(user_data["user_id"])
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
 
     return user
 
 
-def require_admin(request: Request, redis_client) -> Dict:
+def require_admin(request: Request) -> Dict:
     """관리자 권한 확인
 
     Args:
         request: FastAPI Request 객체
-        redis_client: Redis 클라이언트 인스턴스
 
     Returns:
         관리자 사용자 정보 딕셔너리
@@ -258,7 +315,7 @@ def require_admin(request: Request, redis_client) -> Dict:
     Raises:
         HTTPException: 인증 실패 또는 권한 없음 시 401 또는 403
     """
-    user = get_current_user_from_request(request, redis_client)
+    user = get_current_user_from_request(request)
 
     if user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Admin access required")

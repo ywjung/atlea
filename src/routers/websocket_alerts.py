@@ -36,7 +36,7 @@ async def websocket_alerts(websocket: WebSocket):
         return
 
     # JWT 토큰 검증
-    payload = verify_token(token, expected_type="access", redis_client=_cache_manager.redis)
+    payload = verify_token(token, expected_type="access")
     if not payload:
         await websocket.close(code=4001, reason="유효하지 않은 토큰입니다")
         return
@@ -44,8 +44,9 @@ async def websocket_alerts(websocket: WebSocket):
     # 관리자 권한 확인
     user_id = payload.get("user_id")
     if user_id:
-        user_data = _cache_manager.redis.hgetall(f"user:{user_id}")
-        user_role = user_data.get(b"role", b"").decode("utf-8") if user_data else ""
+        from ..auth.utils import get_user
+        user_data = get_user(user_id)
+        user_role = user_data.get("role", "") if user_data else ""
         if user_role != "admin":
             await websocket.close(code=4003, reason="관리자 권한이 필요합니다")
             return

@@ -292,9 +292,35 @@ async def query(
     # Reindexing happens on a separate index, then swaps atomically
 
     try:
-        # Check semantic cache first (similarity-based, 5-min TTL)
+        # Save user question to conversation history & retrieve context
+        if request.session_id and conversation_manager:
+            conversation_manager.add_message(
+                session_id=request.session_id,
+                role="user",
+                content=request.question
+            )
+
+            conversation_history = conversation_manager.get_messages(
+                session_id=request.session_id,
+                limit=10
+            )
+        else:
+            conversation_history = []
+
+        # 🔄 대화 컨텍스트 기반 쿼리 컨텍스트화 (캐시 조회 전에 수행)
+        search_question = request.question
+        is_contextualized = False
+        if conversation_history and len(conversation_history) > 1:
+            hybrid_rag = await get_hybrid_rag_orchestrator()
+            if hybrid_rag is not None:
+                search_question = await hybrid_rag.contextualize_query(
+                    request.question, conversation_history
+                )
+                is_contextualized = (search_question != request.question)
+
+        # Check semantic cache (컨텍스트화된 쿼리로 조회)
         cached_response = cache_manager.get_cached_response(
-            question=request.question,
+            question=search_question,
             top_k=request.top_k,
             group_ids=request.group_ids,
             document_ids=request.document_ids
@@ -314,37 +340,22 @@ async def query(
 
         logger.info("❌ Cache MISS - proceeding with RAG query")
 
-        # Save user question to conversation history
-        if request.session_id and conversation_manager:
-            conversation_manager.add_message(
-                session_id=request.session_id,
-                role="user",
-                content=request.question
-            )
-
-            # 🆕 Retrieve conversation history (last 10 messages = 5 Q&A pairs)
-            conversation_history = conversation_manager.get_messages(
-                session_id=request.session_id,
-                limit=10
-            )
-        else:
-            conversation_history = []
-
-        # Create query embedding (비동기 + 캐시)
-        cached_embedding = cache_manager.get_embedding_cache(request.question)
+        # Create query embedding (컨텍스트화된 쿼리 사용)
+        cached_embedding = cache_manager.get_embedding_cache(search_question)
         if cached_embedding:
             query_embedding = cached_embedding
         else:
+            embed_q = search_question
             query_embedding = await asyncio.to_thread(
-                lambda: embedding_model.encode(request.question)[0]
+                lambda: embedding_model.encode(embed_q)[0]
             )
-            cache_manager.set_embedding_cache(request.question, query_embedding)
+            cache_manager.set_embedding_cache(search_question, query_embedding)
 
         # Organization-based access control: validate and filter group_ids
         user_org_id = current_user.get("org_id")
 
         # All users (including system admins) can only search their organization's groups
-        # 동기 Redis 호출을 비동기 래핑 (이벤트 루프 블로킹 방지)
+        # 동기 PG 호출을 비동기 래핑 (이벤트 루프 블로킹 방지)
         org_groups = await asyncio.to_thread(group_manager.get_all_groups, org_id=user_org_id)
         org_group_ids = {g['id'] for g in org_groups}
 
@@ -384,10 +395,8 @@ async def query(
 
         # 🆕 자동 프롬프트 선택 (사용자가 지정하지 않은 경우)
         if not request.system_prompt:
-            redis_client = cache_manager.redis
             # 초기 추정: search_mode 기반 (실제 sources는 검색 후 알 수 있음)
             auto_prompt = get_system_prompt_for_mode(
-                redis_client=redis_client,
                 search_mode='smart',  # Hybrid RAG의 기본 모드
                 sources_used=None  # 검색 전이므로 None
             )
@@ -395,7 +404,7 @@ async def query(
             logger.debug(f"📝 Auto-selected system prompt based on search mode")
 
         # 🎭 페르소나 통합 (사용자별 맞춤 응답)
-        persona_service = PersonaService(cache_manager.redis)
+        persona_service = PersonaService()
         user_persona = await persona_service.get_persona(current_user.get('user_id'))
         logger.info(f"🔍 [PERSONA] Check - user: {current_user.get('user_id')}, found: {user_persona is not None}, enabled: {user_persona.enabled if user_persona else False}")
         if user_persona and user_persona.enabled:
@@ -422,7 +431,7 @@ async def query(
             logger.info(f"🎯 Search mode: {search_mode}")
 
             result = await hybrid_rag.answer(
-                query=request.question,
+                query=search_question,
                 group_ids=expanded_group_ids,
                 user_id=current_user.get("user_id"),
                 search_mode=search_mode,  # Use user-selected search mode
@@ -430,7 +439,8 @@ async def query(
                 top_k=request.top_k,  # 🆕 검색 문서 개수 전달
                 document_ids=request.document_ids,  # 🆕 문서 필터 전달
                 query_embedding=query_embedding,  # 임베딩 재사용
-                conversation_history=conversation_history  # 🆕 대화 히스토리 전달
+                conversation_history=conversation_history,  # 🆕 대화 히스토리 전달
+                pre_contextualized=is_contextualized  # 라우터에서 이미 컨텍스트화됨
             )
 
             # 🔄 Convert Hybrid RAG format to basic RAG format
@@ -473,14 +483,12 @@ async def query(
             rag = await get_rag_system()
             # 🆕 로컬 전용 프롬프트 선택
             if not request.system_prompt:
-                redis_client = cache_manager.redis
                 request.system_prompt = get_system_prompt_for_mode(
-                    redis_client=redis_client,
                     search_mode='local-only',
                     sources_used=['local']
                 )
             result = rag.query(
-                question=request.question,
+                question=search_question,
                 query_embedding=query_embedding,
                 top_k=request.top_k,
                 history=request.history,
@@ -561,7 +569,7 @@ async def query(
         FALLBACK_MSG = "죄송합니다. 응답을 생성하지 못했습니다."
         if result["answer"] and FALLBACK_MSG not in result["answer"]:
             cache_manager.set_cached_response(
-                question=request.question,
+                question=search_question,
                 response=result["answer"],
                 sources=result["sources"],
                 context=result["context"],
@@ -639,9 +647,24 @@ async def query_stream(
         if not cache_manager:
             raise HTTPException(status_code=503, detail="Cache manager not initialized")
 
+        # 🔄 대화 컨텍스트 기반 쿼리 컨텍스트화 (캐시 조회 전에 수행)
+        # 후속 질문의 대명사/생략된 주어를 독립적 질문으로 변환
+        search_question = request.question
+        is_contextualized = False
+        if conversation_history and len(conversation_history) > 1:
+            hybrid_rag = await get_hybrid_rag_orchestrator()
+            if hybrid_rag is not None:
+                search_question = await hybrid_rag.contextualize_query(
+                    request.question, conversation_history
+                )
+                is_contextualized = (search_question != request.question)
+                if is_contextualized:
+                    logger.info(f"🔄 Query contextualized for cache/search: '{request.question}' → '{search_question}'")
+
         # Check query result cache first (exact match, 5-min TTL)
+        # 컨텍스트화된 쿼리로 캐시 조회 (대화별 올바른 캐시 매칭)
         query_result_cached = cache_manager.get_query_result_cache(
-            query_text=request.question,
+            query_text=search_question,
             group_ids=request.group_ids
         )
 
@@ -666,41 +689,13 @@ async def query_stream(
                 yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
                 # 후속 질문을 done 후 비동기 생성
-                followup_start_time = time.time()
-
-                # 🎯 캐시 확인 먼저 시도
-                cached_follow_up = cache_manager.get_follow_up_questions_cache(
-                    question=request.question,
-                    answer=query_result_cached["response"]
+                cached_follow_up = await _generate_and_cache_follow_ups(
+                    question=search_question,
+                    answer=query_result_cached["response"],
+                    rag_instance=rag,
+                    conversation_history=conversation_history,
+                    label="exact cache"
                 )
-
-                if not cached_follow_up:
-                    # 캐시 미스 - LLM 생성
-                    try:
-                        cached_follow_up = await asyncio.to_thread(
-                            _generate_llm_follow_up_questions,
-                            request.question, query_result_cached["response"], rag.llm
-                        )
-                        if len(cached_follow_up) < 3:
-                            cached_follow_up = _generate_context_aware_fallback(
-                                request.question, cached_follow_up, query_result_cached["response"]
-                            )
-
-                        # 🎯 캐시에 저장
-                        if cached_follow_up and len(cached_follow_up) >= 3:
-                            cache_manager.set_follow_up_questions_cache(
-                                question=request.question,
-                                answer=query_result_cached["response"],
-                                questions=cached_follow_up,
-                                ttl=3600
-                            )
-                    except Exception:
-                        cached_follow_up = _generate_context_aware_fallback(
-                            request.question, [], query_result_cached["response"]
-                        )
-
-                followup_time = time.time() - followup_start_time
-                logger.info(f"⏱️ [TIMING] Follow-up generation (exact cache): {followup_time*1000:.0f}ms")
 
                 if cached_follow_up:
                     yield f"data: {json.dumps({'type': 'follow_up_questions', 'data': cached_follow_up})}\n\n"
@@ -727,9 +722,10 @@ async def query_stream(
             )
 
         # Check semantic cache (similarity-based, 1-hour TTL)
+        # 컨텍스트화된 쿼리로 시맨틱 캐시 조회
         cache_start_time = time.time()
         cached_response = cache_manager.get_cached_response(
-            question=request.question,
+            question=search_question,
             top_k=request.top_k,
             similarity_threshold=request.cache_threshold,
             document_ids=request.document_ids,
@@ -768,41 +764,13 @@ async def query_stream(
                 yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
                 # 후속 질문을 done 후 비동기 생성
-                followup_start_time = time.time()
-
-                # 🎯 캐시 확인 먼저 시도
-                semantic_follow_up = cache_manager.get_follow_up_questions_cache(
-                    question=request.question,
-                    answer=cached_response["response"]
+                semantic_follow_up = await _generate_and_cache_follow_ups(
+                    question=search_question,
+                    answer=cached_response["response"],
+                    rag_instance=rag,
+                    conversation_history=conversation_history,
+                    label="semantic cache"
                 )
-
-                if not semantic_follow_up:
-                    # 캐시 미스 - LLM 생성
-                    try:
-                        semantic_follow_up = await asyncio.to_thread(
-                            _generate_llm_follow_up_questions,
-                            request.question, cached_response["response"], rag.llm
-                        )
-                        if len(semantic_follow_up) < 3:
-                            semantic_follow_up = _generate_context_aware_fallback(
-                                request.question, semantic_follow_up, cached_response["response"]
-                            )
-
-                        # 🎯 캐시에 저장
-                        if semantic_follow_up and len(semantic_follow_up) >= 3:
-                            cache_manager.set_follow_up_questions_cache(
-                                question=request.question,
-                                answer=cached_response["response"],
-                                questions=semantic_follow_up,
-                                ttl=3600
-                            )
-                    except Exception:
-                        semantic_follow_up = _generate_context_aware_fallback(
-                            request.question, [], cached_response["response"]
-                        )
-
-                followup_time = time.time() - followup_start_time
-                logger.info(f"⏱️ [TIMING] Follow-up generation (semantic cache): {followup_time*1000:.0f}ms")
 
                 if semantic_follow_up:
                     yield f"data: {json.dumps({'type': 'follow_up_questions', 'data': semantic_follow_up})}\n\n"
@@ -840,7 +808,7 @@ async def query_stream(
         user_org_id = current_user.get("org_id")
 
         # All users (including system admins) can only search their organization's groups
-        # 동기 Redis 호출을 비동기 래핑 (이벤트 루프 블로킹 방지)
+        # 동기 PG 호출을 비동기 래핑 (이벤트 루프 블로킹 방지)
         org_groups = await asyncio.to_thread(group_manager.get_all_groups, org_id=user_org_id)
         org_group_ids = {g['id'] for g in org_groups}
 
@@ -882,10 +850,8 @@ async def query_stream(
 
         # 🆕 자동 프롬프트 선택 (사용자가 지정하지 않은 경우)
         if not request.system_prompt:
-            redis_client = cache_manager.redis
             # 초기 추정: search_mode 기반 (실제 sources는 검색 후 알 수 있음)
             auto_prompt = get_system_prompt_for_mode(
-                redis_client=redis_client,
                 search_mode='smart',  # Hybrid RAG의 기본 모드
                 sources_used=None  # 검색 전이므로 None
             )
@@ -893,7 +859,7 @@ async def query_stream(
             logger.debug(f"📝 Auto-selected system prompt based on search mode")
 
         # 🎭 페르소나 통합 (사용자별 맞춤 응답)
-        persona_service = PersonaService(cache_manager.redis)
+        persona_service = PersonaService()
         user_persona = await persona_service.get_persona(current_user.get('user_id'))
         logger.info(f"🔍 [PERSONA] Check - user: {current_user.get('user_id')}, found: {user_persona is not None}, enabled: {user_persona.enabled if user_persona else False}")
         if user_persona and user_persona.enabled:
@@ -924,17 +890,19 @@ async def query_stream(
             logger.info(f"🎯 Search mode: {search_mode}")
 
             # Pre-compute embedding for reuse in hybrid RAG
-            cached_emb = cache_manager.get_embedding_cache(request.question)
+            # 컨텍스트화된 쿼리로 임베딩 캐시 조회/생성
+            cached_emb = cache_manager.get_embedding_cache(search_question)
             if cached_emb:
                 hybrid_query_embedding = cached_emb
             else:
+                embed_q = search_question
                 hybrid_query_embedding = await asyncio.to_thread(
-                    lambda: embedding_model.encode(request.question)[0]
+                    lambda: embedding_model.encode(embed_q)[0]
                 )
-                cache_manager.set_embedding_cache(request.question, hybrid_query_embedding)
+                cache_manager.set_embedding_cache(search_question, hybrid_query_embedding)
 
             result = await hybrid_rag.answer(
-                query=request.question,
+                query=search_question,
                 group_ids=expanded_group_ids,
                 user_id=current_user.get("user_id"),
                 search_mode=search_mode,  # Use user-selected search mode
@@ -943,7 +911,8 @@ async def query_stream(
                 document_ids=request.document_ids,  # 🆕 문서 필터 전달
                 query_embedding=hybrid_query_embedding,  # 임베딩 재사용
                 stream=True,  # 스트리밍 모드
-                conversation_history=conversation_history  # 🆕 대화 히스토리 전달
+                conversation_history=conversation_history,  # 🆕 대화 히스토리 전달
+                pre_contextualized=is_contextualized  # 라우터에서 이미 컨텍스트화됨
             )
 
             # Convert Hybrid RAG response to streaming format
@@ -1019,31 +988,30 @@ async def query_stream(
 
             # Update prompt for local-only mode
             if not request.system_prompt:
-                redis_client = cache_manager.redis
                 request.system_prompt = get_system_prompt_for_mode(
-                    redis_client=redis_client,
                     search_mode='local-only',
                     sources_used=['local']
                 )
 
-            # Check embedding cache first
-            cached_embedding = cache_manager.get_embedding_cache(request.question)
+            # Check embedding cache first (컨텍스트화된 쿼리 사용)
+            cached_embedding = cache_manager.get_embedding_cache(search_question)
 
             if cached_embedding:
                 # Use cached embedding
                 query_embedding = cached_embedding
             else:
                 # Generate new embedding (run in thread pool to avoid blocking)
+                embed_q = search_question
                 query_embedding = await asyncio.to_thread(
-                    lambda: embedding_model.encode(request.question)[0]
+                    lambda: embedding_model.encode(embed_q)[0]
                 )
                 # Save to embedding cache
-                cache_manager.set_embedding_cache(request.question, query_embedding)
+                cache_manager.set_embedding_cache(search_question, query_embedding)
 
-            # Query RAG system with streaming (run in thread pool to avoid blocking)
+            # Query RAG system with streaming (컨텍스트화된 쿼리 사용)
             result = await asyncio.to_thread(
                 rag.query,
-                question=request.question,
+                question=search_question,
                 query_embedding=query_embedding,
                 top_k=request.top_k,
                 stream=True,
@@ -1210,9 +1178,9 @@ async def query_stream(
                     elif any(keyword in sources_text for keyword in ['faq', '자주', '질문']):
                         content_type = 'realtime'  # 5-minute cache for FAQs
 
-                # Save to semantic cache (similarity-based, dynamic TTL based on content type)
+                # Save to semantic cache (컨텍스트화된 쿼리로 저장)
                 cache_manager.save_to_cache(
-                    question=request.question,
+                    question=search_question,
                     response=complete_response,
                     sources=result["sources"],
                     top_k=request.top_k,
@@ -1222,11 +1190,11 @@ async def query_stream(
                     group_ids=request.group_ids,
                     content_type=content_type
                 )
-                logger.info(f"💾 [BG] Saved to semantic cache ({content_type}): '{request.question[:50]}...'")
+                logger.info(f"💾 [BG] Saved to semantic cache ({content_type}): '{search_question[:50]}...'")
 
                 # Save to query result cache (exact match, 5-min TTL)
                 cache_manager.set_query_result_cache(
-                    query_text=request.question,
+                    query_text=search_question,
                     result={
                         "response": complete_response,
                         "metadata": context_data
@@ -1281,51 +1249,12 @@ async def query_stream(
             logger.info("✅ [STREAM] done 이벤트 전송 완료, 후속 질문 생성 시작...")
 
             # 🔄 후속 질문을 done 이후 비동기 생성 (사용자 대기 없음)
-            followup_start_time = time.time()
-
-            # 🎯 캐시 확인 먼저 시도
-            cached_follow_up = cache_manager.get_follow_up_questions_cache(
-                question=request.question,
-                answer=complete_response
+            follow_up_qs = await _generate_and_cache_follow_ups(
+                question=search_question,
+                answer=complete_response,
+                conversation_history=conversation_history,
+                label="new response"
             )
-
-            if cached_follow_up:
-                # 캐시 히트 - 즉시 반환
-                follow_up_qs = cached_follow_up
-                followup_time = time.time() - followup_start_time
-                logger.info(f"⏱️ [TIMING] Follow-up generation (CACHE HIT): {followup_time*1000:.0f}ms")
-            else:
-                # 캐시 미스 - LLM 생성
-                try:
-                    rag_system = await get_rag_system()
-                    logger.info(f"🔄 [FOLLOW-UP] asyncio.to_thread 호출 시작...")
-                    follow_up_qs = await asyncio.to_thread(
-                        _generate_llm_follow_up_questions,
-                        request.question, complete_response, rag_system.llm
-                    )
-                    followup_time = time.time() - followup_start_time
-                    logger.info(f"⏱️ [TIMING] Follow-up generation (LLM): {followup_time*1000:.0f}ms")
-                    logger.info(f"🔄 [FOLLOW-UP] LLM 생성 완료: {len(follow_up_qs)}개")
-
-                    if len(follow_up_qs) < 3:
-                        follow_up_qs = _generate_context_aware_fallback(
-                            request.question, follow_up_qs, complete_response
-                        )
-
-                    # 🎯 캐시에 저장
-                    if follow_up_qs and len(follow_up_qs) >= 3:
-                        cache_manager.set_follow_up_questions_cache(
-                            question=request.question,
-                            answer=complete_response,
-                            questions=follow_up_qs,
-                            ttl=3600  # 1시간
-                        )
-                except Exception as e:
-                    followup_time = time.time() - followup_start_time
-                    logger.warning(f"⚠️ [FOLLOW-UP] 생성 실패 ({followup_time*1000:.0f}ms): {type(e).__name__}: {e}")
-                    follow_up_qs = _generate_context_aware_fallback(
-                        request.question, [], complete_response
-                    )
 
             logger.info(f"💬 [FOLLOW-UP] 최종 {len(follow_up_qs)}개 전송 예정")
             if follow_up_qs:
@@ -1349,7 +1278,10 @@ async def query_stream(
         raise HTTPException(status_code=500, detail=safe_message)
 
 
-def _generate_llm_follow_up_questions(question: str, answer: str, llm_instance=None) -> list:
+def _generate_llm_follow_up_questions(
+    question: str, answer: str, llm_instance=None,
+    conversation_history: list = None
+) -> list:
     """
     Generate follow-up questions using LLM by analyzing both question and answer.
 
@@ -1357,6 +1289,7 @@ def _generate_llm_follow_up_questions(question: str, answer: str, llm_instance=N
         question: Original user question
         answer: Generated answer
         llm_instance: Optional LLM instance to use (if not provided, uses global llm)
+        conversation_history: Optional conversation history for context-aware generation
 
     Returns:
         List of 3 relevant follow-up questions, or empty list on failure
@@ -1374,9 +1307,24 @@ def _generate_llm_follow_up_questions(question: str, answer: str, llm_instance=N
         # Truncate answer if too long (keep first 500 chars for context)
         answer_truncated = answer[:500] if len(answer) > 500 else answer
 
+        # 대화 히스토리 컨텍스트 구성
+        history_section = ""
+        if conversation_history and len(conversation_history) > 2:
+            # 현재 Q&A 제외, 최근 4개 메시지 (2 Q&A pairs)
+            recent = conversation_history[-5:-1]
+            history_lines = []
+            for msg in recent:
+                role = "사용자" if msg.get("role") == "user" else "AI"
+                content = msg.get("content", "")
+                if len(content) > 150:
+                    content = content[:150] + "..."
+                history_lines.append(f"{role}: {content}")
+            if history_lines:
+                history_section = "\n[이전 대화]\n" + "\n".join(history_lines) + "\n"
+
         # Create prompt for LLM - more explicit format instructions
         prompt = f"""질문과 답변을 분석하여 후속 질문 3개를 생성하세요.
-
+{history_section}
 [원래 질문]
 {question}
 
@@ -1387,6 +1335,7 @@ def _generate_llm_follow_up_questions(question: str, answer: str, llm_instance=N
 1. 위 답변 내용을 바탕으로 사용자가 더 알고 싶어할 구체적인 질문
 2. 한국어로 작성, 반드시 물음표(?)로 끝남
 3. 각 질문은 새 줄에 "-"로 시작
+4. 대명사(그것, 이것 등) 대신 구체적인 명사를 사용하세요
 
 [후속 질문 3개]
 -"""
@@ -1639,6 +1588,76 @@ def _generate_context_aware_fallback(question: str, partial_questions: list, ans
             result.append(q)
 
     return result[:3]
+
+
+async def _generate_and_cache_follow_ups(
+    question: str,
+    answer: str,
+    rag_instance=None,
+    conversation_history: list = None,
+    label: str = "default"
+) -> list:
+    """
+    후속 질문 생성 + 캐시 조회/저장 공통 로직.
+
+    캐시에서 먼저 조회하고, 미스 시 LLM으로 생성한 뒤 캐시에 저장합니다.
+
+    Args:
+        question: 사용자 질문 (컨텍스트화된 쿼리)
+        answer: 생성된 답변
+        rag_instance: RAG 시스템 인스턴스 (LLM 접근용)
+        conversation_history: 대화 히스토리 (후속 질문 컨텍스트용)
+        label: 로그용 라벨 (exact cache / semantic cache / new response)
+
+    Returns:
+        3개의 후속 질문 리스트
+    """
+    start_time = time.time()
+
+    # 캐시 확인
+    cached = cache_manager.get_follow_up_questions_cache(
+        question=question,
+        answer=answer
+    )
+
+    if cached:
+        elapsed = time.time() - start_time
+        logger.info(f"⏱️ [TIMING] Follow-up generation ({label}, CACHE HIT): {elapsed*1000:.0f}ms")
+        return cached
+
+    # 캐시 미스 - LLM 생성
+    try:
+        llm_inst = None
+        if rag_instance and hasattr(rag_instance, 'llm'):
+            llm_inst = rag_instance.llm
+        elif not rag_instance:
+            rag_sys = await get_rag_system()
+            if rag_sys:
+                llm_inst = rag_sys.llm
+
+        follow_ups = await asyncio.to_thread(
+            _generate_llm_follow_up_questions,
+            question, answer, llm_inst, conversation_history
+        )
+
+        if len(follow_ups) < 3:
+            follow_ups = _generate_context_aware_fallback(question, follow_ups, answer)
+
+        # 캐시에 저장
+        if follow_ups and len(follow_ups) >= 3:
+            cache_manager.set_follow_up_questions_cache(
+                question=question,
+                answer=answer,
+                questions=follow_ups,
+                ttl=3600
+            )
+    except Exception as e:
+        logger.warning(f"⚠️ [FOLLOW-UP] 생성 실패 ({label}): {type(e).__name__}: {e}")
+        follow_ups = _generate_context_aware_fallback(question, [], answer)
+
+    elapsed = time.time() - start_time
+    logger.info(f"⏱️ [TIMING] Follow-up generation ({label}): {elapsed*1000:.0f}ms, count={len(follow_ups)}")
+    return follow_ups
 
 
 @router.post("/api/follow-up-questions", tags=["Query"])

@@ -38,7 +38,7 @@
 | Python 3.11+ | 필수 | - | 3.11 이상 |
 | Docker | - | 필수 | 24.0 이상 |
 | Docker Compose | - | 필수 | v2.20 이상 |
-| Redis Stack | 필수 | 자동 설치 | 7.x |
+| PostgreSQL | 필수 | 자동 설치 | 17.x |
 | Git | 필수 | 필수 | 2.x |
 | Ollama | 필수 | 선택 | 최신 |
 
@@ -57,8 +57,8 @@
 
 | 파일 | 용도 | 포함 서비스 |
 |------|------|------------|
-| `docker-compose.yml` | 부가 서비스 (로컬 개발용) | Redis + Document Service + ClamAV |
-| `docker-compose.full.yml` | 올인원 배포 | Redis + Document Service + 챗봇 앱 |
+| `docker-compose.yml` | 부가 서비스 (로컬 개발용) | PostgreSQL + Document Service + ClamAV |
+| `docker-compose.full.yml` | 올인원 배포 | PostgreSQL + Document Service + 챗봇 앱 |
 | `docker-compose.production.yml` | 프로덕션 배포 | 전체 + Nginx SSL + 모니터링 |
 | `docker-compose.gpu.yml` | GPU 서버 배포 | 전체 + NVIDIA GPU + 모니터링 |
 | `docker-compose.searxng.yml` | 웹 검색 확장 | SearXNG + Crawl4AI |
@@ -99,9 +99,8 @@ cp .env.example .env
 # python3 -c 'import secrets; print(secrets.token_urlsafe(32))'
 JWT_SECRET_KEY=여기에_생성된_키_입력
 
-# Redis (로컬 실행 시)
-REDIS_HOST=localhost
-REDIS_PORT=6379
+# PostgreSQL (로컬 실행 시)
+DATABASE_URL=postgresql+asyncpg://atlea:password@localhost:5432/atlea
 
 # 서버 포트
 PORT=8000
@@ -128,24 +127,24 @@ ollama serve
 ollama pull alibayram/Qwen3-30B-A3B-Instruct-2507:latest
 ```
 
-### 3-5. Redis 및 부가 서비스 시작
+### 3-5. PostgreSQL 및 부가 서비스 시작
 
 ```bash
 docker-compose up -d
 ```
 
-이 명령은 `docker-compose.yml`에 정의된 Redis, Document Service, ClamAV를 시작합니다.
+이 명령은 `docker-compose.yml`에 정의된 PostgreSQL, Document Service, ClamAV를 시작합니다.
 
-Docker 없이 Redis만 사용하려면:
+Docker 없이 PostgreSQL만 사용하려면:
 
 ```bash
 # macOS
-brew install redis
-brew services start redis
+brew install postgresql@17
+brew services start postgresql@17
 
 # Linux
-sudo apt-get install redis-server
-sudo systemctl start redis-server
+sudo apt-get install postgresql-17
+sudo systemctl start postgresql
 ```
 
 ### 3-6. 서버 실행
@@ -172,7 +171,7 @@ sudo systemctl start redis-server
 | 소개 페이지 | http://localhost:8000/landing.html | 제품 소개 |
 | API 문서 | http://localhost:8000/docs | Swagger UI |
 | 건강 상태 | http://localhost:8000/health | 서버 상태 |
-| RedisInsight | http://localhost:8001 | Redis 관리 도구 |
+| PostgreSQL | localhost:5432 | 데이터베이스 |
 
 ---
 
@@ -275,8 +274,8 @@ cp .env.example .env
 # 보안 키 (반드시 변경!)
 JWT_SECRET_KEY=여기에_python3으로_생성한_키
 
-# Redis 비밀번호 설정
-REDIS_PASSWORD=강력한_랜덤_비밀번호
+# PostgreSQL 비밀번호 설정
+POSTGRES_PASSWORD=강력한_랜덤_비밀번호
 
 # CORS 설정 (실제 도메인으로 변경)
 CORS_ORIGINS=https://chatbot.example.com
@@ -288,12 +287,58 @@ LOG_LEVEL=warning
 OLLAMA_BASE_URL=http://host.docker.internal:11434
 ```
 
-### 5-3. Nginx 도메인 설정
+### 5-3. Nginx 리버스 프록시 설정
 
 `nginx/nginx.conf`에서 도메인 이름을 변경합니다:
 
 ```nginx
 server_name chatbot.example.com;   # 실제 도메인으로 변경
+```
+
+Docker 없이 Nginx를 직접 설정하는 경우 (`/etc/nginx/sites-available/chatbot`):
+
+```nginx
+upstream chatbot {
+    server 127.0.0.1:8000;
+}
+
+server {
+    listen 80;
+    server_name yourdomain.com;
+    return 301 https://$server_name$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name yourdomain.com;
+
+    ssl_certificate /etc/letsencrypt/live/yourdomain.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/yourdomain.com/privkey.pem;
+
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+
+    # Rate limiting (추가 보호)
+    limit_req_zone $binary_remote_addr zone=chatbot_limit:10m rate=10r/s;
+    limit_req zone=chatbot_limit burst=20 nodelay;
+
+    client_max_body_size 100M;
+
+    location / {
+        proxy_pass http://chatbot;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 300s;
+        proxy_connect_timeout 75s;
+    }
+
+    location /static/ {
+        alias /path/to/chatbot_redis/static/;
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+}
 ```
 
 ### 5-4. 서비스 시작
@@ -302,7 +347,7 @@ server_name chatbot.example.com;   # 실제 도메인으로 변경
 # 기본 실행
 docker-compose -f docker-compose.production.yml up -d
 
-# 모니터링 포함 실행 (Prometheus + Grafana + RedisInsight)
+# 모니터링 포함 실행 (Prometheus + Grafana)
 docker-compose -f docker-compose.production.yml --profile monitoring up -d
 ```
 
@@ -322,20 +367,101 @@ curl https://chatbot.example.com/api/status
 # Ubuntu/Debian
 sudo ufw allow 80/tcp     # HTTP → HTTPS 리다이렉트
 sudo ufw allow 443/tcp    # HTTPS
-sudo ufw deny 6379/tcp    # Redis 외부 접근 차단
+sudo ufw deny 5432/tcp    # PostgreSQL 외부 접근 차단
 sudo ufw deny 8081/tcp    # Document Service 외부 접근 차단
 ```
 
 ### 5-7. 프로덕션 보안 체크리스트
 
 - [ ] `JWT_SECRET_KEY`를 강력한 랜덤 값으로 변경
-- [ ] `REDIS_PASSWORD` 설정
+- [ ] `POSTGRES_PASSWORD` 설정
 - [ ] `CORS_ORIGINS`에 실제 도메인만 명시 (`*` 사용 금지)
 - [ ] SSL 인증서 설치 및 자동 갱신 설정
-- [ ] 방화벽으로 내부 포트 차단 (6379, 8081)
+- [ ] 방화벽으로 내부 포트 차단 (5432, 8081)
 - [ ] `ADMIN_DEFAULT_PASSWORD` 강력한 비밀번호 설정
 - [ ] `RATE_LIMIT_ENABLED=true` 확인
 - [ ] Docker 메모리 제한 설정 확인
+- [ ] 2FA 강제 적용 활성화 (`config:totp_enabled=true`)
+- [ ] 로그인 CAPTCHA 활성화 (`config:captcha_login_enabled=true`)
+- [ ] 회원가입 CAPTCHA 활성화 (`config:captcha_register_enabled=true`)
+- [ ] 감사 로그 보관 기간 확인 (기본 90일)
+- [ ] Brute Force 방어 설정 확인 (5회 실패 → 15분 잠금)
+
+### 5-8. systemd 서비스 등록 (Linux)
+
+Docker 없이 직접 실행하는 경우 systemd 서비스로 등록합니다.
+
+**챗봇 서비스** (`/etc/systemd/system/chatbot.service`):
+
+```ini
+[Unit]
+Description=ATLEA Service
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/path/to/chatbot_redis
+Environment="PATH=/path/to/venv/bin"
+EnvironmentFile=/path/to/chatbot_redis/.env
+ExecStart=/path/to/venv/bin/uvicorn src.web_server:app --host 0.0.0.0 --port 8000 --workers 4
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+**문서 처리 서비스** (`/etc/systemd/system/document-service.service`):
+
+```ini
+[Unit]
+Description=ATLEA Document Processing Service (Java)
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/path/to/chatbot_redis/document-service
+ExecStart=/usr/bin/java -jar build/libs/document-service.jar --server.port=8081
+Restart=always
+RestartSec=10
+Environment=JAVA_OPTS=-Xmx2g
+
+[Install]
+WantedBy=multi-user.target
+```
+
+서비스 활성화:
+
+```bash
+sudo systemctl enable chatbot document-service
+sudo systemctl start chatbot document-service
+sudo systemctl status chatbot document-service
+```
+
+### 5-9. 성능 최적화
+
+**Worker 수 조정** (CPU 코어 수에 따라):
+
+```bash
+nproc                    # CPU 코어 수 확인
+# Worker 수 = (2 x CPU 코어) + 1
+# 2코어 → 4 workers, 4코어 → 8 workers
+```
+
+**DB 연결 풀** (`.env`):
+
+```bash
+DB_POOL_SIZE=20  # Worker당 5-10개 권장
+```
+
+**타임아웃 설정** (`.env`):
+
+```bash
+REQUEST_TIMEOUT=300        # 요청 타임아웃 (초)
+KEEPALIVE_TIMEOUT=5        # Keep-alive 타임아웃 (초)
+```
 
 ---
 
@@ -375,8 +501,8 @@ GPU 전용 `.env` 설정:
 # GPU용 LLM 모델
 LLM_MODEL=Qwen/Qwen2.5-7B-Instruct
 
-# Redis 비밀번호
-REDIS_PASSWORD=강력한_비밀번호
+# PostgreSQL 비밀번호
+POSTGRES_PASSWORD=강력한_비밀번호
 
 # JWT 키
 JWT_SECRET_KEY=자동_생성_키
@@ -515,7 +641,7 @@ CLAMAV_PORT=3310
 | 변수 | 설명 | 기본값 |
 |------|------|--------|
 | `JWT_SECRET_KEY` | JWT 토큰 서명 키 (32자 이상) | 없음 (반드시 설정) |
-| `REDIS_HOST` | Redis 호스트 | localhost |
+| `DATABASE_URL` | PostgreSQL 연결 URL | postgresql+asyncpg://... |
 | `PORT` | 서버 포트 | 8000 |
 | `LLM_MODEL` | LLM 모델 경로 | Qwen3-30B-A3B-4bit |
 | `EMBEDDING_MODEL` | 임베딩 모델 경로 | nlpai-lab/KURE-v1 |
@@ -525,7 +651,7 @@ CLAMAV_PORT=3310
 | 변수 | 설명 | 프로덕션 권장값 |
 |------|------|----------------|
 | `JWT_SECRET_KEY` | JWT 서명 키 | `python3 -c 'import secrets; print(secrets.token_urlsafe(32))'` |
-| `REDIS_PASSWORD` | Redis 인증 | 반드시 설정 |
+| `POSTGRES_PASSWORD` | PostgreSQL 인증 | 반드시 설정 |
 | `CORS_ORIGINS` | 허용 도메인 | 실제 도메인만 명시 |
 | `RATE_LIMIT_ENABLED` | API 속도 제한 | true |
 | `ADMIN_DEFAULT_PASSWORD` | 관리자 비밀번호 | 미설정 시 자동 생성 |
@@ -594,10 +720,8 @@ openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
 BACKUP_DIR="./backups/$(date +%Y%m%d_%H%M%S)"
 mkdir -p "$BACKUP_DIR"
 
-# 1. Redis 데이터 백업
-docker exec chatbot_redis redis-cli BGSAVE
-sleep 5
-docker cp chatbot_redis:/data/dump.rdb "$BACKUP_DIR/redis_dump.rdb"
+# 1. PostgreSQL 데이터 백업
+docker exec postgres pg_dump -U atlea atlea > "$BACKUP_DIR/pg_dump.sql"
 
 # 2. 업로드된 문서 백업
 cp -r ./data "$BACKUP_DIR/data"
@@ -626,11 +750,10 @@ docker-compose -f docker-compose.full.yml stop
 cp -r "$RESTORE_DIR"/*/data/* ./data/
 cp "$RESTORE_DIR"/*/.env ./.env
 
-# 4. Redis 데이터 복원
-docker-compose -f docker-compose.full.yml up -d redis
+# 4. PostgreSQL 데이터 복원
+docker-compose -f docker-compose.full.yml up -d postgres
 sleep 5
-docker cp "$RESTORE_DIR"/*/redis_dump.rdb chatbot_redis:/data/dump.rdb
-docker-compose -f docker-compose.full.yml restart redis
+docker exec -i postgres psql -U atlea atlea < "$RESTORE_DIR"/*/pg_dump.sql
 
 # 5. 전체 서비스 시작
 docker-compose -f docker-compose.full.yml up -d
@@ -679,7 +802,6 @@ docker-compose -f docker-compose.production.yml --profile monitoring up -d
 |--------|-----|----------|
 | Prometheus | http://localhost:9090 | - |
 | Grafana | http://localhost:3000 | admin / admin |
-| RedisInsight | http://localhost:8001 | - |
 
 ---
 
@@ -761,16 +883,16 @@ docker-compose -f docker-compose.full.yml up -d --build
 docker-compose -f docker-compose.full.yml logs chatbot-app
 
 # 주요 원인:
-# 1. Redis 연결 실패 → Redis 먼저 시작 확인
+# 1. PostgreSQL 연결 실패 → PostgreSQL 먼저 시작 확인
 # 2. 포트 충돌 → lsof -i :8000
 # 3. 메모리 부족 → docker stats
 ```
 
-### Redis 연결 실패
+### PostgreSQL 연결 실패
 
 ```bash
-docker-compose -f docker-compose.full.yml exec redis redis-cli ping
-# PONG 응답이 와야 정상
+docker-compose -f docker-compose.full.yml exec postgres psql -U atlea -c "SELECT 1"
+# 정상 응답이 와야 합니다
 ```
 
 ### 모델 로딩 실패
@@ -837,8 +959,7 @@ sudo certbot renew
 | 80 | Nginx HTTP | 프로덕션 |
 | 443 | Nginx HTTPS | 프로덕션 |
 | 8000 | 챗봇 웹 UI / API | 전체 |
-| 6379 | Redis | 전체 (프로덕션: 외부 차단) |
-| 8001 | RedisInsight | 전체 |
+| 5432 | PostgreSQL | 전체 (프로덕션: 외부 차단) |
 | 8081 | Document Service | 전체 (프로덕션: 외부 차단) |
 | 3310 | ClamAV | 전체 |
 | 8888 | SearXNG | 선택 |

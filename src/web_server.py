@@ -26,7 +26,7 @@ from .middleware.exception_handlers import register_exception_handlers
 from .routers import (
     auth, admin, organizations, documents, cache, conversations,
     feedback, settings, groups, audit, models, prompts, query,
-    redis_backup, questions, tts, security, persona
+    db_backup, questions, tts, security, persona
 )
 from .routers import metrics as metrics_router
 from .routers import static_files, validation, system, search, conversion, websocket_alerts
@@ -270,7 +270,7 @@ app.include_router(metrics_router.router)
 app.include_router(prompts.router)
 app.include_router(persona.router)
 app.include_router(query.router)
-app.include_router(redis_backup.router)
+app.include_router(db_backup.router)
 app.include_router(questions.router)
 app.include_router(tts.router)
 app.include_router(security.router)

@@ -31,6 +31,88 @@
 
     <!-- Auth utilities -->
     <script src="/static/auth.js?v=1"></script>
+
+    <style>
+        .confirm-overlay {
+            display: none;
+            position: fixed; inset: 0;
+            background: rgba(0,0,0,0.45);
+            z-index: 10000;
+            justify-content: center; align-items: center;
+        }
+        .confirm-overlay.active { display: flex; }
+        .confirm-dialog {
+            background: var(--bg-color);
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            max-width: 400px; width: 90%;
+            overflow: hidden;
+            animation: confirmSlideIn 0.2s ease-out;
+        }
+        @keyframes confirmSlideIn {
+            from { opacity: 0; transform: translateY(-20px) scale(0.95); }
+            to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        .confirm-body {
+            padding: 32px 28px 20px;
+            text-align: center;
+        }
+        .confirm-icon {
+            font-size: 2.8rem;
+            margin-bottom: 12px;
+            line-height: 1.2;
+        }
+        .confirm-title {
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: var(--text-color);
+            margin: 0 0 8px;
+        }
+        .confirm-message {
+            font-size: 0.95rem;
+            color: var(--text-light);
+            line-height: 1.6;
+            margin: 0;
+        }
+        .confirm-footer {
+            display: flex; gap: 8px;
+            justify-content: center;
+            padding: 12px 28px 24px;
+        }
+        .confirm-btn {
+            padding: 10px 28px;
+            border-radius: 10px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            min-width: 90px;
+            border: none;
+        }
+        .confirm-btn-cancel {
+            background: var(--border-color);
+            color: var(--text-color);
+        }
+        .confirm-btn-cancel:hover {
+            filter: brightness(0.92);
+        }
+        .confirm-btn-ok {
+            background: var(--primary-color);
+            color: white;
+        }
+        .confirm-btn-ok:hover {
+            background: var(--primary-hover);
+            transform: translateY(-1px);
+            box-shadow: var(--shadow-hover);
+        }
+        .confirm-btn-ok.danger {
+            background: #ef4444;
+        }
+        .confirm-btn-ok.danger:hover {
+            background: #dc2626;
+            box-shadow: 0 4px 12px rgba(239,68,68,0.3);
+        }
+    </style>
 </head>
 <body>
     <div class="profile-container">
@@ -738,9 +820,15 @@
                 return;
             }
 
-            if (!confirm('비밀번호를 변경하면 모든 세션에서 로그아웃됩니다. 계속하시겠습니까?')) {
-                return;
-            }
+            const pwConfirmed = await showConfirmModal({
+                title: '비밀번호 변경',
+                message: '비밀번호를 변경하면 모든 세션에서 로그아웃됩니다.\n계속하시겠습니까?',
+                icon: '🔑',
+                confirmText: '변경',
+                cancelText: '취소',
+                confirmClass: 'danger'
+            });
+            if (!pwConfirmed) return;
 
             try {
                 await Auth.changePassword(oldPassword, newPassword);
@@ -758,7 +846,14 @@
 
         // 로그아웃
         document.getElementById('logoutBtn').addEventListener('click', async () => {
-            if (confirm('로그아웃하시겠습니까?')) {
+            const confirmed = await showConfirmModal({
+                title: '로그아웃',
+                message: '로그아웃하시겠습니까?',
+                icon: '👋',
+                confirmText: '로그아웃',
+                cancelText: '취소'
+            });
+            if (confirmed) {
                 await Auth.logout();
             }
         });
@@ -768,9 +863,15 @@
 
         // 모든 세션 종료
         document.getElementById('revokeAllSessionsBtn').addEventListener('click', async () => {
-            if (!confirm('모든 세션을 종료하면 자동으로 로그아웃됩니다. 계속하시겠습니까?')) {
-                return;
-            }
+            const sessConfirmed = await showConfirmModal({
+                title: '모든 세션 종료',
+                message: '모든 세션을 종료하면 자동으로 로그아웃됩니다.\n계속하시겠습니까?',
+                icon: '⚠️',
+                confirmText: '종료',
+                cancelText: '취소',
+                confirmClass: 'danger'
+            });
+            if (!sessConfirmed) return;
 
             try {
                 const result = await Auth.revokeAllSessions();
@@ -800,6 +901,47 @@
             // 전역 함수로 노출 (인라인 핸들러에서 사용)
             window.revokeSession = revokeSession;
         }); // DOMContentLoaded 이벤트 리스너 종료
+    </script>
+    <!-- Confirm Modal -->
+    <div class="confirm-overlay" id="confirmOverlay">
+        <div class="confirm-dialog">
+            <div class="confirm-body">
+                <div class="confirm-icon" id="confirmIcon">❓</div>
+                <h3 class="confirm-title" id="confirmTitle">확인</h3>
+                <p class="confirm-message" id="confirmMessage"></p>
+            </div>
+            <div class="confirm-footer">
+                <button class="confirm-btn confirm-btn-cancel" id="confirmCancel">취소</button>
+                <button class="confirm-btn confirm-btn-ok" id="confirmOk">확인</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    function showConfirmModal({ title = '확인', message = '', icon = '❓', confirmText = '확인', cancelText = '취소', confirmClass = '' } = {}) {
+        return new Promise((resolve) => {
+            const overlay = document.getElementById('confirmOverlay');
+            const okBtn = document.getElementById('confirmOk');
+            const cancelBtn = document.getElementById('confirmCancel');
+            document.getElementById('confirmIcon').textContent = icon;
+            document.getElementById('confirmTitle').textContent = title;
+            document.getElementById('confirmMessage').textContent = message;
+            okBtn.textContent = confirmText;
+            cancelBtn.textContent = cancelText;
+            okBtn.className = 'confirm-btn confirm-btn-ok' + (confirmClass === 'danger' ? ' danger' : '');
+            overlay.classList.add('active');
+            function cleanup(result) {
+                overlay.classList.remove('active');
+                okBtn.removeEventListener('click', onOk);
+                cancelBtn.removeEventListener('click', onCancel);
+                resolve(result);
+            }
+            function onOk() { cleanup(true); }
+            function onCancel() { cleanup(false); }
+            okBtn.addEventListener('click', onOk);
+            cancelBtn.addEventListener('click', onCancel);
+        });
+    }
     </script>
 </body>
 </html>

@@ -177,7 +177,18 @@ async def _generate_answer(
 
 ## 🧪 Testing
 
-See `CONVERSATION_MEMORY_TEST_PLAN.md` for comprehensive test scenarios.
+### Test Scenarios
+
+| # | 시나리오 | 목적 |
+|---|---------|------|
+| 1 | 기본 대화 컨텍스트 | 대명사 "its" 등으로 이전 문맥 참조 확인 |
+| 2 | 세션 격리 | 서로 다른 session_id 간 메모리 공유 없음 확인 |
+| 3 | 긴 대화 | 10개 메시지 초과 시 오래된 컨텍스트 제거 확인 |
+| 4 | 스트리밍 모드 | `/api/query/stream`에서도 대화 메모리 동작 |
+| 5 | 빈 세션 | session_id 없이도 오류 없이 동작 |
+| 6 | 성능 | 히스토리 추가 시 응답 시간 증가 <10% |
+| 7 | Redis 지속성 | 서버 재시작 후에도 대화 유지 |
+| 8 | 동시 사용자 | 여러 세션 동시 사용 시 간섭 없음 |
 
 ### Quick Test
 ```bash
@@ -273,6 +284,29 @@ redis-cli LLEN "conversation:YOUR_SESSION_ID:messages"
 - Implement adaptive history length
 - Use models with larger context windows
 
+## 🔀 Session Isolation
+
+```
+Redis Storage:
+  conversation:session-A:messages    → User Alice (Redis 관련 대화)
+  conversation:session-B:messages    → User Bob (Python 관련 대화)
+  conversation:session-C:messages    → User Alice (다른 주제 대화)
+
+✅ Session A와 B는 완전 격리
+✅ Alice는 여러 세션 동시 사용 가능 (A, C)
+✅ 세션 간 교차 오염 없음
+```
+
+## 🎯 Memory Window Behavior
+
+```
+Messages in Redis (limit=10):
+ M1:  Q: "What is Python?"          ← 10개 초과 시 LLM 컨텍스트에서 제외
+ M2:  A: "Python is..."             ← 가장 오래된 유지 메시지
+ M3-M10: ...                        ← 히스토리로 전달
+ M11: Q: "Current question [+RAG]"  ← 현재 질문 + RAG 컨텍스트
+```
+
 ## 📈 Future Enhancements
 
 ### Phase 2 (Planned)
@@ -300,8 +334,6 @@ redis-cli LLEN "conversation:YOUR_SESSION_ID:messages"
 
 ## 📚 References
 
-- Plan document: `/plan_conversation_memory.md`
-- Test plan: `CONVERSATION_MEMORY_TEST_PLAN.md`
 - Code files:
   - `src/routers/query.py`
   - `src/hybrid_rag.py`

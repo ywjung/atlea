@@ -55,9 +55,9 @@ ATLEA는 업로드된 문서에서 정보를 검색하고, AI를 활용하여 �
    │      │      │      │
    ▼      ▼      ▼      ▼
 ┌──────┐┌──────┐┌──────┐┌──────────────┐
-│Redis ││Java  ││Searx ││  Ollama      │
-│Vector││문서  ││NG +  ││  LLM 서버    │
-│  DB  ││서비스││Crawl ││  (선택사항)   │
+│Postgr││Java  ││Searx ││  Ollama      │
+│eSQL  ││문서  ││NG +  ││  LLM 서버    │
+│pgvec ││서비스││Crawl ││  (선택사항)   │
 │      ││      ││4AI   ││              │
 └──────┘└──────┘└──────┘└──────────────┘
 ```
@@ -100,8 +100,7 @@ ATLEA는 업로드된 문서에서 정보를 검색하고, AI를 활용하여 �
 | 포트 | 서비스 | 용도 |
 |------|--------|------|
 | 8000 | ATLEA 애플리케이션 | 웹 UI 및 API |
-| 6379 | Redis | Vector DB |
-| 8001 | RedisInsight | Redis 관리 UI (선택) |
+| 5432 | PostgreSQL | Vector DB, 캐시, 세션 |
 | 8081 | 문서 처리 서비스 | 문서 텍스트 추출 |
 | 8082 | 관리 포트 | 메트릭 및 헬스체크 |
 | 8888 | SearXNG | 메타 검색 엔진 (선택) |
@@ -509,24 +508,23 @@ python3 download_models.py
 ls -R model/
 ```
 
-#### 문제 3: Redis 연결 오류
+#### 문제 3: PostgreSQL 연결 오류
 
 **증상**:
 ```
-Failed to connect to Redis
+Failed to connect to PostgreSQL
 ```
 
 **해결 방법**:
 ```bash
-# Redis 컨테이너 상태 확인
-docker ps | grep redis
+# PostgreSQL 컨테이너 상태 확인
+docker ps | grep postgres
 
-# Redis가 실행 중이 아니면 시작
-docker-compose -f docker-compose.full.yml up -d redis
+# PostgreSQL이 실행 중이 아니면 시작
+docker-compose -f docker-compose.full.yml up -d postgres
 
-# Redis 연결 테스트
-docker exec -it rag_chatbot_redis redis-cli ping
-# 응답: PONG
+# PostgreSQL 연결 테스트
+docker exec -it postgres psql -U atlea -c "SELECT 1"
 ```
 
 #### 문제 4: 문서 업로드 실패
@@ -598,17 +596,14 @@ docker cp rag_chatbot_app:/app/logs/app.log ./
 
 ### 정기 백업
 
-#### Redis 데이터 백업
+#### PostgreSQL 데이터 백업
 
 ```bash
 # 수동 백업
-docker exec rag_chatbot_redis redis-cli SAVE
+docker exec postgres pg_dump -U atlea atlea > ./backups/pg_dump_$(date +%Y%m%d).sql
 
-# 백업 파일 위치 확인
-docker exec rag_chatbot_redis ls -la /data/
-
-# 백업 파일 복사
-docker cp rag_chatbot_redis:/data/dump.rdb ./backups/redis_$(date +%Y%m%d).rdb
+# 백업 파일 확인
+ls -la ./backups/pg_dump_*.sql
 ```
 
 #### 문서 파일 백업
@@ -640,9 +635,8 @@ DATE=$(date +%Y%m%d_%H%M%S)
 # 디렉토리 생성
 mkdir -p $BACKUP_DIR
 
-# Redis 백업
-docker exec rag_chatbot_redis redis-cli SAVE
-docker cp rag_chatbot_redis:/data/dump.rdb $BACKUP_DIR/redis_$DATE.rdb
+# PostgreSQL 백업
+docker exec postgres pg_dump -U atlea atlea > $BACKUP_DIR/pg_dump_$DATE.sql
 
 # 문서 백업
 tar -czf $BACKUP_DIR/data_$DATE.tar.gz data/
@@ -717,10 +711,10 @@ du -sh logs/
 
 ### 성능 최적화 팁
 
-1. **Redis 메모리 최적화**:
+1. **PostgreSQL 최적화**:
    ```bash
-   # Redis 메모리 사용량 확인
-   docker exec rag_chatbot_redis redis-cli INFO memory
+   # PostgreSQL 상태 확인
+   docker exec postgres psql -U atlea -c "SELECT pg_database_size('atlea');"
    ```
 
 2. **Docker 리소스 할당**:
@@ -813,8 +807,8 @@ sudo ufw enable
 프로덕션 환경에서는 모든 사용자에게 2FA를 강제 적용하는 것을 권장합니다.
 
 ```bash
-# 관리자 페이지에서 설정하거나, Redis에서 직접 설정
-docker exec rag_chatbot_redis redis-cli SET config:totp_enabled true
+# 관리자 페이지에서 설정하거나, PostgreSQL에서 직접 설정
+docker exec postgres psql -U atlea -c "INSERT INTO system_config (key, value) VALUES ('totp_enabled', 'true') ON CONFLICT (key) DO UPDATE SET value = 'true';"
 ```
 
 ### CAPTCHA 설정
@@ -822,24 +816,22 @@ docker exec rag_chatbot_redis redis-cli SET config:totp_enabled true
 봇 방지를 위해 로그인/회원가입에 CAPTCHA를 활성화합니다.
 
 ```bash
-# 관리자 페이지에서 설정하거나, Redis에서 직접 설정
-# 로그인 CAPTCHA 활성화
-docker exec rag_chatbot_redis redis-cli SET config:captcha_login_enabled true
-
-# 회원가입 CAPTCHA 활성화
-docker exec rag_chatbot_redis redis-cli SET config:captcha_register_enabled true
+# 관리자 페이지에서 설정 (권장)
+# 또는 PostgreSQL에서 직접 설정
+docker exec postgres psql -U atlea -c "INSERT INTO system_config (key, value) VALUES ('captcha_login_enabled', 'true') ON CONFLICT (key) DO UPDATE SET value = 'true';"
+docker exec postgres psql -U atlea -c "INSERT INTO system_config (key, value) VALUES ('captcha_register_enabled', 'true') ON CONFLICT (key) DO UPDATE SET value = 'true';"
 ```
 
 ### 데이터베이스 보안
 
 ```bash
-# Redis 비밀번호 설정
+# PostgreSQL 비밀번호 설정
 # docker-compose.full.yml에 추가:
 environment:
-  - REDIS_PASSWORD=your-strong-password
+  - POSTGRES_PASSWORD=your-strong-password
 
 # .env 파일에 비밀번호 추가
-echo "REDIS_PASSWORD=your-strong-password" >> .env
+echo "POSTGRES_PASSWORD=your-strong-password" >> .env
 ```
 
 ---
@@ -853,15 +845,14 @@ echo "REDIS_PASSWORD=your-strong-password" >> .env
 - **답변 캐싱**: 유사도 95% 이상 질문
 - **Java 문서 추출**: Caffeine 캐시 500개 항목
 
-### Redis 최적화
+### PostgreSQL 최적화
 
 ```bash
-# Redis 설정 확인
-docker exec rag_chatbot_redis redis-cli CONFIG GET maxmemory
+# PostgreSQL 설정 확인
+docker exec postgres psql -U atlea -c "SHOW shared_buffers;"
 
-# 최대 메모리 설정 (예: 4GB)
-docker exec rag_chatbot_redis redis-cli CONFIG SET maxmemory 4gb
-docker exec rag_chatbot_redis redis-cli CONFIG SET maxmemory-policy allkeys-lru
+# 연결 풀 상태 확인
+docker exec postgres psql -U atlea -c "SELECT count(*) FROM pg_stat_activity;"
 ```
 
 ### 모델 선택 가이드
@@ -898,11 +889,9 @@ chatbot_redis/
 ### B. 환경 변수 전체 목록
 
 ```bash
-# Redis
-REDIS_HOST=redis
-REDIS_PORT=6379
-REDIS_DB=0
-REDIS_PASSWORD=                # 선택사항
+# PostgreSQL
+DATABASE_URL=postgresql+asyncpg://atlea:password@postgres:5432/atlea
+POSTGRES_PASSWORD=             # 프로덕션에서 반드시 설정
 
 # 문서 서비스
 DOCUMENT_SERVICE_URL=http://document-service:8081
@@ -949,8 +938,8 @@ RATE_LIMIT_BURST=10
 CORS_ORIGINS=http://localhost:8000     # 프로덕션에서는 실제 도메인으로 변경
 ```
 
-> **참고**: 2FA, CAPTCHA, TTS, 감사 로그, Brute Force 방어 등의 보안/기능 설정은 관리자 웹 UI 또는 Redis 설정 키로 관리됩니다.
-> 주요 Redis 설정 키: `config:totp_enabled`, `config:captcha_login_enabled`, `config:captcha_register_enabled`, `config:tts`, `config:bf_*`
+> **참고**: 2FA, CAPTCHA, TTS, 감사 로그, Brute Force 방어 등의 보안/기능 설정은 관리자 웹 UI 또는 PostgreSQL `system_config` 테이블로 관리됩니다.
+> 주요 설정 키: `totp_enabled`, `captcha_login_enabled`, `captcha_register_enabled`, `tts`, `bf_*`
 
 ### C. 유용한 명령어 모음
 
@@ -971,9 +960,9 @@ docker-compose -f docker-compose.full.yml restart chatbot-app
 docker-compose -f docker-compose.full.yml down
 docker-compose -f docker-compose.full.yml up -d
 
-# Redis 명령
-docker exec -it rag_chatbot_redis redis-cli
-docker exec rag_chatbot_redis redis-cli KEYS "*"
+# PostgreSQL 명령
+docker exec -it postgres psql -U atlea
+docker exec postgres psql -U atlea -c "\dt"
 
 # 디스크 정리
 docker system prune -a

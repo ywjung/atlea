@@ -25,9 +25,12 @@ dependencies = [
     "langchain-community>=0.3.6",
     # Web Search
     "tavily-python>=0.3.0",
-    # Redis
-    "redis>=5.0.0",
-    "redis-om>=0.2.1",
+    # PostgreSQL & ORM
+    "sqlalchemy[asyncio]>=2.0.36",
+    "asyncpg>=0.30.0",
+    "psycopg2-binary>=2.9.9",
+    "alembic>=1.14.0",
+    "greenlet>=3.0.0",
     # Utilities
     "python-dotenv>=1.0.0",
     "pydantic>=2.7.4",

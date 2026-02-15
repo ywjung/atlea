@@ -13,9 +13,11 @@ Admin privileges required for all endpoints.
 from fastapi import APIRouter, HTTPException, Request
 from pathlib import Path
 import os
+import json
 from loguru import logger
 
 from ..utils.error_handling import get_safe_error_message
+from ..services.config_service import config_get_sync, config_set_sync
 
 # Create router with prefix and tags
 router = APIRouter(prefix="/api/admin", tags=["Admin", "Models"])
@@ -33,7 +35,7 @@ def inject_dependencies(cache_mgr, reload_callback=None):
     Inject dependencies from main application
 
     Args:
-        cache_mgr: CacheManager instance for Redis access
+        cache_mgr: CacheManager instance
         reload_callback: Callback function to reload models in main app
     """
     global cache_manager, model_reload_callback
@@ -60,37 +62,36 @@ async def get_model_backend(request: Request):
         if not cache_manager:
             raise HTTPException(status_code=500, detail="Cache manager not initialized")
 
-        redis_client = cache_manager.redis
-        require_admin(request, redis_client)
+        require_admin(request)
 
-        # Redis에서 모델 설정 읽기 (멀티 워커 환경에서 일관성 보장)
-        redis_config = redis_client.hgetall("config:model")
+        # PostgreSQL에서 모델 설정 읽기 (멀티 워커 환경에서 일관성 보장)
+        pg_config_str = config_get_sync("config:model")
 
-        if redis_config:
-            # Redis에 설정이 있으면 사용
-            def get_redis_value(key, default=""):
-                val = redis_config.get(key.encode()) or redis_config.get(key)
-                if val is None:
-                    return default
-                return val.decode() if isinstance(val, bytes) else val
+        if pg_config_str:
+            # PG에 설정이 있으면 사용
+            pg_config = json.loads(pg_config_str)
 
-            use_ollama = get_redis_value("use_ollama", "false").lower() == "true"
+            def get_pg_value(key, default=""):
+                val = pg_config.get(key)
+                return val if val is not None else default
+
+            use_ollama = get_pg_value("use_ollama", "false").lower() == "true"
             backend = "ollama" if use_ollama else "local"
 
             config = {
                 "backend": backend,
                 "ollama": {
-                    "base_url": get_redis_value("ollama_base_url", os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")),
-                    "llm_model": get_redis_value("ollama_llm_model", os.getenv("OLLAMA_LLM_MODEL", "")),
-                    "embedding_model": get_redis_value("ollama_embedding_model", os.getenv("OLLAMA_EMBEDDING_MODEL", ""))
+                    "base_url": get_pg_value("ollama_base_url", os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")),
+                    "llm_model": get_pg_value("ollama_llm_model", os.getenv("OLLAMA_LLM_MODEL", "")),
+                    "embedding_model": get_pg_value("ollama_embedding_model", os.getenv("OLLAMA_EMBEDDING_MODEL", ""))
                 },
                 "local": {
-                    "llm_model": get_redis_value("local_llm_model", os.getenv("LLM_MODEL", "mlx-community/Qwen3-30B-A3B-4bit")),
-                    "embedding_model": get_redis_value("local_embedding_model", os.getenv("EMBEDDING_MODEL", "nlpai-lab/KURE-v1"))
+                    "llm_model": get_pg_value("local_llm_model", os.getenv("LLM_MODEL", "mlx-community/Qwen3-30B-A3B-4bit")),
+                    "embedding_model": get_pg_value("local_embedding_model", os.getenv("EMBEDDING_MODEL", "nlpai-lab/KURE-v1"))
                 }
             }
         else:
-            # Redis에 설정이 없으면 환경변수에서 읽기 (기존 동작)
+            # PG에 설정이 없으면 환경변수에서 읽기 (기존 동작)
             use_ollama = os.getenv("USE_OLLAMA", "false").lower() == "true"
             backend = "ollama" if use_ollama else "local"
 
@@ -134,8 +135,7 @@ async def get_model_list(request: Request, backend: str = "ollama"):
         if not cache_manager:
             raise HTTPException(status_code=500, detail="Cache manager not initialized")
 
-        redis_client = cache_manager.redis
-        require_admin(request, redis_client)
+        require_admin(request)
 
         if backend == "ollama":
             # Ollama 모델 목록 가져오기
@@ -228,8 +228,7 @@ async def update_model_config(request: Request):
         if not cache_manager:
             raise HTTPException(status_code=500, detail="Cache manager not initialized")
 
-        redis_client = cache_manager.redis
-        require_admin(request, redis_client)
+        require_admin(request)
 
         data = await request.json()
         backend = data.get("backend")
@@ -298,24 +297,24 @@ async def update_model_config(request: Request):
         with open(env_path, 'w', encoding='utf-8') as f:
             f.writelines(env_lines)
 
-        # Redis에 모델 설정 저장 (멀티 워커 환경에서 일관성 보장)
-        redis_config = {
+        # PG에 모델 설정 저장 (멀티 워커 환경에서 일관성 보장)
+        model_config = {
             "use_ollama": "true" if backend == "ollama" else "false",
             "ollama_base_url": os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
         }
         if backend == "ollama":
             if llm_model:
-                redis_config["ollama_llm_model"] = llm_model
+                model_config["ollama_llm_model"] = llm_model
             if embedding_model_name:
-                redis_config["ollama_embedding_model"] = embedding_model_name
+                model_config["ollama_embedding_model"] = embedding_model_name
         else:
             if llm_model:
-                redis_config["local_llm_model"] = llm_model
+                model_config["local_llm_model"] = llm_model
             if embedding_model_name:
-                redis_config["local_embedding_model"] = embedding_model_name
+                model_config["local_embedding_model"] = embedding_model_name
 
-        redis_client.hset("config:model", mapping=redis_config)
-        logger.info(f"Model configuration saved to Redis: {redis_config}")
+        config_set_sync("config:model", json.dumps(model_config), "json")
+        logger.info(f"Model configuration saved to PostgreSQL: {model_config}")
 
         logger.info(f"Model configuration updated: backend={backend}, llm={llm_model}, embedding={embedding_model_name}")
 

@@ -13,13 +13,17 @@ Admin privileges required for admin-specific endpoints.
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import json
 from loguru import logger
+
+from sqlalchemy import select, func, case
 
 from ..auth.middleware import get_current_active_user
 from ..routers.admin import require_admin
 from ..utils.error_handling import get_safe_error_message
+from ..database.connection import SyncSessionFactory
+from ..database.models.feedback import FeedbackEntry
 
 # Create router with prefix and tags
 router = APIRouter(prefix="/api", tags=["Feedback"])
@@ -40,7 +44,7 @@ def inject_dependencies(fb_analyzer, conv_manager, cache_mgr):
     Args:
         fb_analyzer: FeedbackAnalyzer instance for feedback analytics
         conv_manager: ConversationManager instance for conversation lookup
-        cache_mgr: CacheManager instance for Redis access
+        cache_mgr: CacheManager instance
     """
     global feedback_analyzer, conversation_manager, cache_manager
     feedback_analyzer = fb_analyzer
@@ -73,10 +77,10 @@ async def submit_feedback(
     답변 평가 피드백 제출 (로그인 필요)
 
     사용자가 챗봇 답변에 대해 👍/👎 피드백을 제공합니다.
-    Redis에 피드백을 저장하고 통계 데이터를 업데이트합니다.
+    피드백을 저장하고 통계 데이터를 업데이트합니다.
 
     Args:
-        request: FastAPI request object (for Redis access)
+        request: FastAPI request object
         feedback: FeedbackRequest with conversation_id, message_id, feedback_type
         current_user: Authenticated user (injected by dependency)
 
@@ -90,34 +94,23 @@ async def submit_feedback(
         HTTPException: 500 if cache manager not initialized or save fails
     """
     try:
-        if not cache_manager:
-            raise HTTPException(status_code=500, detail="Cache manager not initialized")
+        # 피드백을 PG에 저장
+        rating = 1 if feedback.feedback_type == "positive" else -1
 
-        redis = cache_manager.redis
-
-        # 피드백 데이터 구성
-        feedback_key = f"feedback:{feedback.conversation_id}:{feedback.message_id}"
-        feedback_data = {
-            "type": feedback.feedback_type,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "conversation_id": feedback.conversation_id,
-            "message_id": feedback.message_id
-        }
-
-        # Redis에 피드백 저장 (TTL: 90일)
-        redis.setex(
-            feedback_key,
-            90 * 24 * 60 * 60,  # 90 days
-            json.dumps(feedback_data)
-        )
-
-        # 통계용 ZSET에 추가 (타임스탬프를 스코어로 사용)
-        timestamp_score = datetime.now(timezone.utc).timestamp()
-        stats_key = f"feedback:stats:{feedback.feedback_type}"
-        redis.zadd(stats_key, {feedback_key: timestamp_score})
-
-        # 전체 피드백 카운트 증가
-        redis.incr(f"feedback:count:{feedback.feedback_type}")
+        with SyncSessionFactory() as db:
+            entry = FeedbackEntry(
+                query="",  # Will be filled from conversation if available
+                response="",
+                rating=rating,
+                user_id=current_user.get("user_id") or current_user.get("username"),
+                metadata_={
+                    "type": feedback.feedback_type,
+                    "conversation_id": feedback.conversation_id,
+                    "message_id": feedback.message_id,
+                },
+            )
+            db.add(entry)
+            db.commit()
 
         # 📊 FeedbackAnalyzer에 피드백 기록
         # 대화 기록에서 메시지 가져오기
@@ -186,7 +179,7 @@ async def get_feedback_stats(
     전체 피드백 수, 긍정/부정 비율, 최근 피드백 등을 제공합니다.
 
     Args:
-        request: FastAPI request object (for Redis access)
+        request: FastAPI request object
         user: Admin user (injected by require_admin dependency)
 
     Returns:
@@ -203,47 +196,48 @@ async def get_feedback_stats(
         HTTPException: 500 if cache manager not initialized or retrieval fails
     """
     try:
-        if not cache_manager:
-            raise HTTPException(status_code=500, detail="Cache manager not initialized")
+        with SyncSessionFactory() as db:
+            # 전체 카운트 조회
+            count_stmt = select(
+                func.count().label("total"),
+                func.sum(case((FeedbackEntry.rating > 0, 1), else_=0)).label("positive"),
+                func.sum(case((FeedbackEntry.rating <= 0, 1), else_=0)).label("negative"),
+            )
+            row = db.execute(count_stmt).one()
+            total_count = row.total or 0
+            positive_count = int(row.positive or 0)
+            negative_count = int(row.negative or 0)
 
-        redis = cache_manager.redis
+            # 긍정 비율 계산
+            positive_ratio = (positive_count / total_count * 100) if total_count > 0 else 0
 
-        # 전체 피드백 카운트 조회
-        positive_count = int(redis.get("feedback:count:positive") or 0)
-        negative_count = int(redis.get("feedback:count:negative") or 0)
-        total_count = positive_count + negative_count
+            # 최근 7일 피드백 조회
+            week_ago = datetime.now(timezone.utc) - timedelta(days=7)
+            recent_stmt = select(
+                func.sum(case((FeedbackEntry.rating > 0, 1), else_=0)).label("positive"),
+                func.sum(case((FeedbackEntry.rating <= 0, 1), else_=0)).label("negative"),
+            ).where(FeedbackEntry.created_at >= week_ago)
+            recent_row = db.execute(recent_stmt).one()
+            recent_positive = int(recent_row.positive or 0)
+            recent_negative = int(recent_row.negative or 0)
 
-        # 긍정 비율 계산
-        positive_ratio = (positive_count / total_count * 100) if total_count > 0 else 0
-
-        # 최근 7일 피드백 조회
-        week_ago = (datetime.now(timezone.utc).timestamp() - 7 * 24 * 60 * 60)
-        recent_positive = redis.zcount("feedback:stats:positive", week_ago, "+inf")
-        recent_negative = redis.zcount("feedback:stats:negative", week_ago, "+inf")
-
-        # 최근 피드백 목록 (최대 10개) - Pipeline으로 배치 조회 (N+1 방지)
-        recent_feedback_keys = []
-        recent_positive_keys = redis.zrevrange("feedback:stats:positive", 0, 4) or []
-        recent_negative_keys = redis.zrevrange("feedback:stats:negative", 0, 4) or []
-        recent_feedback_keys.extend(recent_positive_keys)
-        recent_feedback_keys.extend(recent_negative_keys)
+            # 최근 피드백 목록 (최대 10개)
+            recent_stmt = (
+                select(FeedbackEntry)
+                .order_by(FeedbackEntry.created_at.desc())
+                .limit(10)
+            )
+            recent_rows = db.execute(recent_stmt).scalars().all()
 
         recent_feedbacks = []
-        if recent_feedback_keys:
-            # Pipeline으로 모든 키를 한 번에 조회
-            pipe = redis.pipeline()
-            for key in recent_feedback_keys:
-                key_str = key.decode('utf-8') if isinstance(key, bytes) else key
-                pipe.get(key_str)
-            results = pipe.execute()
-
-            for feedback_data in results:
-                if feedback_data:
-                    recent_feedbacks.append(json.loads(feedback_data))
-
-        # 타임스탬프 기준으로 정렬
-        recent_feedbacks.sort(key=lambda x: x['timestamp'], reverse=True)
-        recent_feedbacks = recent_feedbacks[:10]
+        for fb in recent_rows:
+            meta = fb.metadata_ or {}
+            recent_feedbacks.append({
+                "type": meta.get("type", "positive" if fb.rating > 0 else "negative"),
+                "timestamp": fb.created_at.isoformat() if fb.created_at else "",
+                "conversation_id": meta.get("conversation_id", ""),
+                "message_id": meta.get("message_id", ""),
+            })
 
         stats = {
             "total_count": total_count,

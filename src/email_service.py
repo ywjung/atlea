@@ -5,11 +5,11 @@
 import smtplib
 import os
 import time
+import json
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from typing import Optional
 from loguru import logger
-from redis import Redis
 
 
 # SMTP 설정 캐시 (TTL 기반)
@@ -21,33 +21,30 @@ SMTP_SETTINGS_CACHE_TTL = 300  # 5분 캐시
 class EmailService:
     """이메일 전송 서비스"""
 
-    def __init__(self, redis_client: Optional[Redis] = None):
-        """SMTP 설정 로드 (Redis 우선, 환경 변수 대체)
+    def __init__(self):
+        """SMTP 설정 로드 (PostgreSQL 우선, 환경 변수 대체)
 
         Args:
-            redis_client: Redis 클라이언트 (선택적)
         """
-        self.redis = redis_client
         self._load_settings()
 
     def _load_settings(self):
-        """SMTP 설정 로드 (Redis > 환경 변수)"""
-        # Redis에서 설정 로드 시도
-        if self.redis:
-            try:
-                smtp_settings = self.redis.hgetall("smtp:settings")
-                if smtp_settings:
-                    # Redis에서 로드
-                    self.smtp_host = smtp_settings.get(b"host", b"smtp.gmail.com").decode()
-                    self.smtp_port = int(smtp_settings.get(b"port", b"587").decode())
-                    self.smtp_username = smtp_settings.get(b"username", b"").decode()
-                    self.smtp_password = smtp_settings.get(b"password", b"").decode()
-                    self.from_email = smtp_settings.get(b"from_email", self.smtp_username.encode()).decode()
-                    self.from_name = smtp_settings.get(b"from_name", b"AI Chatbot").decode()
-                    logger.info("SMTP 설정을 Redis에서 로드했습니다")
-                    return
-            except Exception as e:
-                logger.warning(f"Redis에서 SMTP 설정 로드 실패, 환경 변수 사용: {e}")
+        """SMTP 설정 로드 (PostgreSQL > 환경 변수)"""
+        try:
+            from .services.config_service import config_get_sync
+            smtp_json = config_get_sync("smtp:settings")
+            if smtp_json:
+                settings = json.loads(smtp_json)
+                self.smtp_host = settings.get("host", "smtp.gmail.com")
+                self.smtp_port = int(settings.get("port", 587))
+                self.smtp_username = settings.get("username", "")
+                self.smtp_password = settings.get("password", "")
+                self.from_email = settings.get("from_email", self.smtp_username)
+                self.from_name = settings.get("from_name", "AI Chatbot")
+                logger.info("SMTP 설정을 PostgreSQL에서 로드했습니다")
+                return
+        except Exception as e:
+            logger.warning(f"PostgreSQL에서 SMTP 설정 로드 실패, 환경 변수 사용: {e}")
 
         # 환경 변수에서 로드 (대체)
         self.smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")
@@ -170,37 +167,31 @@ class EmailService:
 _email_service = None
 
 
-def get_email_service(redis_client: Optional[Redis] = None) -> EmailService:
+def get_email_service() -> EmailService:
     """이메일 서비스 싱글톤 인스턴스 반환
 
     Args:
-        redis_client: Redis 클라이언트 (선택적)
 
     Returns:
         EmailService 인스턴스
     """
     global _email_service
     if _email_service is None:
-        _email_service = EmailService(redis_client)
-    elif redis_client and _email_service.redis is None:
-        _email_service.redis = redis_client
-        _email_service.reload_settings()
+        _email_service = EmailService()
     return _email_service
 
 
 def save_smtp_settings(
-    redis_client: Redis,
-    host: str,
-    port: int,
-    username: str,
-    password: str,
+    host: str = "",
+    port: int = 587,
+    username: str = "",
+    password: str = "",
     from_email: Optional[str] = None,
     from_name: Optional[str] = None
 ) -> bool:
-    """SMTP 설정을 Redis에 저장
+    """SMTP 설정을 PostgreSQL에 저장
 
     Args:
-        redis_client: Redis 클라이언트
         host: SMTP 호스트
         port: SMTP 포트
         username: SMTP 사용자명
@@ -212,6 +203,7 @@ def save_smtp_settings(
         저장 성공 여부
     """
     try:
+        from .services.config_service import config_set_sync
         settings = {
             "host": host,
             "port": str(port),
@@ -220,8 +212,8 @@ def save_smtp_settings(
             "from_email": from_email or username,
             "from_name": from_name or "AI Chatbot"
         }
-        redis_client.hset("smtp:settings", mapping=settings)
-        logger.info("SMTP 설정이 Redis에 저장되었습니다")
+        config_set_sync("smtp:settings", json.dumps(settings))
+        logger.info("SMTP 설정이 PostgreSQL에 저장되었습니다")
 
         # 캐시 무효화
         invalidate_smtp_settings_cache()
@@ -244,11 +236,10 @@ def invalidate_smtp_settings_cache():
     _smtp_settings_cache_time = 0
 
 
-def get_smtp_settings(redis_client: Redis) -> dict:
-    """Redis에서 SMTP 설정 조회 (캐시 사용)
+def get_smtp_settings() -> dict:
+    """PostgreSQL에서 SMTP 설정 조회 (캐시 사용)
 
     Args:
-        redis_client: Redis 클라이언트
 
     Returns:
         SMTP 설정 딕셔너리
@@ -261,15 +252,17 @@ def get_smtp_settings(redis_client: Redis) -> dict:
         return _smtp_settings_cache
 
     try:
-        smtp_settings = redis_client.hgetall("smtp:settings")
-        if smtp_settings:
+        from .services.config_service import config_get_sync
+        smtp_json = config_get_sync("smtp:settings")
+        if smtp_json:
+            settings = json.loads(smtp_json)
             result = {
-                "host": smtp_settings.get(b"host", b"").decode(),
-                "port": int(smtp_settings.get(b"port", b"587").decode()),
-                "username": smtp_settings.get(b"username", b"").decode(),
-                "password": smtp_settings.get(b"password", b"").decode(),
-                "from_email": smtp_settings.get(b"from_email", b"").decode(),
-                "from_name": smtp_settings.get(b"from_name", b"").decode(),
+                "host": settings.get("host", ""),
+                "port": int(settings.get("port", 587)),
+                "username": settings.get("username", ""),
+                "password": settings.get("password", ""),
+                "from_email": settings.get("from_email", ""),
+                "from_name": settings.get("from_name", ""),
                 "configured": True
             }
         else:

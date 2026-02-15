@@ -12,7 +12,7 @@ services:
       - SEARXNG_SECRET_KEY=${SEARXNG_SECRET_KEY:-47d2ce3c064f6cccf72ba8cc44d102f213a8016e6642fffa5df21ed50c8a9a04}
     restart: unless-stopped
     networks:
-      - chatbot_network
+      - default
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/healthz"]
       interval: 30s
@@ -29,7 +29,7 @@ services:
       - MAX_CONCURRENT_TASKS=5
     restart: unless-stopped
     networks:
-      - chatbot_network
+      - default
     deploy:
       resources:
         limits:
@@ -46,5 +46,6 @@ volumes:
   searxng_data:
 
 networks:
-  chatbot_network:
-    driver: bridge
+  default:
+    external: true
+    name: chatbot_redis_default

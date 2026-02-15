@@ -37,12 +37,9 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # 사용자 조회를 위한 cache_manager 가져오기
-    cache_manager = request.app.state.cache_manager
-
     # JWT 토큰 검증 (블랙리스트 확인 포함)
     token = credentials.credentials
-    payload = verify_token(token, expected_type="access", redis_client=cache_manager.redis)
+    payload = verify_token(token, expected_type="access")
 
     if not payload:
         raise HTTPException(
@@ -52,7 +49,7 @@ async def get_current_user(
         )
 
     # 사용자 조회
-    auth_service = AuthService(cache_manager.redis)
+    auth_service = AuthService()
 
     user_id = payload.get("user_id")
     user = await auth_service.get_user_by_id(user_id)

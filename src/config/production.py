@@ -44,11 +44,11 @@ class ProductionConfig:
         "xls", "xlsx", "ppt", "pptx"
     ]
 
-    # Redis Configuration
-    REDIS_HOST: str = os.getenv("REDIS_HOST", "localhost")
-    REDIS_PORT: int = int(os.getenv("REDIS_PORT", 6379))
-    REDIS_DB: int = int(os.getenv("REDIS_DB", 0))
-    REDIS_MAX_CONNECTIONS: int = int(os.getenv("REDIS_MAX_CONNECTIONS", 50))
+    # PostgreSQL Configuration
+    DATABASE_URL: str = os.getenv(
+        "DATABASE_URL",
+        "postgresql+asyncpg://chatbot_user:chatbot_secret@localhost:5432/chatbot",
+    )
 
     # Security
     SECRET_KEY: Optional[str] = os.getenv("SECRET_KEY")
@@ -115,10 +115,6 @@ class ProductionConfig:
                     errors.append("CORS localhost origins not allowed in strict mode - set CORS_STRICT=false to allow or use production origins")
                 else:
                     logger.warning("⚠️  CORS origins include localhost (not recommended for production)")
-
-        # Redis 연결 정보 확인
-        if not cls.REDIS_HOST:
-            errors.append("REDIS_HOST must be set")
 
         # 오류가 있으면 출력하고 종료
         if errors:
@@ -203,7 +199,14 @@ class ProductionConfig:
         logger.info(f"Rate Limit: {cls.RATE_LIMIT_PER_MINUTE}/min (enabled: {cls.RATE_LIMIT_ENABLED})")
         logger.info(f"Request Timeout: {cls.REQUEST_TIMEOUT}s")
         logger.info(f"Max File Size: {cls.MAX_FILE_SIZE_MB}MB")
-        logger.info(f"Redis: {cls.REDIS_HOST}:{cls.REDIS_PORT}/{cls.REDIS_DB}")
+        # Mask password in DATABASE_URL for logging
+        db_display = cls.DATABASE_URL
+        if "@" in db_display:
+            prefix, rest = db_display.split("@", 1)
+            if ":" in prefix:
+                scheme_user = prefix.rsplit(":", 1)[0]
+                db_display = f"{scheme_user}:***@{rest}"
+        logger.info(f"PostgreSQL: {db_display}")
         logger.info(f"Log Level: {cls.LOG_LEVEL}")
         logger.info("=" * 60)
 

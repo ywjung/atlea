@@ -3,7 +3,7 @@
 사용자 페르소나 설정 API
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
 
 from src.models.persona import PersonaCreate, PersonaUpdate, PersonaResponse
@@ -14,18 +14,14 @@ from src.auth.middleware import get_current_active_user
 router = APIRouter(prefix="/api/persona", tags=["Persona"])
 
 
-def get_persona_service(request: Request) -> PersonaService:
+def get_persona_service() -> PersonaService:
     """
     페르소나 서비스 의존성
-
-    Args:
-        request: FastAPI Request
 
     Returns:
         PersonaService 인스턴스
     """
-    redis_client = request.app.state.cache_manager.redis
-    return PersonaService(redis_client)
+    return PersonaService()
 
 
 @router.get("", response_model=PersonaResponse)

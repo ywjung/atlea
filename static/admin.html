@@ -426,6 +426,103 @@
         .stat-card:nth-child(4) { animation-delay: 0.2s; }
         .stat-card:nth-child(5) { animation-delay: 0.25s; }
 
+        /* A-RAG Pipeline Badges */
+        .pipeline-badges {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+        .pipeline-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 0.82rem;
+            font-weight: 600;
+            transition: all 0.2s ease;
+        }
+        .pipeline-badge-active {
+            background: rgba(34, 197, 94, 0.12);
+            color: #16a34a;
+            border: 1px solid rgba(34, 197, 94, 0.3);
+        }
+        .pipeline-badge-inactive {
+            background: rgba(148, 163, 184, 0.1);
+            color: #94a3b8;
+            border: 1px solid rgba(148, 163, 184, 0.2);
+        }
+        .source-badges {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 12px;
+        }
+        .source-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 4px 12px;
+            border-radius: 16px;
+            font-size: 0.78rem;
+            font-weight: 500;
+        }
+        .source-configured {
+            background: rgba(59, 130, 246, 0.1);
+            color: #3b82f6;
+            border: 1px solid rgba(59, 130, 246, 0.25);
+        }
+        .source-not-configured {
+            background: rgba(148, 163, 184, 0.08);
+            color: #94a3b8;
+            border: 1px solid rgba(148, 163, 184, 0.15);
+        }
+        .model-info {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 12px;
+        }
+        .model-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 4px 12px;
+            border-radius: 8px;
+            font-size: 0.78rem;
+            font-weight: 500;
+            background: rgba(139, 92, 246, 0.08);
+            color: #7c3aed;
+            border: 1px solid rgba(139, 92, 246, 0.2);
+            font-family: 'SF Mono', monospace;
+        }
+        [data-theme="dark"] .pipeline-badge-active {
+            background: rgba(34, 197, 94, 0.18);
+            color: #4ade80;
+            border-color: rgba(34, 197, 94, 0.35);
+        }
+        [data-theme="dark"] .pipeline-badge-inactive {
+            background: rgba(100, 116, 139, 0.15);
+            color: #64748b;
+            border-color: rgba(100, 116, 139, 0.25);
+        }
+        [data-theme="dark"] .source-configured {
+            background: rgba(59, 130, 246, 0.15);
+            color: #60a5fa;
+            border-color: rgba(59, 130, 246, 0.3);
+        }
+        [data-theme="dark"] .source-not-configured {
+            background: rgba(100, 116, 139, 0.1);
+            color: #475569;
+            border-color: rgba(100, 116, 139, 0.2);
+        }
+        [data-theme="dark"] .model-tag {
+            background: rgba(139, 92, 246, 0.15);
+            color: #a78bfa;
+            border-color: rgba(139, 92, 246, 0.3);
+        }
+
         /* Animations */
         @keyframes fadeInUp {
             from {
@@ -1462,6 +1559,103 @@
             border-color: var(--brand-primary, #667eea) !important;
             background: var(--bg-active, #f0f4ff) !important;
         }
+
+        /* Admin Confirm Modal */
+        .acm-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(6px);
+            z-index: 99999;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .acm-dialog {
+            background: var(--bg-card, white);
+            border-radius: 16px;
+            max-width: 440px;
+            width: 90%;
+            box-shadow: var(--shadow-xl, 0 20px 60px rgba(0, 0, 0, 0.3));
+            animation: slideUp 0.25s ease-out;
+            border: 1px solid var(--border-color, transparent);
+        }
+
+        @keyframes slideUp {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .acm-body {
+            padding: 28px 28px 0;
+            text-align: center;
+        }
+
+        .acm-icon {
+            font-size: 3rem;
+            margin-bottom: 12px;
+            line-height: 1.2;
+        }
+
+        .acm-title {
+            margin: 0 0 12px;
+            font-size: 1.2rem;
+            color: var(--text-primary, #1a1a2e);
+            font-weight: 700;
+        }
+
+        .acm-message {
+            margin: 0;
+            font-size: 0.95rem;
+            line-height: 1.7;
+            color: var(--text-secondary, #555);
+            white-space: pre-line;
+        }
+
+        .acm-footer {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+            padding: 24px 28px;
+        }
+
+        .acm-btn {
+            padding: 10px 28px;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            min-width: 100px;
+        }
+
+        .acm-btn-cancel {
+            background: var(--bg-muted, #f1f3f5);
+            color: var(--text-secondary, #555);
+            border: 1px solid var(--border-color, #dee2e6);
+        }
+
+        .acm-btn-cancel:hover {
+            background: var(--bg-active, #e9ecef);
+            border-color: var(--border-color-dark, #ced4da);
+            transform: translateY(-1px);
+        }
+
+        .acm-btn-confirm {
+            background: linear-gradient(135deg, var(--brand-primary, #667eea), var(--brand-secondary, #764ba2));
+            color: white;
+            border: none;
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+        }
+
+        .acm-btn-confirm:hover {
+            box-shadow: 0 4px 16px rgba(102, 126, 234, 0.4);
+            transform: translateY(-1px);
+        }
     </style>
 
     <!-- Logger System -->
@@ -1679,9 +1873,21 @@
                             el.style.background = '#334155';
                             el.style.borderColor = '#475569';
                             el.querySelectorAll('h3, h4, p, span, small').forEach(function(child) {
-                                child.style.color = '#f1f5f9';
+                                // 벡터 통계 카드 테마 색상 보존 (data-theme-color)
+                                if (child.dataset.themeColor) {
+                                    child.style.color = child.dataset.themeColor;
+                                } else {
+                                    child.style.color = '#f1f5f9';
+                                }
                             });
                         });
+
+                        // A-RAG 파이프라인 카드 다크모드
+                        var aragCard = document.querySelector('#arag-section > h3 + div');
+                        if (aragCard) {
+                            aragCard.style.background = '#334155';
+                            aragCard.style.borderColor = '#475569';
+                        }
 
                         // Card headers
                         document.querySelectorAll('.card-header').forEach(function(el) {
@@ -2136,9 +2342,21 @@
                             el.style.background = '';
                             el.style.borderColor = '';
                             el.querySelectorAll('h3, h4, p, span, small').forEach(function(child) {
-                                child.style.color = '';
+                                // 벡터 통계 카드 원래 색상 복원 (data-light-color)
+                                if (child.dataset.lightColor) {
+                                    child.style.color = child.dataset.lightColor;
+                                } else {
+                                    child.style.color = '';
+                                }
                             });
                         });
+
+                        // A-RAG 파이프라인 카드 라이트모드 복원
+                        var aragCardLight = document.querySelector('#arag-section > h3 + div');
+                        if (aragCardLight) {
+                            aragCardLight.style.background = '';
+                            aragCardLight.style.borderColor = '';
+                        }
 
                         // Card headers
                         document.querySelectorAll('.card-header').forEach(function(el) {
@@ -2748,11 +2966,11 @@
                 </div>
             </div>
 
-            <!-- Redis 및 시스템 리소스 -->
+            <!-- DB 및 시스템 리소스 -->
             <div style="margin-bottom: 24px;">
                 <h3 style="color: #ef4444; margin-bottom: 16px; font-size: 1.2em; font-weight: 700;">
                     <span style="background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
-                        🗄️ Redis & 시스템
+                        🗄️ DB & 시스템
                     </span>
                 </h3>
                 <div class="stats-grid">
@@ -2760,8 +2978,8 @@
                         <div style="position: absolute; top: 0; left: 0; right: 0; height: 4px; background: linear-gradient(90deg, #ef4444 0%, #dc2626 100%);"></div>
                         <div style="display: flex; justify-content: space-between; align-items: flex-start;">
                             <div>
-                                <h3 style="color: #ef4444;">🔑 Redis 키</h3>
-                                <p class="value" id="stat-redis-keys" style="color: #ef4444;" data-target="0">0</p>
+                                <h3 style="color: #ef4444;">🔑 DB 테이블</h3>
+                                <p class="value" id="stat-db-tables" style="color: #ef4444;" data-target="0">0</p>
                                 <p class="subtext" style="color: #64748b;">저장된 총 키</p>
                             </div>
                             <div style="font-size: 2.5em; opacity: 0.15;">🗃️</div>
@@ -2773,7 +2991,7 @@
                             <div style="flex: 1;">
                                 <h3 style="color: #10b981;">⚡ 캐시 히트율</h3>
                                 <p class="value" id="stat-cache-hit-rate" style="color: #10b981;" data-target="0">0%</p>
-                                <p class="subtext" style="color: #64748b;">Redis 성능</p>
+                                <p class="subtext" style="color: #64748b;">캐시 성능</p>
                                 <div class="progress-bar">
                                     <div class="progress-fill" id="cache-progress" style="background: linear-gradient(90deg, #10b981 0%, #059669 100%);"></div>
                                 </div>
@@ -2821,6 +3039,90 @@
                                 </div>
                             </div>
                             <div style="font-size: 2.5em; opacity: 0.15;">📀</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- A-RAG 검색 파이프라인 -->
+            <div id="arag-section" style="margin-bottom: 24px;">
+                <h3 style="color: #8b5cf6; margin-bottom: 16px; font-size: 1.2em; font-weight: 700;">
+                    <span style="background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
+                        🧠 A-RAG 검색 파이프라인
+                    </span>
+                </h3>
+                <div style="position: relative; background: var(--bg-card, #fff); padding: 20px; border-radius: 12px; box-shadow: var(--shadow-card, 0 2px 8px rgba(0,0,0,0.08)); overflow: hidden;">
+                    <div style="position: absolute; top: 0; left: 0; right: 0; height: 4px; background: linear-gradient(90deg, #8b5cf6 0%, #7c3aed 100%);"></div>
+                    <div class="pipeline-badges" id="arag-pipeline-badges">
+                        <span class="pipeline-badge pipeline-badge-inactive">⏳ 로딩 중...</span>
+                    </div>
+                    <div style="display: flex; flex-wrap: wrap; gap: 24px; margin-top: 16px;">
+                        <div>
+                            <p style="font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin: 0 0 6px 0;">📡 소스</p>
+                            <div class="source-badges" id="arag-source-badges">
+                                <span class="source-badge source-not-configured">로딩 중...</span>
+                            </div>
+                        </div>
+                        <div>
+                            <p style="font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin: 0 0 6px 0;">🤖 모델</p>
+                            <div class="model-info" id="arag-model-info">
+                                <span class="model-tag">로딩 중...</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 벡터 검색 통계 -->
+            <div id="vector-stats-section" style="margin-bottom: 24px;">
+                <h3 style="color: #0891b2; margin-bottom: 16px; font-size: 1.2em; font-weight: 700;">
+                    <span style="background: linear-gradient(135deg, #0891b2 0%, #0e7490 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
+                        🔎 벡터 검색 통계
+                    </span>
+                </h3>
+                <div class="stats-grid">
+                    <div class="stat-card" style="background: linear-gradient(135deg, #ecfeff 0%, #ffffff 100%);">
+                        <div style="position: absolute; top: 0; left: 0; right: 0; height: 4px; background: linear-gradient(90deg, #0891b2 0%, #0e7490 100%);"></div>
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                            <div>
+                                <h3 style="color: #0891b2;" data-theme-color="#22d3ee" data-light-color="#0891b2">📦 문서 청크</h3>
+                                <p class="value" id="stat-arag-chunks" style="color: #0891b2;" data-theme-color="#22d3ee" data-light-color="#0891b2" data-target="0">0</p>
+                                <p class="subtext" style="color: #64748b;">인덱싱된 청크</p>
+                            </div>
+                            <div style="font-size: 2.5em; opacity: 0.15;">📦</div>
+                        </div>
+                    </div>
+                    <div class="stat-card" style="background: linear-gradient(135deg, #f5f3ff 0%, #ffffff 100%);">
+                        <div style="position: absolute; top: 0; left: 0; right: 0; height: 4px; background: linear-gradient(90deg, #8b5cf6 0%, #7c3aed 100%);"></div>
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                            <div>
+                                <h3 style="color: #8b5cf6;" data-theme-color="#a78bfa" data-light-color="#8b5cf6">📝 문장 임베딩</h3>
+                                <p class="value" id="stat-arag-sentences" style="color: #8b5cf6;" data-theme-color="#a78bfa" data-light-color="#8b5cf6" data-target="0">0</p>
+                                <p class="subtext" style="color: #64748b;">세분화 임베딩</p>
+                            </div>
+                            <div style="font-size: 2.5em; opacity: 0.15;">📝</div>
+                        </div>
+                    </div>
+                    <div class="stat-card" style="background: linear-gradient(135deg, #f0fdf4 0%, #ffffff 100%);">
+                        <div style="position: absolute; top: 0; left: 0; right: 0; height: 4px; background: linear-gradient(90deg, #22c55e 0%, #16a34a 100%);"></div>
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                            <div>
+                                <h3 style="color: #22c55e;" data-theme-color="#4ade80" data-light-color="#22c55e">📊 평균 문장/청크</h3>
+                                <p class="value" id="stat-arag-avg" style="color: #22c55e;" data-theme-color="#4ade80" data-light-color="#22c55e" data-target="0">0</p>
+                                <p class="subtext" style="color: #64748b;">청크당 문장 수</p>
+                            </div>
+                            <div style="font-size: 2.5em; opacity: 0.15;">📊</div>
+                        </div>
+                    </div>
+                    <div class="stat-card" style="background: linear-gradient(135deg, #fffbeb 0%, #ffffff 100%);">
+                        <div style="position: absolute; top: 0; left: 0; right: 0; height: 4px; background: linear-gradient(90deg, #f59e0b 0%, #d97706 100%);"></div>
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                            <div>
+                                <h3 style="color: #f59e0b;" data-theme-color="#fbbf24" data-light-color="#f59e0b">📄 인덱스 문서</h3>
+                                <p class="value" id="stat-arag-files" style="color: #f59e0b;" data-theme-color="#fbbf24" data-light-color="#f59e0b" data-target="0">0</p>
+                                <p class="subtext" style="color: #64748b;">인덱싱된 파일 수</p>
+                            </div>
+                            <div style="font-size: 2.5em; opacity: 0.15;">📄</div>
                         </div>
                     </div>
                 </div>
@@ -4150,7 +4452,7 @@
                             <li><strong>슬라이딩 윈도우:</strong> 1분 동안의 요청 수를 실시간으로 추적하여 정확하게 제한합니다</li>
                             <li><strong>개발 환경:</strong> 개발/테스트 환경에서는 비활성화할 수 있습니다</li>
                             <li><strong>프로덕션 권장:</strong> 프로덕션 환경에서는 반드시 활성화하는 것을 권장합니다</li>
-                            <li><strong>분산 환경 지원:</strong> Redis 기반으로 여러 서버 인스턴스 간 일관된 제한을 유지합니다</li>
+                            <li><strong>분산 환경 지원:</strong> 데이터베이스 기반으로 여러 서버 인스턴스 간 일관된 제한을 유지합니다</li>
                         </ul>
                     </div>
                 </div>
@@ -5203,9 +5505,9 @@
             </div>
         </div>
 
-        <!-- Redis Backup Tab -->
+        <!-- Database Backup Tab -->
         <div id="backup-tab" class="tab-content">
-            <h2 style="margin-bottom: 20px;">💾 Redis 백업 관리</h2>
+            <h2 style="margin-bottom: 20px;">💾 데이터베이스 백업 관리</h2>
 
             <!-- Backup Control Panel -->
             <div class="card" style="margin-bottom: 20px;">
@@ -5221,7 +5523,7 @@
                                 수동 백업
                             </h4>
                             <p style="margin: 0 0 15px 0; font-size: 14px; opacity: 0.9;">
-                                현재 Redis 데이터의 스냅샷을 즉시 생성합니다.
+                                현재 PostgreSQL 데이터베이스의 백업을 생성합니다.
                             </p>
                             <button onclick="createBackup('manual')" style="width: 100%; padding: 12px; background: white; color: #667eea; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; transition: all 0.3s;">
                                 지금 백업 생성
@@ -6509,8 +6811,8 @@
                 <div id="backupHelp" class="card-body" style="display: none;">
                     <h4 style="color: #667eea; margin-bottom: 15px;">📋 백업 개요</h4>
                     <ul style="line-height: 1.8; color: #444;">
-                        <li><strong>대상:</strong> Redis에 저장된 모든 데이터 (문서 메타데이터, 임베딩, 설정, 사용자, 그룹, 조직 등)</li>
-                        <li><strong>형식:</strong> JSON 기반 백업 파일</li>
+                        <li><strong>대상:</strong> PostgreSQL 데이터베이스 전체 (사용자, 문서, 설정, 그룹, 조직 등)</li>
+                        <li><strong>형식:</strong> SQL 덤프 파일 (pg_dump)</li>
                         <li><strong>설정 위치:</strong> 시스템 관리 → 백업 탭</li>
                     </ul>
 
@@ -6525,7 +6827,7 @@
                     <h4 style="color: #667eea; margin: 20px 0 15px 0;">📤 복원</h4>
                     <ul style="line-height: 1.8; color: #444;">
                         <li><strong>백업 복원:</strong> 백업 목록에서 원하는 시점의 백업으로 복원</li>
-                        <li><strong>복원 시 주의:</strong> 현재 Redis 데이터가 모두 삭제되고 백업 시점의 데이터로 교체됨</li>
+                        <li><strong>복원 시 주의:</strong> 현재 데이터베이스가 백업 시점의 데이터로 교체됨</li>
                         <li><strong>원본 파일:</strong> <code>data/</code> 디렉토리의 원본 문서는 별도 백업 필요</li>
                     </ul>
 
@@ -6660,7 +6962,7 @@
                     <div style="margin-bottom: 20px;">
                         <h4 style="color: #667eea; margin-bottom: 10px;">Q: 업로드한 문서는 어디에 저장되나요?</h4>
                         <p style="margin: 0 0 0 20px; padding: 10px; background: #f8f9fa; border-radius: 4px;">
-                            A: 문서는 서버의 `data/` 디렉토리에 저장되며, 텍스트 추출 후 임베딩은 Redis 벡터 데이터베이스에 저장됩니다.
+                            A: 문서는 서버의 `data/` 디렉토리에 저장되며, 텍스트 추출 후 임베딩은 PostgreSQL 벡터 데이터베이스에 저장됩니다.
                         </p>
                     </div>
 
@@ -6716,7 +7018,7 @@
                     <div style="margin-bottom: 20px;">
                         <h4 style="color: #667eea; margin-bottom: 10px;">Q: 백업 복원 후 문서가 검색되지 않습니다</h4>
                         <p style="margin: 0 0 0 20px; padding: 10px; background: #f8f9fa; border-radius: 4px;">
-                            A: 백업은 Redis 데이터만 복원합니다. 원본 문서 파일(<code>data/</code> 디렉토리)이 백업 시점과 일치하는지 확인하세요. 불일치하면 "재색인" 탭에서 전체 재색인을 수행하세요.
+                            A: 백업은 데이터베이스만 복원합니다. 원본 문서 파일(<code>data/</code> 디렉토리)이 백업 시점과 일치하는지 확인하세요. 불일치하면 "재색인" 탭에서 전체 재색인을 수행하세요.
                         </p>
                     </div>
 
@@ -6759,7 +7061,7 @@
                             <div style="text-align: center; padding: 15px; background: white; border-radius: 6px; border: 2px solid #4facfe;">
                                 <div style="font-size: 32px; margin-bottom: 8px;">🗄️</div>
                                 <div style="font-weight: 600; color: #4facfe;">벡터 DB</div>
-                                <div style="font-size: 12px; color: #666;">Redis Stack</div>
+                                <div style="font-size: 12px; color: #666;">PostgreSQL + pgvector</div>
                             </div>
                         </div>
                         <div style="font-size: 14px; color: #666; line-height: 1.8;">
@@ -6777,7 +7079,7 @@
                             <ul style="margin: 10px 0 0 20px; line-height: 1.8; color: #444;">
                                 <li>업로드된 문서를 작은 청크(chunk)로 분할</li>
                                 <li>각 청크를 임베딩 모델로 벡터화</li>
-                                <li>벡터를 Redis 벡터 데이터베이스에 저장</li>
+                                <li>벡터를 PostgreSQL 벡터 데이터베이스에 저장</li>
                                 <li>메타데이터(파일명, 그룹, 페이지 등) 함께 저장</li>
                             </ul>
                         </div>
@@ -6819,22 +7121,22 @@
                                 </tr>
                                 <tr style="background: #f8f9fa;">
                                     <td style="padding: 10px; border: 1px solid #ddd;"><strong>벡터 임베딩</strong></td>
-                                    <td style="padding: 10px; border: 1px solid #ddd;">Redis Vector DB</td>
+                                    <td style="padding: 10px; border: 1px solid #ddd;">PostgreSQL (pgvector)</td>
                                     <td style="padding: 10px; border: 1px solid #ddd;">문서 청크의 벡터 표현</td>
                                 </tr>
                                 <tr>
                                     <td style="padding: 10px; border: 1px solid #ddd;"><strong>메타데이터</strong></td>
-                                    <td style="padding: 10px; border: 1px solid #ddd;">Redis Hash</td>
+                                    <td style="padding: 10px; border: 1px solid #ddd;">PostgreSQL</td>
                                     <td style="padding: 10px; border: 1px solid #ddd;">파일명, 크기, 그룹, 생성일 등</td>
                                 </tr>
                                 <tr style="background: #f8f9fa;">
                                     <td style="padding: 10px; border: 1px solid #ddd;"><strong>그룹 정보</strong></td>
-                                    <td style="padding: 10px; border: 1px solid #ddd;">Redis Hash</td>
+                                    <td style="padding: 10px; border: 1px solid #ddd;">PostgreSQL</td>
                                     <td style="padding: 10px; border: 1px solid #ddd;">그룹 ID, 이름, 문서 목록</td>
                                 </tr>
                                 <tr>
                                     <td style="padding: 10px; border: 1px solid #ddd;"><strong>시스템 설정</strong></td>
-                                    <td style="padding: 10px; border: 1px solid #ddd;">Redis String</td>
+                                    <td style="padding: 10px; border: 1px solid #ddd;">PostgreSQL</td>
                                     <td style="padding: 10px; border: 1px solid #ddd;">모델 설정, 시스템 파라미터</td>
                                 </tr>
                             </tbody>
@@ -6856,7 +7158,7 @@
                         <div style="margin-bottom: 15px;">
                             <strong style="color: #667eea;">🔍 벡터 검색 엔진</strong>
                             <ul style="line-height: 1.8; color: #444; margin: 10px 0 0 20px;">
-                                <li><strong>Redis Stack:</strong> Vector Similarity Search 지원</li>
+                                <li><strong>PostgreSQL + pgvector:</strong> Vector Similarity Search 지원</li>
                                 <li><strong>인덱스 타입:</strong> HNSW (Hierarchical Navigable Small World)</li>
                                 <li><strong>거리 메트릭:</strong> COSINE (코사인 유사도)</li>
                                 <li><strong>차원:</strong> 임베딩 모델에 따라 가변 (768/1024/1536 등)</li>
@@ -6881,7 +7183,7 @@
                                 <strong style="color: #2e7d32;">벡터 검색 최적화</strong>
                                 <ul style="margin: 10px 0 0 0; padding-left: 20px; font-size: 13px; color: #444;">
                                     <li>HNSW 인덱스로 빠른 검색</li>
-                                    <li>메모리 기반 Redis 활용</li>
+                                    <li>PostgreSQL pgvector 활용</li>
                                     <li>그룹 필터로 검색 범위 축소</li>
                                 </ul>
                             </div>
@@ -6890,7 +7192,7 @@
                                 <strong style="color: #1976d2;">메모리 관리</strong>
                                 <ul style="margin: 10px 0 0 0; padding-left: 20px; font-size: 13px; color: #444;">
                                     <li>청크 크기 최적화</li>
-                                    <li>Redis 메모리 모니터링</li>
+                                    <li>데이터베이스 성능 모니터링</li>
                                     <li>불필요한 데이터 정리</li>
                                 </ul>
                             </div>
@@ -6912,7 +7214,7 @@
                             <strong style="color: #c62828;">데이터 보안</strong>
                             <ul style="margin: 10px 0 0 20px; line-height: 1.8; color: #444;">
                                 <li>업로드된 문서는 서버에만 저장 (외부 유출 없음)</li>
-                                <li>Redis 데이터베이스 접근 제어</li>
+                                <li>PostgreSQL 데이터베이스 접근 제어</li>
                                 <li>API 키는 서버 환경변수로 안전하게 관리</li>
                                 <li>HTTPS 사용 권장 (프로덕션 환경)</li>
                             </ul>
@@ -6921,7 +7223,7 @@
                             <strong style="color: #6a1b9a;">백업 및 복구</strong>
                             <ul style="margin: 10px 0 0 20px; line-height: 1.8; color: #444;">
                                 <li>원본 문서: <code>data/</code> 디렉토리 백업</li>
-                                <li>Redis 데이터: RDB/AOF 스냅샷 활용</li>
+                                <li>데이터베이스: pg_dump SQL 백업 활용</li>
                                 <li>재색인 기능으로 벡터 DB 재구성 가능</li>
                                 <li>정기적인 백업 스케줄 설정 권장</li>
                             </ul>
@@ -7497,6 +7799,9 @@
                 // 문서 및 대화 통계 로드
                 await loadDocumentStats();
 
+                // A-RAG 파이프라인 및 벡터 검색 통계 로드
+                await loadARAGStats();
+
                 // 차트 초기화 (Chart.js 모듈 사용)
                 await initDashboardCharts();
 
@@ -7530,6 +7835,8 @@
 
                 if (isPercentage) {
                     element.textContent = current.toFixed(decimals) + '%';
+                } else if (decimals > 0) {
+                    element.textContent = current.toFixed(decimals);
                 } else {
                     element.textContent = Math.floor(current).toLocaleString();
                 }
@@ -7540,6 +7847,8 @@
                     // Final value
                     if (isPercentage) {
                         element.textContent = target.toFixed(decimals) + '%';
+                    } else if (decimals > 0) {
+                        element.textContent = target.toFixed(decimals);
                     } else {
                         element.textContent = target.toLocaleString();
                     }
@@ -7605,11 +7914,9 @@
                 const data = await response.json();
                 devLog('System health:', data);
 
-                // Redis 통계
-                const redisInfo = await Auth.apiCall('/api/admin/redis-stats').catch(() => ({
-                    total_keys: 0,
-                    keyspace_hits: 0,
-                    keyspace_misses: 0
+                // DB 통계
+                const dbInfo = await Auth.apiCall('/api/admin/db-stats').catch(() => ({
+                    total_keys: 0
                 }));
 
                 // 시맨틱 캐시 통계 (Settings와 동일한 소스 사용)
@@ -7625,8 +7932,8 @@
                     ? parseFloat((cacheStats.hit_rate * 100).toFixed(1))
                     : 0;
 
-                // Redis 키와 캐시 히트율 애니메이션
-                animateCounter(document.getElementById('stat-redis-keys'), redisInfo.total_keys || 0);
+                // DB 테이블과 캐시 히트율 애니메이션
+                animateCounter(document.getElementById('stat-db-tables'), dbInfo.total_keys || 0);
                 animateCounter(document.getElementById('stat-cache-hit-rate'), hitRate, 1000, true, 1);
                 animateProgressBar('cache-progress', hitRate);
 
@@ -7654,7 +7961,7 @@
 
             } catch (error) {
                 logger.error('Failed to load system health:', error);
-                document.getElementById('stat-redis-keys').textContent = '0';
+                document.getElementById('stat-db-tables').textContent = '0';
                 document.getElementById('stat-cache-hit-rate').textContent = '0%';
                 document.getElementById('stat-cpu-usage').textContent = '0%';
                 document.getElementById('stat-memory-usage').textContent = '0%';
@@ -7741,6 +8048,82 @@
                 document.getElementById('stat-documents').textContent = '0';
                 document.getElementById('stat-chunks').textContent = '0';
                 document.getElementById('stat-conversations').textContent = '0';
+            }
+        }
+
+        async function loadARAGStats() {
+            try {
+                const data = await Auth.apiCall('/api/admin/arag-stats').catch(() => null);
+                if (!data) return;
+
+                devLog('A-RAG stats:', data);
+
+                // Pipeline badges
+                const badgeContainer = document.getElementById('arag-pipeline-badges');
+                if (badgeContainer) {
+                    const features = [
+                        { key: 'hybrid_search', label: '3-Signal 하이브리드' },
+                        { key: 'sentence_embeddings', label: '문장 임베딩' },
+                        { key: 'reranking', label: 'Cross-Encoder 리랭킹' },
+                        { key: 'query_rewrite', label: '쿼리 재작성' },
+                        { key: 'web_search', label: '웹 검색' },
+                        { key: 'doc_search', label: '공식 문서 검색' },
+                        { key: 'context_compression', label: '컨텍스트 압축' },
+                        { key: 'query_contextualization', label: '후속 질문 해석' },
+                    ];
+                    badgeContainer.innerHTML = features.map(f => {
+                        const active = data.features[f.key];
+                        const cls = active ? 'pipeline-badge-active' : 'pipeline-badge-inactive';
+                        const icon = active ? '✅' : '⬜';
+                        const ariaLabel = f.label + (active ? ' 활성' : ' 비활성');
+                        return `<span class="pipeline-badge ${cls}" role="status" aria-label="${ariaLabel}" title="${ariaLabel}">${icon} ${f.label}</span>`;
+                    }).join('');
+                }
+
+                // Source badges
+                const sourceContainer = document.getElementById('arag-source-badges');
+                if (sourceContainer) {
+                    const sources = [
+                        { key: 'tavily', label: 'Tavily' },
+                        { key: 'searxng', label: 'SearXNG' },
+                        { key: 'context7', label: 'Context7' },
+                        { key: 'crawl4ai', label: 'Crawl4AI' },
+                    ];
+                    sourceContainer.innerHTML = sources.map(s => {
+                        const configured = data.sources[s.key];
+                        const cls = configured ? 'source-configured' : 'source-not-configured';
+                        const icon = configured ? '🟢' : '⚪';
+                        const ariaLabel = s.label + (configured ? ' 설정됨' : ' 미설정');
+                        return `<span class="source-badge ${cls}" role="status" aria-label="${ariaLabel}" title="${ariaLabel}">${icon} ${s.label}</span>`;
+                    }).join('');
+                }
+
+                // Model info (textContent로 XSS 방지)
+                const modelContainer = document.getElementById('arag-model-info');
+                if (modelContainer) {
+                    modelContainer.innerHTML = '';
+                    const rerankerTag = document.createElement('span');
+                    rerankerTag.className = 'model-tag';
+                    rerankerTag.textContent = '🎯 리랭커: ' + (data.models.reranker || '-');
+                    const embeddingTag = document.createElement('span');
+                    embeddingTag.className = 'model-tag';
+                    embeddingTag.textContent = '🧬 임베딩: ' + (data.models.embedding || '-');
+                    modelContainer.append(rerankerTag, embeddingTag);
+                }
+
+                // Vector stats counters (null 체크)
+                const st = data.stats || {};
+                const safeAnimate = (id, val, dur, pct, dec) => {
+                    const el = document.getElementById(id);
+                    if (el) animateCounter(el, val, dur, pct, dec);
+                };
+                safeAnimate('stat-arag-chunks', st.total_chunks || 0);
+                safeAnimate('stat-arag-sentences', st.total_sentence_embeddings || 0);
+                safeAnimate('stat-arag-avg', st.avg_sentences_per_chunk || 0, 1000, false, 1);
+                safeAnimate('stat-arag-files', st.total_files || 0);
+
+            } catch (error) {
+                logger.error('Failed to load A-RAG stats:', error);
             }
         }
 
@@ -7938,7 +8321,7 @@
                         conversations: document.getElementById('stat-conversations')?.textContent || '0'
                     },
                     system: {
-                        redisKeys: document.getElementById('stat-redis-keys')?.textContent || '0',
+                        dbTables: document.getElementById('stat-db-tables')?.textContent || '0',
                         cacheHitRate: document.getElementById('stat-cache-hit-rate')?.textContent || '0%',
                         cpuUsage: document.getElementById('stat-cpu-usage')?.textContent || '0%',
                         memoryUsage: document.getElementById('stat-memory-usage')?.textContent || '0%',
@@ -12566,6 +12949,49 @@
         }
 
         // ============================================
+        // Admin Confirm Modal (confirm/alert replacement)
+        // ============================================
+        function showAdminConfirm(title, message, icon = '❓') {
+            return new Promise((resolve) => {
+                let overlay = document.getElementById('adminConfirmOverlay');
+                if (!overlay) {
+                    overlay = document.createElement('div');
+                    overlay.id = 'adminConfirmOverlay';
+                    overlay.className = 'acm-overlay';
+                    overlay.innerHTML = `
+                        <div class="acm-dialog">
+                            <div class="acm-body">
+                                <div id="acmIcon" class="acm-icon"></div>
+                                <h3 id="acmTitle" class="acm-title"></h3>
+                                <p id="acmMessage" class="acm-message"></p>
+                            </div>
+                            <div class="acm-footer">
+                                <button id="acmCancel" class="acm-btn acm-btn-cancel">취소</button>
+                                <button id="acmConfirm" class="acm-btn acm-btn-confirm">확인</button>
+                            </div>
+                        </div>`;
+                    document.body.appendChild(overlay);
+                }
+                overlay.querySelector('#acmIcon').textContent = icon;
+                overlay.querySelector('#acmTitle').textContent = title;
+                overlay.querySelector('#acmMessage').textContent = message;
+                overlay.style.display = 'flex';
+
+                function cleanup(result) {
+                    overlay.style.display = 'none';
+                    overlay.querySelector('#acmConfirm').removeEventListener('click', onYes);
+                    overlay.querySelector('#acmCancel').removeEventListener('click', onNo);
+                    resolve(result);
+                }
+                function onYes() { cleanup(true); }
+                function onNo() { cleanup(false); }
+
+                overlay.querySelector('#acmConfirm').addEventListener('click', onYes);
+                overlay.querySelector('#acmCancel').addEventListener('click', onNo);
+            });
+        }
+
+        // ============================================
         // 재색인 기능
         // ============================================
 
@@ -12632,7 +13058,8 @@
             if (barEl) barEl.style.width = `${progress.progress || 0}%`;
             if (percentEl) percentEl.textContent = `${progress.progress || 0}%`;
             if (statsEl) {
-                statsEl.textContent = `${progress.current_item || 0} / ${progress.total_items || 0}`;
+                const unit = progress.step === '문장 임베딩 생성 중' ? '청크' : '문서';
+                statsEl.textContent = `${progress.current_item || 0} / ${progress.total_items || 0} ${unit}`;
             }
 
             // Update remaining time
@@ -12671,7 +13098,8 @@
         }
 
         async function adminStartReindex() {
-            if (!confirm('문서를 재색인하시겠습니까?\n\n⏳ 재색인은 수 분이 걸릴 수 있습니다.')) {
+            const confirmed = await showAdminConfirm('문서 재색인', '문서를 재색인하시겠습니까?\n\n⏳ 재색인은 수 분이 걸릴 수 있습니다.', '🔄');
+            if (!confirmed) {
                 return;
             }
 
@@ -12759,7 +13187,8 @@
         }
 
         async function adminCancelReindex() {
-            if (!confirm('재색인을 중지하시겠습니까?')) {
+            const confirmed = await showAdminConfirm('재색인 중지', '재색인을 중지하시겠습니까?\n\n진행 중인 작업이 취소됩니다.', '🛑');
+            if (!confirmed) {
                 return;
             }
 
@@ -12795,7 +13224,8 @@
         }
 
         async function adminClearReindexProgress() {
-            if (!confirm('재색인 진행 상태를 초기화하시겠습니까?\n\n⚠️ 이 작업은 에러 상태에 갇힌 진행 상태를 즉시 제거합니다.\n정상적으로는 1시간 후 자동으로 초기화됩니다.')) {
+            const clearConfirmed = await showAdminConfirm('진행 상태 초기화', '재색인 진행 상태를 초기화하시겠습니까?\n\n⚠️ 이 작업은 에러 상태에 갇힌 진행 상태를 즉시 제거합니다.\n정상적으로는 1시간 후 자동으로 초기화됩니다.', '⚠️');
+            if (!clearConfirmed) {
                 return;
             }
 
@@ -13475,12 +13905,77 @@
             if (e.target === documentViewerModal) closeAdminDocumentViewer();
         });
 
-        // ===== Redis Backup Management Functions =====
+        // ===== Database Backup Management Functions =====
 
         // Global flag to prevent concurrent backup/restore operations
         let isBackupOperationInProgress = false;
 
-        // Progress Modal Control Functions
+        // ==================== Confirm/Alert Modal ====================
+        let _confirmModalResolve = null;
+
+        function showConfirmModal(message, { title = '확인', icon = '❓', type = 'confirm', okText = '확인', cancelText = '취소', okStyle = '' } = {}) {
+            return new Promise(resolve => {
+                _confirmModalResolve = resolve;
+                const modal = document.getElementById('confirmModal');
+                const header = document.getElementById('confirmModalHeader');
+                document.getElementById('confirmModalTitle').textContent = title;
+                document.getElementById('confirmModalIcon').textContent = icon;
+                document.getElementById('confirmModalMessage').innerHTML = message;
+
+                const okBtn = document.getElementById('confirmModalOk');
+                const cancelBtn = document.getElementById('confirmModalCancel');
+                okBtn.textContent = okText;
+                cancelBtn.textContent = cancelText;
+
+                // Style variants
+                if (type === 'alert') {
+                    cancelBtn.style.display = 'none';
+                } else {
+                    cancelBtn.style.display = '';
+                }
+
+                if (type === 'danger') {
+                    header.style.background = 'linear-gradient(135deg, #f44336 0%, #d32f2f 100%)';
+                    okBtn.style.background = 'linear-gradient(135deg, #f44336 0%, #d32f2f 100%)';
+                    okBtn.textContent = okText || '삭제';
+                } else if (type === 'warning') {
+                    header.style.background = 'linear-gradient(135deg, #ff9800 0%, #f57c00 100%)';
+                    okBtn.style.background = 'linear-gradient(135deg, #ff9800 0%, #f57c00 100%)';
+                } else if (type === 'success') {
+                    header.style.background = 'linear-gradient(135deg, #4CAF50 0%, #388E3C 100%)';
+                    okBtn.style.background = 'linear-gradient(135deg, #4CAF50 0%, #388E3C 100%)';
+                    cancelBtn.style.display = 'none';
+                } else if (type === 'alert') {
+                    header.style.background = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+                    okBtn.style.background = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+                } else {
+                    header.style.background = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+                    okBtn.style.background = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+                }
+
+                if (okStyle) okBtn.style.background = okStyle;
+
+                modal.style.display = 'flex';
+                modal.classList.add('active');
+                okBtn.focus();
+            });
+        }
+
+        function closeConfirmModal(result) {
+            const modal = document.getElementById('confirmModal');
+            modal.style.display = 'none';
+            modal.classList.remove('active');
+            if (_confirmModalResolve) {
+                _confirmModalResolve(result);
+                _confirmModalResolve = null;
+            }
+        }
+
+        function showAlertModal(message, { title = '알림', icon = 'ℹ️', type = 'alert' } = {}) {
+            return showConfirmModal(message, { title, icon, type, okText: '확인' });
+        }
+
+        // ==================== Progress Modal Control Functions ====================
         function showProgressModal(title, steps) {
             const modal = document.getElementById('progressModal');
             const titleEl = document.getElementById('progressModalTitle');
@@ -13597,19 +14092,19 @@
         async function createBackup(type = 'manual') {
             // Check if another operation is in progress
             if (isBackupOperationInProgress) {
-                alert('⚠️ 이미 진행 중인 백업 또는 복원 작업이 있습니다.\n현재 작업이 완료될 때까지 기다려주세요.');
+                await showAlertModal('이미 진행 중인 백업 또는 복원 작업이 있습니다.\n현재 작업이 완료될 때까지 기다려주세요.', { title: '작업 진행 중', icon: '⚠️', type: 'warning' });
                 return;
             }
 
-            if (!confirm('Redis 백업을 생성하시겠습니까?')) return;
+            if (!await showConfirmModal('데이터베이스 백업을 생성하시겠습니까?', { title: '백업 생성', icon: '💾' })) return;
 
             // Set flag to prevent concurrent operations
             isBackupOperationInProgress = true;
 
             // Define backup steps
             const steps = [
-                'Redis SAVE 명령 실행',
-                '백업 파일 복사',
+                'PostgreSQL 백업 실행',
+                '백업 파일 저장',
                 '백업 파일 검증'
             ];
 
@@ -13618,9 +14113,9 @@
 
             try {
                 // Step 1: Starting backup
-                updateProgressStep(0, 'active', 'Redis SAVE 명령을 실행하고 있습니다...');
+                updateProgressStep(0, 'active', 'PostgreSQL 백업을 생성하고 있습니다...');
 
-                const data = await Auth.apiCall('/api/redis/backup/create', {
+                const data = await Auth.apiCall('/api/db/backup/create', {
                     method: 'POST',
                     body: JSON.stringify({ type })
                 });
@@ -13688,7 +14183,7 @@
         // Refresh backup list
         async function refreshBackupList() {
             try {
-                const data = await Auth.apiCall('/api/redis/backup/list');
+                const data = await Auth.apiCall('/api/db/backup/list');
 
                 if (data.success) {
                     displayBackupList(data.backups);
@@ -13839,15 +14334,15 @@
         async function restoreBackup(filename) {
             // Check if another operation is in progress
             if (isBackupOperationInProgress) {
-                alert('⚠️ 이미 진행 중인 백업 또는 복원 작업이 있습니다.\n현재 작업이 완료될 때까지 기다려주세요.');
+                await showAlertModal('이미 진행 중인 백업 또는 복원 작업이 있습니다.\n현재 작업이 완료될 때까지 기다려주세요.', { title: '작업 진행 중', icon: '⚠️', type: 'warning' });
                 return;
             }
 
-            if (!confirm(`⚠️ 경고!\n\n백업을 복원하면 현재 Redis 데이터가 모두 삭제되고 백업 시점의 데이터로 교체됩니다.\n\n백업 파일: ${filename}\n\n정말 복원하시겠습니까?`)) {
+            if (!await showConfirmModal(`백업을 복원하면 현재 데이터베이스가 백업 시점의 데이터로 교체됩니다.\n\n<strong>백업 파일:</strong> ${filename}`, { title: '⚠️ 백업 복원 경고', icon: '🔄', type: 'warning', okText: '복원' })) {
                 return;
             }
 
-            if (!confirm('정말로 복원하시겠습니까? 이 작업은 되돌릴 수 없습니다!')) {
+            if (!await showConfirmModal('정말로 복원하시겠습니까?\n이 작업은 되돌릴 수 없습니다!', { title: '최종 확인', icon: '⚠️', type: 'danger', okText: '복원 실행' })) {
                 return;
             }
 
@@ -13856,12 +14351,10 @@
 
             // Define restore steps (matching backend's 7 steps)
             const steps = [
-                '백업 파일 검증',
-                'Docker 환경 감지',
-                '현재 DBSIZE 확인',
-                '필수 사전 백업 생성',
-                '백업 파일 복사',
-                'Redis 재시작',
+                '백업 파일 확인',
+                '현재 상태 확인',
+                '사전 백업 생성',
+                'SQL 복원 실행',
                 '복원 후 검증'
             ];
 
@@ -13873,57 +14366,42 @@
                 // We'll update steps as we progress
 
                 // Step 1: Validate backup file
-                updateProgressStep(0, 'active', '백업 파일을 검증하고 있습니다...');
+                updateProgressStep(0, 'active', '백업 파일을 확인하고 있습니다...');
                 await new Promise(resolve => setTimeout(resolve, 300));
                 updateProgressStep(0, 'completed');
 
-                // Step 2: Detect Docker
-                updateProgressStep(1, 'active', 'Docker 환경을 감지하고 있습니다...');
+                // Step 2: Check current state
+                updateProgressStep(1, 'active', '현재 데이터베이스 상태를 확인하고 있습니다...');
                 await new Promise(resolve => setTimeout(resolve, 300));
                 updateProgressStep(1, 'completed');
 
-                // Step 3: Check DBSIZE
-                updateProgressStep(2, 'active', '현재 데이터베이스 크기를 확인하고 있습니다...');
-                await new Promise(resolve => setTimeout(resolve, 300));
-                updateProgressStep(2, 'completed');
-
-                // Step 4: Pre-restore backup (CRITICAL STEP)
-                updateProgressStep(3, 'active', '현재 상태를 백업하고 있습니다... (중요)');
+                // Step 3: Pre-restore backup
+                updateProgressStep(2, 'active', '현재 상태를 사전 백업하고 있습니다... (중요)');
 
                 // Call the API
-                const data = await Auth.apiCall('/api/redis/backup/restore', {
+                const data = await Auth.apiCall('/api/db/backup/restore', {
                     method: 'POST',
                     body: JSON.stringify({ filename })
                 });
 
                 if (data.success) {
-                    // Complete all steps
-                    updateProgressStep(3, 'completed', '사전 백업이 성공적으로 생성되었습니다');
+                    updateProgressStep(2, 'completed', '사전 백업이 성공적으로 생성되었습니다');
                     await new Promise(resolve => setTimeout(resolve, 300));
 
-                    updateProgressStep(4, 'active', '백업 파일을 Redis 컨테이너로 복사하고 있습니다...');
+                    updateProgressStep(3, 'active', 'SQL 파일로 데이터베이스를 복원하고 있습니다...');
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    updateProgressStep(3, 'completed');
+
+                    updateProgressStep(4, 'active', '복원된 데이터를 검증하고 있습니다...');
                     await new Promise(resolve => setTimeout(resolve, 500));
                     updateProgressStep(4, 'completed');
 
-                    updateProgressStep(5, 'active', 'Redis를 재시작하고 있습니다...');
-                    await new Promise(resolve => setTimeout(resolve, 1000));
-                    updateProgressStep(5, 'completed');
-
-                    updateProgressStep(6, 'active', '복원된 데이터를 검증하고 있습니다...');
-                    await new Promise(resolve => setTimeout(resolve, 500));
-                    updateProgressStep(6, 'completed');
-
                     // Show success result
-                    const originalKeys = data.original_keys || '확인 불가';
-                    const restoredKeys = data.restored_keys || '확인 불가';
-
                     showProgressResult(
                         true,
                         '백업이 성공적으로 복원되었습니다',
-                        `복원 파일: ${data.filename}<br>` +
-                        `사전 백업: ${data.current_backup}<br>` +
-                        `원본 키 수: ${originalKeys.toLocaleString ? originalKeys.toLocaleString() : originalKeys}<br>` +
-                        `복원 키 수: ${restoredKeys.toLocaleString ? restoredKeys.toLocaleString() : restoredKeys}<br><br>` +
+                        `복원 파일: ${data.restored_from}<br>` +
+                        `사전 백업: ${data.current_backup || '없음'}<br><br>` +
                         `확인을 클릭하면 페이지가 새로고침됩니다.`,
                         () => {
                             isBackupOperationInProgress = false;  // Reset flag
@@ -13960,7 +14438,7 @@
                     '백업 복원 중 오류가 발생했습니다',
                     `${error.message || '서버 오류'}<br><br>` +
                     `현재 상태는 사전 백업으로부터 자동 복구되었을 수 있습니다.<br>` +
-                    `백업 목록에서 "dump_pre_restore_" 파일을 확인하세요.`,
+                    `백업 목록에서 사전 백업 파일을 확인하세요.`,
                     () => {
                         isBackupOperationInProgress = false;  // Reset flag
                         closeProgressModal();
@@ -13972,7 +14450,7 @@
         // Download backup
         async function downloadBackup(filename) {
             try {
-                const url = `/api/redis/backup/download/${filename}`;
+                const url = `/api/db/backup/download/${filename}`;
 
                 // Get access token
                 const token = Auth.getAccessToken();
@@ -14007,31 +14485,31 @@
                 devLog(`✅ Backup downloaded: ${filename}`);
             } catch (error) {
                 logger.error('Download error:', error);
-                alert(`백업 다운로드 중 오류가 발생했습니다.\n${error.message}`);
+                await showAlertModal(`백업 다운로드 중 오류가 발생했습니다.\n${error.message}`, { title: '다운로드 실패', icon: '❌', type: 'alert' });
             }
         }
 
         // Delete backup
         async function deleteBackup(filename) {
-            if (!confirm(`백업 파일을 삭제하시겠습니까?\n\n파일: ${filename}`)) {
+            if (!await showConfirmModal(`백업 파일을 삭제하시겠습니까?\n\n<strong>파일:</strong> ${filename}`, { title: '백업 삭제', icon: '🗑️', type: 'danger', okText: '삭제' })) {
                 return;
             }
 
             try {
-                const data = await Auth.apiCall('/api/redis/backup/delete', {
+                const data = await Auth.apiCall('/api/db/backup/delete', {
                     method: 'POST',
                     body: JSON.stringify({ filename })
                 });
 
                 if (data.success) {
-                    alert('✅ 백업 파일이 삭제되었습니다.');
+                    await showAlertModal('백업 파일이 삭제되었습니다.', { title: '삭제 완료', icon: '✅', type: 'success' });
                     refreshBackupList();
                 } else {
-                    alert(`❌ 삭제 실패: ${data.error || '알 수 없는 오류'}`);
+                    await showAlertModal(`삭제 실패: ${data.error || '알 수 없는 오류'}`, { title: '삭제 실패', icon: '❌', type: 'alert' });
                 }
             } catch (error) {
                 logger.error('Delete error:', error);
-                alert(`백업 삭제 중 오류가 발생했습니다.\n${error.message}`);
+                await showAlertModal(`백업 삭제 중 오류가 발생했습니다.\n${error.message}`, { title: '삭제 오류', icon: '❌', type: 'alert' });
             }
         }
 
@@ -14101,27 +14579,27 @@
                     }
                 }
 
-                const data = await Auth.apiCall('/api/redis/backup/schedule', {
+                const data = await Auth.apiCall('/api/db/backup/schedule', {
                     method: 'POST',
                     body: JSON.stringify(scheduleData)
                 });
 
                 if (data.success) {
-                    let message = `✅ 백업 스케줄이 저장되었습니다.\n주기: ${interval === 'disabled' ? '비활성화' : interval}${timeMessage}`;
-                    alert(message);
+                    let message = `백업 스케줄이 저장되었습니다.\n주기: ${interval === 'disabled' ? '비활성화' : interval}${timeMessage}`;
+                    await showAlertModal(message, { title: '스케줄 저장 완료', icon: '✅', type: 'success' });
                 } else {
-                    alert(`❌ 저장 실패: ${data.error}`);
+                    await showAlertModal(`저장 실패: ${data.error}`, { title: '저장 실패', icon: '❌', type: 'alert' });
                 }
             } catch (error) {
                 logger.error('Schedule update error:', error);
-                alert('스케줄 저장 중 오류가 발생했습니다.');
+                await showAlertModal('스케줄 저장 중 오류가 발생했습니다.', { title: '저장 오류', icon: '❌', type: 'alert' });
             }
         }
 
         // Load backup schedule on page load
         async function loadBackupSchedule() {
             try {
-                const data = await Auth.apiCall('/api/redis/backup/schedule');
+                const data = await Auth.apiCall('/api/db/backup/schedule');
 
                 if (data.success && data.schedule) {
                     const enabled = data.schedule.enabled || false;
@@ -15890,6 +16368,30 @@
         window.loadRagQualityConfig = loadRagQualityConfig;
 
     </script>
+
+    <!-- Confirm/Alert Modal (replaces native confirm/alert) -->
+    <div id="confirmModal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 480px;">
+            <div class="modal-header" id="confirmModalHeader">
+                <h3 id="confirmModalTitle" style="margin: 0; color: white; font-size: 18px;">확인</h3>
+                <button class="modal-close" onclick="closeConfirmModal(false)">&times;</button>
+            </div>
+            <div class="modal-body" style="padding: 24px 30px;">
+                <div id="confirmModalIcon" style="text-align: center; font-size: 48px; margin-bottom: 16px;">❓</div>
+                <div id="confirmModalMessage" style="text-align: center; font-size: 15px; line-height: 1.6; color: var(--text-primary); white-space: pre-line;"></div>
+            </div>
+            <div class="modal-footer" style="display: flex; gap: 12px; justify-content: center; padding: 16px 30px; border-top: 1px solid var(--border-color-light, #eee);">
+                <button id="confirmModalCancel" onclick="closeConfirmModal(false)"
+                        style="padding: 10px 28px; background: var(--bg-tertiary, #f0f0f0); color: var(--text-primary); border: 1px solid var(--border-color, #ddd); border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500; min-width: 100px;">
+                    취소
+                </button>
+                <button id="confirmModalOk" onclick="closeConfirmModal(true)"
+                        style="padding: 10px 28px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500; min-width: 100px;">
+                    확인
+                </button>
+            </div>
+        </div>
+    </div>
 
     <!-- Progress Modal -->
     <div id="progressModal" class="progress-modal">

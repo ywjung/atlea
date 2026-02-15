@@ -7,7 +7,7 @@ Default prompts for different search modes:
 - TOOLS_ONLY: Web + Official docs only
 """
 
-# System Prompt Management - Redis Keys
+# System Prompt Management
 PROMPT_KEY_BASIC = "system:prompt:basic"
 PROMPT_KEY_HYBRID = "system:prompt:hybrid"
 PROMPT_KEY_TOOLS_ONLY = "system:prompt:tools_only"
@@ -668,18 +668,19 @@ DEFAULT_TOOLS_ONLY_PROMPT = """당신은 실시간 웹 검색 및 공식 문서 
 # Prompt Selection Helper
 # ============================================================================
 
-def get_system_prompt_for_mode(redis_client, search_mode: str, sources_used: list = None) -> str:
+def get_system_prompt_for_mode(search_mode: str, sources_used: list = None) -> str:
     """
     검색 모드에 따라 적절한 시스템 프롬프트 반환
 
     Args:
-        redis_client: Redis 클라이언트
         search_mode: 검색 모드 ('smart', 'local-only', 'web-enhanced', 'comprehensive', 'tools-only')
         sources_used: 실제 사용된 소스 리스트 (['local', 'web', 'docs'])
 
     Returns:
         적절한 시스템 프롬프트
     """
+    from ..services.config_service import config_get_sync
+
     # 소스 기반으로 프롬프트 타입 결정
     prompt_type = None
 
@@ -707,23 +708,19 @@ def get_system_prompt_for_mode(redis_client, search_mode: str, sources_used: lis
             # 'smart', 'local-only' 등
             prompt_type = 'basic'
 
-    # 프롬프트 타입에 따라 가져오기
+    # PostgreSQL에서 프롬프트 가져오기
     if prompt_type == 'tools_only':
-        prompt = redis_client.get(PROMPT_KEY_TOOLS_ONLY)
+        prompt = config_get_sync(PROMPT_KEY_TOOLS_ONLY)
         if not prompt:
             prompt = DEFAULT_TOOLS_ONLY_PROMPT
     elif prompt_type == 'hybrid':
-        prompt = redis_client.get(PROMPT_KEY_HYBRID)
+        prompt = config_get_sync(PROMPT_KEY_HYBRID)
         if not prompt:
             prompt = DEFAULT_HYBRID_PROMPT
     else:
-        prompt = redis_client.get(PROMPT_KEY_BASIC)
+        prompt = config_get_sync(PROMPT_KEY_BASIC)
         if not prompt:
             prompt = DEFAULT_BASIC_PROMPT
-
-    # bytes to str 변환
-    if isinstance(prompt, bytes):
-        prompt = prompt.decode('utf-8')
 
     return prompt
 
@@ -760,7 +757,6 @@ DEFAULT_HYBRID_LOCAL_PRIORITY_PROMPT = """⭐ 내부 문서 {local_count}개 최
 
 
 def get_hybrid_rag_priority_prompt(
-    redis_client,
     needs_fresh: bool = False,
     benefits_web: bool = False,
     has_web: bool = False,
@@ -772,7 +768,6 @@ def get_hybrid_rag_priority_prompt(
     하이브리드 RAG 소스 우선순위 프롬프트 가져오기
 
     Args:
-        redis_client: Redis 클라이언트
         needs_fresh: 최신 정보 필요 여부
         benefits_web: 웹 검색이 도움되는 질문 여부
         has_web: 웹 검색 결과 있음
@@ -783,35 +778,33 @@ def get_hybrid_rag_priority_prompt(
     Returns:
         우선순위 지침 프롬프트
     """
+    from ..services.config_service import config_get_sync
+
     prompt = None
 
     # 우선순위 결정 로직
     if needs_fresh or benefits_web:
         if has_web and has_local:
             # 웹 우선 프롬프트
-            prompt = redis_client.get(PROMPT_KEY_HYBRID_WEB_PRIORITY)
+            prompt = config_get_sync(PROMPT_KEY_HYBRID_WEB_PRIORITY)
             if not prompt:
                 prompt = DEFAULT_HYBRID_WEB_PRIORITY_PROMPT
         elif has_web:
             # 웹만 프롬프트
-            prompt = redis_client.get(PROMPT_KEY_HYBRID_WEB_ONLY)
+            prompt = config_get_sync(PROMPT_KEY_HYBRID_WEB_ONLY)
             if not prompt:
                 prompt = DEFAULT_HYBRID_WEB_ONLY_PROMPT
         elif has_local:
             # 내부만 프롬프트
-            prompt = redis_client.get(PROMPT_KEY_HYBRID_LOCAL_ONLY)
+            prompt = config_get_sync(PROMPT_KEY_HYBRID_LOCAL_ONLY)
             if not prompt:
                 prompt = DEFAULT_HYBRID_LOCAL_ONLY_PROMPT
     else:
         # 일반적인 경우: 내부 문서 우선
         if has_local:
-            prompt = redis_client.get(PROMPT_KEY_HYBRID_LOCAL_PRIORITY)
+            prompt = config_get_sync(PROMPT_KEY_HYBRID_LOCAL_PRIORITY)
             if not prompt:
                 prompt = DEFAULT_HYBRID_LOCAL_PRIORITY_PROMPT
-
-    # bytes to str 변환
-    if isinstance(prompt, bytes):
-        prompt = prompt.decode('utf-8')
 
     # 변수 치환
     if prompt:

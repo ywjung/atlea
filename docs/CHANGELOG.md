@@ -717,11 +717,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Version History Summary
 
+- **2.5.1** (2026-02-07): pip 설치 가능 패키지 구조, Makefile, atlea CLI
+- **2.5.0** (2026-01-21): SearXNG 웹 검색, Crawl4AI 콘텐츠 추출, Hybrid RAG 웹 검색 통합
+- **2.4.0** (2025-12-27): 감사 로그 시스템, TOTP 2FA, CAPTCHA, 보안 강화
+- **2.3.0** (2025-12-27): 파일 업로드 보안 (MIME 검증, 악성 패턴 탐지), ClamAV 바이러스 스캔
+- **2.2.0** (2025-12-25): JWT 인증, 세션 관리, Rate Limiting, 비밀번호 정책, 보안 로깅
 - **2.1.0** (2025-12-23): Document grouping, production server optimizations, multi-worker architecture, monitoring
 - **2.0.0** (2025-12-21): Multi-format support, microservices architecture, major performance optimizations
 - **1.0.0** (2024-12-XX): Initial release with PDF/HWP support
 
-[Unreleased]: https://github.com/yourusername/chatbot_redis/compare/v2.1.0...HEAD
+[Unreleased]: https://github.com/yourusername/chatbot_redis/compare/v2.5.1...HEAD
+[2.5.1]: https://github.com/yourusername/chatbot_redis/compare/v2.5.0...v2.5.1
+[2.5.0]: https://github.com/yourusername/chatbot_redis/compare/v2.4.0...v2.5.0
+[2.4.0]: https://github.com/yourusername/chatbot_redis/compare/v2.3.0...v2.4.0
+[2.3.0]: https://github.com/yourusername/chatbot_redis/compare/v2.2.0...v2.3.0
+[2.2.0]: https://github.com/yourusername/chatbot_redis/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/yourusername/chatbot_redis/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/yourusername/chatbot_redis/compare/v1.0.0...v2.0.0
 [1.0.0]: https://github.com/yourusername/chatbot_redis/releases/tag/v1.0.0
