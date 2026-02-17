@@ -99,25 +99,25 @@ else
     echo -e "${YELLOW}  ⚠️  백업에 .env 파일이 없습니다${NC}"
 fi
 
-# 5. Redis 데이터 복원 및 서비스 재시작
-echo -e "${CYAN}[5/5]${NC} Redis 데이터 복원 및 서비스 시작 중..."
+# 5. PostgreSQL 데이터 복원 및 서비스 재시작
+echo -e "${CYAN}[5/5]${NC} PostgreSQL 데이터 복원 및 서비스 시작 중..."
 
-# Redis 먼저 시작
-docker-compose -f "$COMPOSE_FILE" up -d redis 2>/dev/null || true
+# PostgreSQL 먼저 시작
+docker-compose -f "$COMPOSE_FILE" up -d postgres 2>/dev/null || true
 sleep 5
 
-if [ -f "$EXTRACTED_DIR/redis_dump.rdb" ]; then
-    REDIS_CONTAINER=$(docker ps --format '{{.Names}}' | grep -E "redis" | grep -v "insight" | head -1)
-    if [ -n "$REDIS_CONTAINER" ]; then
-        docker cp "$EXTRACTED_DIR/redis_dump.rdb" "$REDIS_CONTAINER":/data/dump.rdb
-        docker-compose -f "$COMPOSE_FILE" restart redis
-        sleep 3
-        echo -e "${GREEN}  ✅ Redis 데이터 복원 완료${NC}"
+if [ -f "$EXTRACTED_DIR/postgres_dump.sql" ]; then
+    PG_CONTAINER=$(docker ps --format '{{.Names}}' | grep -E "postgres" | head -1)
+    if [ -n "$PG_CONTAINER" ]; then
+        docker cp "$EXTRACTED_DIR/postgres_dump.sql" "$PG_CONTAINER":/tmp/restore.sql
+        docker exec "$PG_CONTAINER" psql -U chatbot_user -d chatbot -f /tmp/restore.sql 2>/dev/null
+        docker exec "$PG_CONTAINER" rm /tmp/restore.sql
+        echo -e "${GREEN}  ✅ PostgreSQL 데이터 복원 완료${NC}"
     else
-        echo -e "${YELLOW}  ⚠️  Redis 컨테이너를 찾을 수 없습니다${NC}"
+        echo -e "${YELLOW}  ⚠️  PostgreSQL 컨테이너를 찾을 수 없습니다${NC}"
     fi
 else
-    echo -e "${YELLOW}  ⚠️  백업에 Redis 데이터가 없습니다${NC}"
+    echo -e "${YELLOW}  ⚠️  백업에 PostgreSQL 데이터가 없습니다${NC}"
 fi
 
 # 전체 서비스 시작

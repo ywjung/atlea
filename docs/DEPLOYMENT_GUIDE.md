@@ -103,7 +103,7 @@ JWT_SECRET_KEY=여기에_생성된_키_입력
 DATABASE_URL=postgresql+asyncpg://atlea:password@localhost:5432/atlea
 
 # 서버 포트
-PORT=8000
+PORT=8085
 
 # 모델 설정 (RAM에 따라 선택)
 # 20GB+ RAM → mlx-community/Qwen3-30B-A3B-4bit
@@ -167,10 +167,10 @@ sudo systemctl start postgresql
 
 | 서비스 | URL | 설명 |
 |--------|-----|------|
-| 웹 UI | http://localhost:8000 | 챗봇 메인 화면 |
-| 소개 페이지 | http://localhost:8000/landing.html | 제품 소개 |
-| API 문서 | http://localhost:8000/docs | Swagger UI |
-| 건강 상태 | http://localhost:8000/health | 서버 상태 |
+| 웹 UI | http://localhost:8085 | 챗봇 메인 화면 |
+| 소개 페이지 | http://localhost:8085/landing.html | 제품 소개 |
+| API 문서 | http://localhost:8085/docs | Swagger UI |
+| 건강 상태 | http://localhost:8085/health | 서버 상태 |
 | PostgreSQL | localhost:5432 | 데이터베이스 |
 
 ---
@@ -299,7 +299,7 @@ Docker 없이 Nginx를 직접 설정하는 경우 (`/etc/nginx/sites-available/c
 
 ```nginx
 upstream chatbot {
-    server 127.0.0.1:8000;
+    server 127.0.0.1:8085;
 }
 
 server {
@@ -404,7 +404,7 @@ User=www-data
 WorkingDirectory=/path/to/chatbot_redis
 Environment="PATH=/path/to/venv/bin"
 EnvironmentFile=/path/to/chatbot_redis/.env
-ExecStart=/path/to/venv/bin/uvicorn src.web_server:app --host 0.0.0.0 --port 8000 --workers 4
+ExecStart=/path/to/venv/bin/uvicorn src.web_server:app --host 0.0.0.0 --port 8085 --workers 4
 Restart=always
 RestartSec=10
 
@@ -642,7 +642,7 @@ CLAMAV_PORT=3310
 |------|------|--------|
 | `JWT_SECRET_KEY` | JWT 토큰 서명 키 (32자 이상) | 없음 (반드시 설정) |
 | `DATABASE_URL` | PostgreSQL 연결 URL | postgresql+asyncpg://... |
-| `PORT` | 서버 포트 | 8000 |
+| `PORT` | 서버 포트 | 8085 |
 | `LLM_MODEL` | LLM 모델 경로 | Qwen3-30B-A3B-4bit |
 | `EMBEDDING_MODEL` | 임베딩 모델 경로 | nlpai-lab/KURE-v1 |
 
@@ -789,7 +789,7 @@ docker stats
 docker-compose -f docker-compose.full.yml logs -f chatbot-app --tail=100
 
 # 건강 상태 API
-curl http://localhost:8000/health
+curl http://localhost:8085/health
 ```
 
 ### Prometheus + Grafana (프로덕션)
@@ -820,7 +820,7 @@ git pull origin main
 docker-compose -f docker-compose.full.yml up -d --build
 
 # 4. 확인
-curl http://localhost:8000/health
+curl http://localhost:8085/health
 ```
 
 ### 롤백
@@ -884,7 +884,7 @@ docker-compose -f docker-compose.full.yml logs chatbot-app
 
 # 주요 원인:
 # 1. PostgreSQL 연결 실패 → PostgreSQL 먼저 시작 확인
-# 2. 포트 충돌 → lsof -i :8000
+# 2. 포트 충돌 → lsof -i :8085
 # 3. 메모리 부족 → docker stats
 ```
 
@@ -912,7 +912,7 @@ ollama pull alibayram/Qwen3-30B-A3B-Instruct-2507:latest
 
 ```bash
 # 사용 중인 포트 확인
-lsof -i :8000
+lsof -i :8085
 lsof -i :6379
 
 # 해결: .env에서 PORT 값 변경
@@ -958,7 +958,7 @@ sudo certbot renew
 |------|--------|----------|
 | 80 | Nginx HTTP | 프로덕션 |
 | 443 | Nginx HTTPS | 프로덕션 |
-| 8000 | 챗봇 웹 UI / API | 전체 |
+| 8085 | 챗봇 웹 UI / API | 전체 |
 | 5432 | PostgreSQL | 전체 (프로덕션: 외부 차단) |
 | 8081 | Document Service | 전체 (프로덕션: 외부 차단) |
 | 3310 | ClamAV | 전체 |

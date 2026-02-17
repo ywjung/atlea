@@ -88,23 +88,23 @@
 ```bash
 # 모든 로그 조회 (최근 100개)
 curl -H "Authorization: Bearer <admin_token>" \
-  "http://localhost:8000/api/admin/audit/logs"
+  "http://localhost:8085/api/admin/audit/logs"
 
 # 특정 사용자의 로그
 curl -H "Authorization: Bearer <admin_token>" \
-  "http://localhost:8000/api/admin/audit/logs?user_id=user123&limit=50"
+  "http://localhost:8085/api/admin/audit/logs?user_id=user123&limit=50"
 
 # 특정 작업 유형 필터
 curl -H "Authorization: Bearer <admin_token>" \
-  "http://localhost:8000/api/admin/audit/logs?action=login&limit=20"
+  "http://localhost:8085/api/admin/audit/logs?action=login&limit=20"
 
 # 날짜 범위 필터
 curl -H "Authorization: Bearer <admin_token>" \
-  "http://localhost:8000/api/admin/audit/logs?start_date=2025-12-01&end_date=2025-12-31"
+  "http://localhost:8085/api/admin/audit/logs?start_date=2025-12-01&end_date=2025-12-31"
 
 # 페이지네이션
 curl -H "Authorization: Bearer <admin_token>" \
-  "http://localhost:8000/api/admin/audit/logs?limit=50&offset=100"
+  "http://localhost:8085/api/admin/audit/logs?limit=50&offset=100"
 ```
 
 **응답**:
@@ -145,11 +145,11 @@ curl -H "Authorization: Bearer <admin_token>" \
 ```bash
 # 최근 7일 통계
 curl -H "Authorization: Bearer <admin_token>" \
-  "http://localhost:8000/api/admin/audit/stats"
+  "http://localhost:8085/api/admin/audit/stats"
 
 # 특정 기간 통계
 curl -H "Authorization: Bearer <admin_token>" \
-  "http://localhost:8000/api/admin/audit/stats?start_date=2025-12-01&end_date=2025-12-31"
+  "http://localhost:8085/api/admin/audit/stats?start_date=2025-12-01&end_date=2025-12-31"
 ```
 
 **응답**:
@@ -194,7 +194,7 @@ curl -H "Authorization: Bearer <admin_token>" \
 ```bash
 # 사용자 활동 조회
 curl -H "Authorization: Bearer <admin_token>" \
-  "http://localhost:8000/api/admin/audit/user/user123?limit=100"
+  "http://localhost:8085/api/admin/audit/user/user123?limit=100"
 ```
 
 **응답**:
@@ -224,7 +224,7 @@ curl -H "Authorization: Bearer <admin_token>" \
 ```bash
 # 사용 가능한 작업 유형 조회
 curl -H "Authorization: Bearer <admin_token>" \
-  "http://localhost:8000/api/admin/audit/actions"
+  "http://localhost:8085/api/admin/audit/actions"
 ```
 
 **응답**:
@@ -248,7 +248,7 @@ curl -H "Authorization: Bearer <admin_token>" \
 import requests
 
 # 관리자 로그인
-response = requests.post("http://localhost:8000/api/auth/login", json={
+response = requests.post("http://localhost:8085/api/auth/login", json={
     "username": "admin",
     "password": "admin_password"
 })
@@ -258,7 +258,7 @@ headers = {"Authorization": f"Bearer {token}"}
 
 # 감사 로그 조회
 response = requests.get(
-    "http://localhost:8000/api/admin/audit/logs",
+    "http://localhost:8085/api/admin/audit/logs",
     headers=headers,
     params={
         "action": "login",
@@ -272,7 +272,7 @@ for log in logs:
 
 # 통계 조회
 response = requests.get(
-    "http://localhost:8000/api/admin/audit/stats",
+    "http://localhost:8085/api/admin/audit/stats",
     headers=headers
 )
 stats = response.json()
@@ -284,7 +284,7 @@ print(f"성공률: {stats['summary']['success_rate']}%")
 
 ```javascript
 // 관리자 로그인
-const loginResponse = await fetch('http://localhost:8000/api/auth/login', {
+const loginResponse = await fetch('http://localhost:8085/api/auth/login', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({
@@ -296,7 +296,7 @@ const { access_token } = await loginResponse.json();
 
 // 감사 로그 조회
 const logsResponse = await fetch(
-  'http://localhost:8000/api/admin/audit/logs?action=login&limit=20',
+  'http://localhost:8085/api/admin/audit/logs?action=login&limit=20',
   {
     headers: { 'Authorization': `Bearer ${access_token}` }
   }
@@ -309,7 +309,7 @@ logs.forEach(log => {
 
 // 통계 조회
 const statsResponse = await fetch(
-  'http://localhost:8000/api/admin/audit/stats',
+  'http://localhost:8085/api/admin/audit/stats',
   {
     headers: { 'Authorization': `Bearer ${access_token}` }
   }
@@ -326,7 +326,7 @@ console.log(`성공률: ${stats.summary.success_rate}%`);
 ```bash
 # 로그인 실패 모니터링
 curl -H "Authorization: Bearer <token>" \
-  "http://localhost:8000/api/admin/audit/logs?action=login_failed&limit=50"
+  "http://localhost:8085/api/admin/audit/logs?action=login_failed&limit=50"
 
 # 특정 IP의 의심스러운 활동
 # (IP 필터는 로그 조회 후 클라이언트에서 필터링)
@@ -337,11 +337,11 @@ curl -H "Authorization: Bearer <token>" \
 ```bash
 # 사용자의 활동 패턴 분석
 curl -H "Authorization: Bearer <token>" \
-  "http://localhost:8000/api/admin/audit/user/user123?limit=200"
+  "http://localhost:8085/api/admin/audit/user/user123?limit=200"
 
 # 문서 업로드 활동 조회
 curl -H "Authorization: Bearer <token>" \
-  "http://localhost:8000/api/admin/audit/logs?action=document_upload"
+  "http://localhost:8085/api/admin/audit/logs?action=document_upload"
 ```
 
 ### 3. 규정 준수 보고서
@@ -349,7 +349,7 @@ curl -H "Authorization: Bearer <token>" \
 ```bash
 # 월간 활동 보고서
 curl -H "Authorization: Bearer <token>" \
-  "http://localhost:8000/api/admin/audit/stats?start_date=2025-12-01&end_date=2025-12-31"
+  "http://localhost:8085/api/admin/audit/stats?start_date=2025-12-01&end_date=2025-12-31"
 ```
 
 ### 4. 문제 해결
@@ -357,7 +357,7 @@ curl -H "Authorization: Bearer <token>" \
 ```bash
 # 특정 시간대의 오류 조회
 curl -H "Authorization: Bearer <token>" \
-  "http://localhost:8000/api/admin/audit/logs?start_date=2025-12-27&end_date=2025-12-27&limit=1000"
+  "http://localhost:8085/api/admin/audit/logs?start_date=2025-12-27&end_date=2025-12-27&limit=1000"
 # 응답에서 success=false 항목 필터링
 ```
 
@@ -424,4 +424,4 @@ redis-cli info memory
 ## 📝 참고
 
 - 자세한 변경 이력: [CHANGELOG.md](CHANGELOG.md)
-- API 문서: http://localhost:8000/docs (개발 모드)
+- API 문서: http://localhost:8085/docs (개발 모드)

@@ -75,7 +75,7 @@ ENV PATH="/opt/venv/bin:$PATH" \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/app \
     HOST=0.0.0.0 \
-    PORT=8000
+    PORT=8085
 
 # Switch to non-root user
 USER ${APP_USER}

@@ -49,8 +49,7 @@ show_status() {
     if is_running; then
         PID=$(cat "$PID_FILE")
         echo "✅ 서버가 실행 중입니다 (PID: $PID)"
-        echo "📍 주소: http://localhost:${PORT:-8000}"
-        echo "📊 RedisInsight: http://localhost:8001"
+        echo "📍 주소: http://localhost:${PORT:-8085}"
         echo "📝 로그: tail -f $LOG_FILE"
     else
         echo "❌ 서버가 실행 중이지 않습니다"
@@ -111,42 +110,28 @@ fi
 echo "🔧 가상환경 활성화..."
 source venv/bin/activate
 
-# Check if Redis is running
-echo "🔍 Redis 상태 확인..."
+# Check if PostgreSQL is running
+echo "🔍 PostgreSQL 상태 확인..."
 
-# Try to ping Redis directly first
-if redis-cli ping > /dev/null 2>&1; then
-    echo "✅ Redis가 실행 중입니다 (네이티브)"
+if command -v docker-compose > /dev/null 2>&1 && docker-compose ps 2>/dev/null | grep -q "postgres.*Up"; then
+    echo "✅ PostgreSQL이 실행 중입니다 (Docker)"
 else
-    # Check if running in Docker Compose
-    if command -v docker-compose > /dev/null 2>&1 && docker-compose ps 2>/dev/null | grep -q "redis.*Up"; then
-        echo "✅ Redis가 실행 중입니다 (Docker)"
-    else
-        # Try to start Redis via docker-compose
-        if command -v docker-compose > /dev/null 2>&1 && [ -f "docker-compose.yml" ]; then
-            echo "📦 Docker Compose로 Redis 시작 중..."
-            docker-compose up -d redis
-            echo "⏳ Redis 준비 대기..."
-            sleep 5
+    # Try to start services via docker-compose
+    if command -v docker-compose > /dev/null 2>&1 && [ -f "docker-compose.yml" ]; then
+        echo "📦 Docker Compose로 서비스 시작 중..."
+        docker-compose up -d
+        echo "⏳ PostgreSQL 준비 대기..."
+        sleep 5
 
-            if redis-cli ping > /dev/null 2>&1; then
-                echo "✅ Redis가 시작되었습니다"
-            else
-                echo "❌ Redis를 시작할 수 없습니다"
-                echo "💡 Redis를 수동으로 시작하세요:"
-                echo "   - Linux: sudo systemctl start redis-server"
-                echo "   - Mac: brew services start redis"
-                echo "   - Docker: docker-compose up -d"
-                exit 1
-            fi
+        if docker-compose ps 2>/dev/null | grep -q "postgres.*Up"; then
+            echo "✅ PostgreSQL이 시작되었습니다"
         else
-            echo "❌ Redis가 실행 중이지 않습니다"
-            echo "💡 Redis를 먼저 시작하세요:"
-            echo "   - Linux: sudo systemctl start redis-server"
-            echo "   - Mac: brew services start redis"
-            echo "   - Docker: docker-compose up -d"
+            echo "❌ PostgreSQL을 시작할 수 없습니다"
+            echo "💡 Docker Compose를 확인하세요: docker-compose logs postgres"
             exit 1
         fi
+    else
+        echo "⚠️  Docker Compose가 없습니다. PostgreSQL이 별도로 실행 중이어야 합니다."
     fi
 fi
 
@@ -157,12 +142,11 @@ fi
 
 # Get host and port from environment or use defaults
 HOST=${HOST:-0.0.0.0}
-PORT=${PORT:-8000}
+PORT=${PORT:-8085}
 
 echo ""
 echo "✨ 서버 시작 중..."
 echo "📍 주소: http://localhost:$PORT"
-echo "📊 RedisInsight: http://localhost:8001"
 echo ""
 
 # Run in background or foreground

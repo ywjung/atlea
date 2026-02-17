@@ -10,11 +10,10 @@ This module provides endpoints for:
 All endpoints require authentication.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from typing import Optional
 from loguru import logger
-from ..auth.middleware import get_current_active_user
+from ..auth.middleware import get_current_active_user, require_admin
 from ..utils.error_handling import get_safe_error_message
 
 # Create router with prefix and tags
@@ -93,8 +92,7 @@ async def get_cache_stats(
 
 @router.post("/cache/clear", tags=["Cache"])
 async def clear_cache(
-    request: Request,
-    current_user: dict = Depends(get_current_active_user)
+    current_user: dict = Depends(require_admin)
 ):
     """
     Clear all cached responses (관리자 전용)
@@ -107,8 +105,7 @@ async def clear_cache(
     Requires admin privileges.
 
     Args:
-        request: FastAPI request object (for admin validation)
-        current_user: Authenticated user (injected by dependency)
+        current_user: Authenticated admin user (injected by dependency)
 
     Returns:
         dict: Success message and number of entries cleared
@@ -119,10 +116,6 @@ async def clear_cache(
         HTTPException: 500 if error occurs
     """
     try:
-        # 관리자 권한 확인
-        if current_user.get("role") != "admin":
-            raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다")
-
         if not cache_manager:
             raise HTTPException(status_code=503, detail="Cache manager not initialized")
 

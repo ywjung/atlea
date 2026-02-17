@@ -48,4 +48,4 @@ volumes:
 networks:
   default:
     external: true
-    name: chatbot_redis_default
+    name: chatbot_redis_default  # docker-compose.yml 기본 네트워크 (docker-compose.full.yml 사용 시 chatbot_redis_chatbot-network 로 변경)

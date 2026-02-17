@@ -4,7 +4,7 @@
 # ATLEA 챗봇 시스템 - 간편 배포 스크립트
 # ==============================================================================
 # 사용법:
-#   ./deploy.sh dev          - 로컬 개발 (Redis + 부가서비스만, 앱은 직접 실행)
+#   ./deploy.sh dev          - 로컬 개발 (PostgreSQL + 부가서비스만, 앱은 직접 실행)
 #   ./deploy.sh docker       - Docker 올인원 배포
 #   ./deploy.sh production   - 프로덕션 배포 (SSL + Nginx)
 #   ./deploy.sh gpu          - GPU 서버 배포
@@ -77,10 +77,10 @@ print_header() {
 }
 
 print_urls() {
-    local PORT=${PORT:-8000}
+    local PORT=${PORT:-8085}
     if [ -f ".env" ]; then
-        PORT=$(grep "^PORT=" .env 2>/dev/null | cut -d= -f2 || echo "8000")
-        PORT=${PORT:-8000}
+        PORT=$(grep "^PORT=" .env 2>/dev/null | cut -d= -f2 || echo "8085")
+        PORT=${PORT:-8085}
     fi
 
     echo ""
@@ -89,7 +89,6 @@ print_urls() {
     echo -e "    소개 페이지:  http://localhost:$PORT/landing.html"
     echo -e "    API 문서:    http://localhost:$PORT/docs"
     echo -e "    상태 확인:   http://localhost:$PORT/health"
-    echo -e "    RedisInsight: http://localhost:8001"
     echo ""
 }
 
@@ -103,7 +102,7 @@ case "${1:-help}" in
         ensure_env
         ensure_dirs
 
-        echo -e "${CYAN}[1/2]${NC} 부가 서비스 시작 (Redis, Document Service, ClamAV)..."
+        echo -e "${CYAN}[1/2]${NC} 부가 서비스 시작 (PostgreSQL, Document Service, ClamAV)..."
         docker-compose up -d
 
         echo -e "${CYAN}[2/2]${NC} 서비스 시작 대기 중..."

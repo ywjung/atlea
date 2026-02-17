@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-Fix groups that are incorrectly in root indexes when they have parents
+[DEPRECATED] Fix groups that are incorrectly in root indexes when they have parents
+
+This script uses Redis directly and is no longer compatible with the
+PostgreSQL-based architecture (v3.0+). Kept for historical reference only.
 """
 
 import sys

@@ -21,7 +21,7 @@
 - Layer 캐싱 최적화
 - .dockerignore로 불필요한 파일 제외
 - Nginx reverse proxy로 부하 분산
-- Redis 영구 저장 및 캐싱 설정
+- PostgreSQL + pgvector 벡터 검색
 
 ### 4. 운영 기능
 - Health check 자동화
@@ -34,16 +34,17 @@
 ### 1. 환경 설정
 
 ```bash
-# .env.production 파일 생성
-cp .env.production.example .env.production
+# .env 파일 생성
+cp .env.example .env
 
 # 환경 변수 설정
-nano .env.production
+nano .env
 ```
 
 필수 환경 변수:
-- `REDIS_PASSWORD`: Redis 비밀번호 (강력한 암호 사용)
-- `GRAFANA_PASSWORD`: Grafana 관리자 비밀번호
+- `JWT_SECRET_KEY`: JWT 시크릿 키 (최소 32자)
+- `SECRET_KEY`: 앱 시크릿 키
+- `POSTGRES_PASSWORD`: PostgreSQL 비밀번호
 
 ### 2. 이미지 빌드
 
@@ -63,7 +64,7 @@ export DOCKER_REGISTRY=your-registry.com/your-org
 
 ```bash
 # 프로덕션 환경 배포
-./docker-deploy.sh production
+./deploy.sh production
 
 # 로그 확인
 docker-compose -f docker-compose.production.yml logs -f
@@ -77,14 +78,14 @@ docker-compose -f docker-compose.production.yml ps
 ### Core Services
 
 1. **app** - FastAPI 애플리케이션
-   - Port: 8000 (internal)
+   - Port: 8085 (internal)
    - Resources: 2 CPU, 4GB RAM
-   - Health check: `/api/status`
+   - Health check: `/health`
 
-2. **redis** - Redis 데이터베이스
-   - Port: 6379 (internal only)
-   - Persistence: AOF + RDB
-   - Max Memory: 2GB (LRU eviction)
+2. **postgres** - PostgreSQL 17 + pgvector
+   - Port: 5432 (internal only)
+   - Persistence: Docker volume
+   - Extensions: pgvector, pg_trgm
 
 3. **nginx** - Reverse Proxy
    - Port: 80 (HTTP), 443 (HTTPS)
@@ -93,13 +94,10 @@ docker-compose -f docker-compose.production.yml ps
 
 ### Optional Services (monitoring profile)
 
-4. **redis-insight** - Redis 관리 UI
-   - Port: 8001 (localhost only)
-
-5. **prometheus** - 메트릭 수집
+4. **prometheus** - 메트릭 수집
    - Port: 9090 (localhost only)
 
-6. **grafana** - 시각화 대시보드
+5. **grafana** - 시각화 대시보드
    - Port: 3000 (localhost only)
 
 ## SSL 인증서 설정
@@ -141,7 +139,6 @@ docker-compose -f docker-compose.production.yml --profile monitoring up -d
 # 접속
 # Grafana: http://localhost:3000 (admin / GRAFANA_PASSWORD)
 # Prometheus: http://localhost:9090
-# Redis Insight: http://localhost:8001
 ```
 
 ## 스케일링
@@ -173,16 +170,17 @@ deploy:
 
 ## 백업 및 복구
 
-### Redis 데이터 백업
+### PostgreSQL 데이터 백업
 
 ```bash
 # 백업 생성
-docker-compose -f docker-compose.production.yml exec redis redis-cli --raw SAVE
-docker cp chatbot_redis:/data/dump.rdb ./backups/redis-$(date +%Y%m%d).rdb
+docker-compose -f docker-compose.production.yml exec postgres \
+  pg_dump -U chatbot_user chatbot > ./backups/postgres-$(date +%Y%m%d).sql
 
 # 백업 복구
-docker cp ./backups/redis-20240101.rdb chatbot_redis:/data/dump.rdb
-docker-compose -f docker-compose.production.yml restart redis
+cat ./backups/postgres-20260101.sql | \
+  docker-compose -f docker-compose.production.yml exec -T postgres \
+  psql -U chatbot_user chatbot
 ```
 
 ### 애플리케이션 데이터 백업
@@ -197,6 +195,16 @@ docker cp ./backups/data-backup.tar.gz chatbot_app_1:/tmp/
 docker-compose -f docker-compose.production.yml exec app tar xzf /tmp/data-backup.tar.gz -C /
 ```
 
+### 자동 백업
+
+```bash
+# 백업 스크립트 사용
+./scripts/backup.sh
+
+# 복원
+./scripts/restore.sh backups/backup_20260101_120000.tar.gz
+```
+
 ## 로그 관리
 
 ```bash
@@ -207,7 +215,7 @@ docker-compose -f docker-compose.production.yml logs -f app
 docker-compose -f docker-compose.production.yml logs --tail=100 app
 
 # 특정 시간 이후 로그
-docker-compose -f docker-compose.production.yml logs --since="2024-01-01T00:00:00"
+docker-compose -f docker-compose.production.yml logs --since="2026-01-01T00:00:00"
 
 # 로그 저장
 docker-compose -f docker-compose.production.yml logs > logs/app-$(date +%Y%m%d).log
@@ -222,10 +230,10 @@ docker-compose -f docker-compose.production.yml logs > logs/app-$(date +%Y%m%d).
 ./docker-build.sh v2.0.0
 
 # 2. 새 컨테이너 시작 (다른 포트)
-docker run -d --name app_new -p 8001:8000 chatbot-app:v2.0.0
+docker run -d --name app_new -p 8086:8085 chatbot-app:v2.0.0
 
 # 3. Health check
-curl http://localhost:8001/api/status
+curl http://localhost:8086/health
 
 # 4. Nginx upstream 전환
 # nginx.conf 수정 후
@@ -259,18 +267,19 @@ docker-compose -f docker-compose.production.yml exec app /bin/bash
 docker-compose -f docker-compose.production.yml exec app env
 ```
 
-### Redis 연결 실패
+### PostgreSQL 연결 실패
 
 ```bash
-# Redis 상태 확인
-docker-compose -f docker-compose.production.yml exec redis redis-cli ping
+# PostgreSQL 상태 확인
+docker-compose -f docker-compose.production.yml exec postgres pg_isready
 
-# 비밀번호로 접속
-docker-compose -f docker-compose.production.yml exec redis \
-  redis-cli -a $REDIS_PASSWORD ping
+# 직접 접속 테스트
+docker-compose -f docker-compose.production.yml exec postgres \
+  psql -U chatbot_user -d chatbot -c "SELECT 1;"
 
 # 연결 정보 확인
-docker-compose -f docker-compose.production.yml exec redis redis-cli info
+docker-compose -f docker-compose.production.yml exec postgres \
+  psql -U chatbot_user -d chatbot -c "SELECT version();"
 ```
 
 ### 성능 문제
@@ -281,7 +290,7 @@ docker stats
 
 # 상세 메트릭
 docker-compose -f docker-compose.production.yml exec app \
-  curl http://localhost:8000/metrics
+  curl http://localhost:8085/health
 
 # Prometheus 확인
 open http://localhost:9090
@@ -289,7 +298,8 @@ open http://localhost:9090
 
 ## 보안 체크리스트
 
-- [ ] Redis 비밀번호 설정됨
+- [ ] PostgreSQL 비밀번호 설정됨
+- [ ] JWT_SECRET_KEY 설정됨 (최소 32자)
 - [ ] SSL 인증서 설정됨
 - [ ] Nginx rate limiting 활성화됨
 - [ ] 방화벽 규칙 설정됨
@@ -309,17 +319,14 @@ worker_connections 2048;  # 동시 연결 수
 keepalive_timeout 65;  # Keep-alive 타임아웃
 ```
 
-### Redis
+### PostgreSQL
 
-```bash
-# Redis 메모리 정책
-maxmemory 2gb
-maxmemory-policy allkeys-lru
-
-# Persistence 설정
-save 900 1
-save 300 10
-appendonly yes
+```sql
+-- postgresql.conf 튜닝
+shared_buffers = '256MB'
+work_mem = '16MB'
+maintenance_work_mem = '128MB'
+effective_cache_size = '1GB'
 ```
 
 ### FastAPI
@@ -334,5 +341,5 @@ environment:
 
 - [Docker Best Practices](https://docs.docker.com/develop/dev-best-practices/)
 - [Nginx Documentation](https://nginx.org/en/docs/)
-- [Redis Production Deployment](https://redis.io/topics/admin)
+- [PostgreSQL Documentation](https://www.postgresql.org/docs/)
 - [FastAPI Deployment](https://fastapi.tiangolo.com/deployment/)

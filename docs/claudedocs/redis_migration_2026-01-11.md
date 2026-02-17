@@ -213,7 +213,7 @@ redis-cli -p 6380 SHUTDOWN NOSAVE
 
 ```bash
 # 관리자 페이지에서 리인덱싱 실행
-curl -X POST http://localhost:8000/api/reindex \
+curl -X POST http://localhost:8085/api/reindex \
   -H "Authorization: Bearer <admin_token>"
 ```
 

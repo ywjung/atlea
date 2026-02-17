@@ -370,7 +370,7 @@ curl http://localhost:8082/management/metrics/cache.gets
 curl http://localhost:8081/api/document/health
 
 # Python Web Server
-curl http://localhost:8000/
+curl http://localhost:8085/
 
 # Redis
 redis-cli ping

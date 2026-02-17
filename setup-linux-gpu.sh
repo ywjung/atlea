@@ -82,17 +82,18 @@ else:
 EOF
 echo ""
 
-# Install Redis if not present
-echo "Checking Redis..."
-if ! command -v redis-server &> /dev/null; then
-    echo "Redis not found. Installing..."
+# Check Docker for PostgreSQL
+echo "Checking Docker..."
+if ! command -v docker &> /dev/null; then
+    echo "Docker not found. Installing..."
     sudo apt-get update
-    sudo apt-get install -y redis-server
-    sudo systemctl enable redis-server
-    sudo systemctl start redis-server
-    echo "✅ Redis installed and started"
+    sudo apt-get install -y docker.io docker-compose
+    sudo systemctl enable docker
+    sudo systemctl start docker
+    sudo usermod -aG docker $USER
+    echo "✅ Docker installed (re-login required for group membership)"
 else
-    echo "✅ Redis already installed"
+    echo "✅ Docker already installed"
 fi
 echo ""
 
@@ -112,13 +113,13 @@ else
 fi
 echo ""
 
-# Test Redis connection
-echo "Testing Redis connection..."
-if redis-cli ping &> /dev/null; then
-    echo "✅ Redis is running"
+# Start PostgreSQL via Docker
+echo "Starting PostgreSQL..."
+if docker-compose up -d postgres 2>/dev/null; then
+    echo "✅ PostgreSQL started via Docker"
 else
-    echo "⚠️  Warning: Redis is not responding"
-    echo "Start Redis with: sudo systemctl start redis-server"
+    echo "⚠️  Warning: Could not start PostgreSQL"
+    echo "Start with: docker-compose up -d"
 fi
 echo ""
 

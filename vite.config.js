@@ -77,11 +77,11 @@ export default defineConfig({
         host: true,
         proxy: {
             '/api': {
-                target: 'http://localhost:8000',
+                target: 'http://localhost:8085',
                 changeOrigin: true,
             },
             '/auth': {
-                target: 'http://localhost:8000',
+                target: 'http://localhost:8085',
                 changeOrigin: true,
             },
         },

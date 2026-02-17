@@ -116,7 +116,7 @@ INFO:     Application startup complete.
 
 ### 엔드포인트 확인
 ```bash
-$ curl -s http://localhost:8000/openapi.json | jq -r '.paths | keys[] | select(startswith("/api/reindex") or startswith("/api/documents"))'
+$ curl -s http://localhost:8085/openapi.json | jq -r '.paths | keys[] | select(startswith("/api/reindex") or startswith("/api/documents"))'
 
 /api/documents                                    ✅
 /api/documents/{filename}/download                ✅

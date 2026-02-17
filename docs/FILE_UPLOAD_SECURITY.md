@@ -197,7 +197,7 @@ await validate_file_security(
 - **Application logs**: `logs/server.log`
 - **Audit logs**: Redis `audit:security:*` keys (90일 보관)
 - **Security events**: WebSocket alerts for admins
-- **Admin UI**: http://localhost:8000/admin.html → [보안] 탭 → [보안 이벤트]
+- **Admin UI**: http://localhost:8085/admin.html → [보안] 탭 → [보안 이벤트]
 
 ## Testing Recommendations
 
@@ -213,19 +213,19 @@ await validate_file_security(
 ### Manual Testing
 ```bash
 # Test path traversal
-curl -X POST http://localhost:8000/api/documents/upload \
+curl -X POST http://localhost:8085/api/documents/upload \
   -H "Authorization: Bearer $TOKEN" \
   -F "file=@../../../etc/passwd;filename=../../etc/passwd.pdf"
 
 # Test MIME type validation
-curl -X POST http://localhost:8000/api/documents/upload \
+curl -X POST http://localhost:8085/api/documents/upload \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: text/html" \
   -F "file=@document.pdf"
 
 # Test size limit
 dd if=/dev/zero of=large.pdf bs=1M count=101  # Create 101MB file
-curl -X POST http://localhost:8000/api/documents/upload \
+curl -X POST http://localhost:8085/api/documents/upload \
   -H "Authorization: Bearer $TOKEN" \
   -F "file=@large.pdf"
 ```

@@ -129,91 +129,91 @@ Test each endpoint to ensure it works correctly:
 #### Reindex Endpoints
 ```bash
 # Test reindex progress
-curl -X GET http://localhost:8000/api/reindex/progress \
+curl -X GET http://localhost:8085/api/reindex/progress \
   -H "Authorization: Bearer $TOKEN"
 
 # Test start reindex (admin only)
-curl -X POST http://localhost:8000/api/reindex \
+curl -X POST http://localhost:8085/api/reindex \
   -H "Authorization: Bearer $ADMIN_TOKEN"
 
 # Test cancel reindex
-curl -X POST http://localhost:8000/api/reindex/cancel \
+curl -X POST http://localhost:8085/api/reindex/cancel \
   -H "Authorization: Bearer $TOKEN"
 
 # Test clear progress (admin only)
-curl -X DELETE http://localhost:8000/api/reindex/progress \
+curl -X DELETE http://localhost:8085/api/reindex/progress \
   -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
 
 #### Document Operations
 ```bash
 # List documents
-curl -X GET http://localhost:8000/api/documents \
+curl -X GET http://localhost:8085/api/documents \
   -H "Authorization: Bearer $TOKEN"
 
 # Get document chunks
-curl -X GET http://localhost:8000/api/documents/test.pdf/chunks \
+curl -X GET http://localhost:8085/api/documents/test.pdf/chunks \
   -H "Authorization: Bearer $TOKEN"
 
 # Upload document (admin only)
-curl -X POST http://localhost:8000/api/documents/upload \
+curl -X POST http://localhost:8085/api/documents/upload \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -F "file=@test.pdf"
 
 # Download document
-curl -X GET http://localhost:8000/api/documents/test.pdf/download \
+curl -X GET http://localhost:8085/api/documents/test.pdf/download \
   -H "Authorization: Bearer $TOKEN"
 
 # Download as PDF
-curl -X GET http://localhost:8000/api/documents/test.hwp/download-pdf \
+curl -X GET http://localhost:8085/api/documents/test.hwp/download-pdf \
   -H "Authorization: Bearer $TOKEN"
 
 # View document
-curl -X GET http://localhost:8000/api/documents/test.pdf/view \
+curl -X GET http://localhost:8085/api/documents/test.pdf/view \
   -H "Authorization: Bearer $TOKEN"
 
 # Delete document
-curl -X DELETE http://localhost:8000/api/documents/test.pdf \
+curl -X DELETE http://localhost:8085/api/documents/test.pdf \
   -H "Authorization: Bearer $TOKEN"
 ```
 
 #### Version Management
 ```bash
 # List versions
-curl -X GET http://localhost:8000/api/documents/test.pdf/versions \
+curl -X GET http://localhost:8085/api/documents/test.pdf/versions \
   -H "Authorization: Bearer $TOKEN"
 
 # Get version metadata
-curl -X GET http://localhost:8000/api/documents/test.pdf/versions/1 \
+curl -X GET http://localhost:8085/api/documents/test.pdf/versions/1 \
   -H "Authorization: Bearer $TOKEN"
 
 # Compare versions
-curl -X GET "http://localhost:8000/api/documents/test.pdf/versions/compare?version1=1&version2=2" \
+curl -X GET "http://localhost:8085/api/documents/test.pdf/versions/compare?version1=1&version2=2" \
   -H "Authorization: Bearer $TOKEN"
 
 # Restore version
-curl -X POST http://localhost:8000/api/documents/test.pdf/versions/1/restore \
+curl -X POST http://localhost:8085/api/documents/test.pdf/versions/1/restore \
   -H "Authorization: Bearer $TOKEN"
 
 # Delete version
-curl -X DELETE http://localhost:8000/api/documents/test.pdf/versions/1 \
+curl -X DELETE http://localhost:8085/api/documents/test.pdf/versions/1 \
   -H "Authorization: Bearer $TOKEN"
 
 # Migrate versions
-curl -X POST http://localhost:8000/api/documents/migrate-versions \
+curl -X POST http://localhost:8085/api/documents/migrate-versions \
   -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
 
 #### Group Management
 ```bash
 # Assign document to group
-curl -X PUT http://localhost:8000/api/documents/test.pdf/group \
+curl -X PUT http://localhost:8085/api/documents/test.pdf/group \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"group_id": "group123"}'
 
 # Batch assign documents
-curl -X POST http://localhost:8000/api/groups/group123/documents \
+curl -X POST http://localhost:8085/api/groups/group123/documents \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"filenames": ["test1.pdf", "test2.pdf"]}'

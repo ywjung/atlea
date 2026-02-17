@@ -48,7 +48,7 @@ export default defineConfig({
     fullyParallel: true,
     retries: process.env.CI ? 2 : 0,
     use: {
-        baseURL: 'http://localhost:8000',
+        baseURL: 'http://localhost:8085',
         trace: 'on-first-retry',
         screenshot: 'only-on-failure',
         video: 'retain-on-failure',
@@ -442,7 +442,7 @@ jobs:
         run: ./run.sh &
 
       - name: Wait for server
-        run: npx wait-on http://localhost:8000
+        run: npx wait-on http://localhost:8085
 
       - name: Run tests
         run: npm run test:e2e
@@ -460,7 +460,7 @@ jobs:
 ### Test Environment Requirements
 
 1. **Backend Must Be Running**
-   - Tests expect FastAPI server at localhost:8000
+   - Tests expect FastAPI server at localhost:8085
    - No automatic server startup (can be enabled)
 
 2. **Test Data**

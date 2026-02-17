@@ -101,7 +101,7 @@ $ python scripts/restore_basic_structure.py
 
 #### 그룹 API
 ```bash
-$ curl -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/groups
+$ curl -H "Authorization: Bearer $TOKEN" http://localhost:8085/api/groups
 
 {
   "groups": [{
@@ -116,7 +116,7 @@ $ curl -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/groups
 
 #### 조직 API
 ```bash
-$ curl -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/organizations
+$ curl -H "Authorization: Bearer $TOKEN" http://localhost:8085/api/organizations
 
 {
   "success": true,

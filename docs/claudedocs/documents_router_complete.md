@@ -189,7 +189,7 @@ INFO: Application startup complete.
 
 ### 엔드포인트 등록 확인
 ```bash
-$ curl -s http://localhost:8000/openapi.json | \
+$ curl -s http://localhost:8085/openapi.json | \
   jq -r '.paths | keys[] | select(startswith("/api/documents") or startswith("/api/reindex"))' | \
   wc -l
       18  # ✅ 18개 엔드포인트 정상 등록

@@ -147,7 +147,7 @@ curl http://localhost:8081/api/hwp/health
 
 ### 웹 UI에서 HWP 파일 업로드
 
-1. 브라우저에서 http://localhost:8000 접속
+1. 브라우저에서 http://localhost:8085 접속
 2. "문서 관리" 버튼 클릭
 3. PDF 또는 HWP 파일 드래그 앤 드롭 또는 클릭하여 선택
 4. 파일이 자동으로 처리되고 색인됨

@@ -87,13 +87,13 @@ brew services stop redis
 docker-compose up -d redis
 
 # 3. 웹 서버 재시작
-uvicorn src.web_server:app --host 0.0.0.0 --port 8000 --reload
+uvicorn src.web_server:app --host 0.0.0.0 --port 8085 --reload
 ```
 
 **문서 내용**:
 ```
 ### 6. 상태 확인
-$ curl http://localhost:8000/api/status
+$ curl http://localhost:8085/api/status
 
 {
   "status": "ready",
@@ -474,7 +474,7 @@ After Migration:
 ### 사용자 테스트 필요
 ```bash
 # 관리자 페이지 접속하여 확인
-http://localhost:8000/admin.html
+http://localhost:8085/admin.html
 
 확인 항목:
 ✅ 사용자 관리 → ywjung99@naver.com 표시 여부

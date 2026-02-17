@@ -11,7 +11,7 @@
 ### 1. 발생한 오류
 
 ```
-POST http://localhost:8000/api/auth/login 429 (Too Many Requests)
+POST http://localhost:8085/api/auth/login 429 (Too Many Requests)
 Login error: Error: 요청이 너무 많습니다. null초 후에 다시 시도하세요.
 ```
 
@@ -178,7 +178,7 @@ docker exec chatbot_redis redis-cli GET "config:rate_limit_enabled"
 # 서버 재시작
 kill <PID>
 source venv/bin/activate
-nohup uvicorn src.web_server:app --host 0.0.0.0 --port 8000 > logs/web_server.log 2>&1 &
+nohup uvicorn src.web_server:app --host 0.0.0.0 --port 8085 > logs/web_server.log 2>&1 &
 ```
 
 **로그 확인**:
@@ -218,7 +218,7 @@ docker exec chatbot_redis redis-cli SET "config:rate_limit_enabled" "true"
 
 # 2. 11번 연속 로그인 시도
 for i in {1..11}; do
-    curl -X POST http://localhost:8000/api/auth/login \
+    curl -X POST http://localhost:8085/api/auth/login \
         -H "Content-Type: application/json" \
         -d '{"username":"test","password":"wrong"}' \
         -w "\nStatus: %{http_code}\n"

@@ -12,7 +12,7 @@ Public endpoint for browser CSP reporting.
 from fastapi import APIRouter, Request
 from typing import Optional, Dict, Any
 from loguru import logger
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import json
 
 # Create router with prefix and tags
@@ -117,7 +117,7 @@ async def get_csp_violation_stats(request: Request):
 
         with SyncSessionFactory() as session:
             # Only look at last 24 hours
-            since = datetime.utcnow() - timedelta(hours=24)
+            since = datetime.now(timezone.utc) - timedelta(hours=24)
 
             # Count by directive (from details JSONB)
             rows = (

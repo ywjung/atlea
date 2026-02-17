@@ -178,7 +178,7 @@ if test_orchestrator.context7_client is None:
 - 서버 헬스 체크 정상
 
 🔧 **Context7 API 키 설정** (사용자 테스트 필요):
-1. 관리자 페이지 접속: `http://localhost:8000/admin.html`
+1. 관리자 페이지 접속: `http://localhost:8085/admin.html`
 2. 하이브리드 RAG 설정
 3. Context7 API 키 입력 (ctx7sk-로 시작)
 4. 저장 클릭

@@ -188,7 +188,7 @@ $ redis-cli KEYS "doc:group:*" | wc -l
 
 ### API 확인
 ```bash
-$ curl -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/documents
+$ curl -H "Authorization: Bearer $TOKEN" http://localhost:8085/api/documents
 {
   "documents": [...],  # 44개 문서
   "total_count": 44

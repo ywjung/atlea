@@ -13,7 +13,7 @@
 | **메모리** | 최소 16GB RAM (32GB 권장) |
 | **저장공간** | 50GB 여유 공간 |
 | **소프트웨어** | Docker Desktop ([다운로드](https://www.docker.com/products/docker-desktop)) |
-| **포트** | 8000, 6379, 8081 사용 가능 |
+| **포트** | 8085, 5432, 8081 사용 가능 |
 
 ---
 
@@ -44,7 +44,7 @@ cd /path/to/chatbot_redis
 ### 3️⃣ 웹 브라우저 접속
 
 ```
-http://localhost:8000
+http://localhost:8085
 ```
 
 🎉 **설치 완료!** ATLEA가 실행되었습니다!
@@ -155,12 +155,12 @@ docker-compose -f docker-compose.full.yml logs -f
 
 ```bash
 # 헬스체크
-curl http://localhost:8000/health
+curl http://localhost:8085/health
 
 # API 문서
-open http://localhost:8000/docs  # macOS
-xdg-open http://localhost:8000/docs  # Linux
-start http://localhost:8000/docs  # Windows
+open http://localhost:8085/docs  # macOS
+xdg-open http://localhost:8085/docs  # Linux
+start http://localhost:8085/docs  # Windows
 ```
 
 ---
@@ -180,8 +180,8 @@ docker ps
 
 ```bash
 # 포트 사용 확인
-lsof -i :8000  # macOS/Linux
-netstat -ano | findstr :8000  # Windows
+lsof -i :8085  # macOS/Linux
+netstat -ano | findstr :8085  # Windows
 
 # 다른 프로그램이 사용 중이면:
 # 1. 해당 프로그램 종료
@@ -216,10 +216,10 @@ ls -la model/
 
 | 서비스 | 주소 |
 |--------|------|
-| 💬 ATLEA 웹 UI | http://localhost:8000 |
-| 📚 API 문서 (Swagger) | http://localhost:8000/docs |
-| 📖 API 문서 (ReDoc) | http://localhost:8000/redoc |
-| ❤️ 헬스체크 | http://localhost:8000/health |
+| 💬 ATLEA 웹 UI | http://localhost:8085 |
+| 📚 API 문서 (Swagger) | http://localhost:8085/docs |
+| 📖 API 문서 (ReDoc) | http://localhost:8085/redoc |
+| ❤️ 헬스체크 | http://localhost:8085/health |
 | 🔍 DB 관리 | http://localhost:5432 (PostgreSQL) |
 
 ---
@@ -276,7 +276,7 @@ docker-compose -f docker-compose.full.yml restart
 docker exec -it postgres psql -U atlea -c "SELECT pg_database_size('atlea');"
 
 # 캐시 통계 확인
-curl http://localhost:8000/api/admin/stats
+curl http://localhost:8085/api/admin/stats
 ```
 
 ---
@@ -326,7 +326,7 @@ tar -xzf backup_20260102.tar.gz
 2. **상태 확인**:
    ```bash
    docker-compose -f docker-compose.full.yml ps
-   curl http://localhost:8000/health
+   curl http://localhost:8085/health
    ```
 
 3. **완전 재시작**:

@@ -1,5 +1,7 @@
 # 하이브리드 RAG 우선순위 프롬프트 관리 시스템
 
+> **Note (v3.0)**: 이 문서에서 언급된 Redis 기반 관리는 PostgreSQL SystemConfig 테이블 기반으로 마이그레이션되었습니다. `src/config/prompts.py`에서 `config_get_sync()`를 통해 프롬프트를 조회합니다.
+
 ## 개요
 
 하이브리드 검색 시 정보 소스(웹 검색 결과 vs 로컬 문서)의 우선순위를 동적으로 결정하는 프롬프트 관리 시스템입니다.

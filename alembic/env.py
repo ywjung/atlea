@@ -23,6 +23,11 @@ from src.database.models import (  # noqa: F401 — force model registration
     DocumentVersion, DocumentLatestVersion,
     AuditLog, SecurityLog, SystemConfig,
     LoginHistory, Webhook, FeedbackEntry,
+    Session, TokenBlacklistEntry,
+    IpRateLimit, CaptchaChallenge, PasswordResetToken,
+    Conversation, ConversationMessage, UserPersona,
+    SearchMetric, DocumentChunk, SentenceEmbedding,
+    SemanticCache, EmbeddingCache, QueryResultCache, FollowupCache,
 )
 
 config = context.config

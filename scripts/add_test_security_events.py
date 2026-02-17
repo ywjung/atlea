@@ -128,4 +128,4 @@ with open(LOG_FILE, 'a', encoding='utf-8') as f:
 
 print(f"✅ Successfully wrote {len(test_events)} security events!")
 print(f"📋 Check with: grep 'SECURITY_EVENT:' {LOG_FILE} | tail -10")
-print(f"🌐 View in admin dashboard: http://localhost:8000 → 관리자 대시보드 → 보안 로그")
+print(f"🌐 View in admin dashboard: http://localhost:8085 → 관리자 대시보드 → 보안 로그")

@@ -2,6 +2,29 @@
 # Use with: docker-compose -f docker-compose.gpu.yml up -d
 
 services:
+  # PostgreSQL Database with pgvector
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: chatbot_postgres
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
+    environment:
+      - POSTGRES_DB=chatbot
+      - POSTGRES_USER=chatbot_user
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-chatbot_secret}
+      - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chatbot_user -d chatbot"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+    networks:
+      - chatbot-network
+
   # Nginx reverse proxy with SSL termination
   nginx:
     image: nginx:1.25-alpine
@@ -76,15 +99,18 @@ services:
       - CHUNK_SIZE=${CHUNK_SIZE:-512}
       - CHUNK_OVERLAP=${CHUNK_OVERLAP:-50}
       - HOST=0.0.0.0
-      - PORT=8000
+      - PORT=${PORT:-8085}
       - WORKERS=${WORKERS:-1}
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - CUDA_VISIBLE_DEVICES=0
+      - DATABASE_URL=postgresql+asyncpg://chatbot_user:${POSTGRES_PASSWORD:-chatbot_secret}@postgres:5432/chatbot
     volumes:
       - app_data:/app/data
       - app_models:/app/model
       - app_logs:/app/logs
     depends_on:
+      postgres:
+        condition: service_healthy
       document-service:
         condition: service_healthy
     restart: unless-stopped
@@ -101,7 +127,7 @@ services:
               count: 1
               capabilities: [gpu]
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/status"]
+      test: ["CMD-SHELL", "curl -f http://localhost:${PORT:-8085}/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -171,6 +197,10 @@ services:
       - chatbot-network
 
 volumes:
+  # Database volumes
+  postgres_data:
+    driver: local
+
   # Application volumes
   app_data:
     driver: local

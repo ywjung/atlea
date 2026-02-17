@@ -15,7 +15,7 @@ echo "Server started at $(date)" >> server.log
 echo "================================================" >> server.log
 
 # 서버 시작 (로그 append 모드)
-nohup venv/bin/uvicorn src.web_server:app --host 0.0.0.0 --port 8000 --reload >> server.log 2>&1 &
+nohup venv/bin/uvicorn src.web_server:app --host 0.0.0.0 --port 8085 --reload >> server.log 2>&1 &
 
 sleep 3
 

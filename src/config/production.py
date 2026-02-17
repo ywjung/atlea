@@ -17,13 +17,13 @@ class ProductionConfig:
 
     # Server Configuration
     HOST: str = os.getenv("HOST", "0.0.0.0")
-    PORT: int = int(os.getenv("PORT", 8000))
+    PORT: int = int(os.getenv("PORT", 8085))
     WORKERS: int = int(os.getenv("WORKERS", 4))
 
     # CORS Configuration
     CORS_ORIGINS: List[str] = os.getenv(
         "CORS_ORIGINS",
-        "http://localhost:3000,http://localhost:8000"
+        "http://localhost:3000,http://localhost:8085"
     ).split(",")
     CORS_ALLOW_CREDENTIALS: bool = os.getenv("CORS_ALLOW_CREDENTIALS", "true").lower() == "true"
     CORS_STRICT: bool = os.getenv("CORS_STRICT", "true").lower() == "true"  # Enforce strict CORS in production
@@ -53,7 +53,7 @@ class ProductionConfig:
     # Security
     SECRET_KEY: Optional[str] = os.getenv("SECRET_KEY")
     REQUIRE_HTTPS: bool = os.getenv("REQUIRE_HTTPS", "false").lower() == "true"
-    BASE_URL: str = os.getenv("BASE_URL", "http://localhost:8000")
+    BASE_URL: str = os.getenv("BASE_URL", "http://localhost:8085")
 
     # Default Admin Credentials (환경변수로 설정 권장)
     # 프로덕션 환경에서는 반드시 강력한 비밀번호로 변경해야 합니다
@@ -91,7 +91,7 @@ class ProductionConfig:
                 errors.append("ADMIN_DEFAULT_PASSWORD is too weak for production - set a strong password")
 
             # BASE_URL 검증 (production에서는 localhost가 아니어야 함)
-            if not cls.BASE_URL or cls.BASE_URL == "http://localhost:8000":
+            if not cls.BASE_URL or cls.BASE_URL == "http://localhost:8085":
                 logger.warning("⚠️  BASE_URL is using default localhost (must be set for production)")
             elif not cls.BASE_URL.startswith("https://"):
                 logger.warning("⚠️  BASE_URL should use HTTPS in production")

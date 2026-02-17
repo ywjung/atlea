@@ -300,7 +300,7 @@ patterns = [
 ### 1. 즉시 테스트 (필수)
 ```bash
 # 관리자 페이지 접속하여 확인
-# http://localhost:8000/admin.html
+# http://localhost:8085/admin.html
 
 ✅ 사용자 관리 → ywjung99@naver.com 표시 확인
 ✅ 조직 관리 → IT팀, 테스트 조직, 333 표시 확인

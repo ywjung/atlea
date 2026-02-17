@@ -35,25 +35,20 @@ echo ""
 mkdir -p "$BACKUP_DIR"
 echo -e "${CYAN}[정보]${NC} 백업 디렉토리: $BACKUP_DIR"
 
-# 1. Redis 데이터 백업
-echo -e "${CYAN}[1/4]${NC} Redis 데이터 백업 중..."
+# 1. PostgreSQL 데이터 백업
+echo -e "${CYAN}[1/4]${NC} PostgreSQL 데이터 백업 중..."
 
-# Redis 컨테이너 이름 자동 감지
-REDIS_CONTAINER=$(docker ps --format '{{.Names}}' | grep -E "redis" | grep -v "insight" | head -1)
+# PostgreSQL 컨테이너 자동 감지
+PG_CONTAINER=$(docker ps --format '{{.Names}}' | grep -E "postgres" | head -1)
 
-if [ -n "$REDIS_CONTAINER" ]; then
-    docker exec "$REDIS_CONTAINER" redis-cli BGSAVE > /dev/null 2>&1
-    sleep 3
-    if docker cp "$REDIS_CONTAINER":/data/dump.rdb "$BACKUP_DIR/redis_dump.rdb" 2>/dev/null; then
-        echo -e "${GREEN}  ✅ Redis 데이터 백업 완료${NC}"
+if [ -n "$PG_CONTAINER" ]; then
+    if docker exec "$PG_CONTAINER" pg_dump -U chatbot_user chatbot > "$BACKUP_DIR/postgres_dump.sql" 2>/dev/null; then
+        echo -e "${GREEN}  ✅ PostgreSQL 데이터 백업 완료${NC}"
     else
-        echo -e "${YELLOW}  ⚠️  Redis dump.rdb 복사 실패 (데이터가 없을 수 있음)${NC}"
+        echo -e "${YELLOW}  ⚠️  PostgreSQL 백업 실패${NC}"
     fi
-
-    # AOF 파일도 백업 (존재하는 경우)
-    docker cp "$REDIS_CONTAINER":/data/appendonly.aof "$BACKUP_DIR/appendonly.aof" 2>/dev/null || true
 else
-    echo -e "${YELLOW}  ⚠️  Redis 컨테이너를 찾을 수 없습니다${NC}"
+    echo -e "${YELLOW}  ⚠️  PostgreSQL 컨테이너를 찾을 수 없습니다${NC}"
 fi
 
 # 2. 문서 데이터 백업

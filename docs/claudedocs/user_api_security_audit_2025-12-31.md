@@ -149,13 +149,13 @@
 ### 수동 검증
 ```bash
 # 공개 엔드포인트 테스트 (인증 없이 접근 가능)
-curl http://localhost:8000/api/status
+curl http://localhost:8085/api/status
 
 # 인증 필요 엔드포인트 테스트 (401 응답)
-curl http://localhost:8000/api/documents
+curl http://localhost:8085/api/documents
 
 # 관리자 권한 필요 엔드포인트 테스트 (일반 사용자는 403)
-curl -H "Authorization: Bearer <user_token>" http://localhost:8000/api/reindex
+curl -H "Authorization: Bearer <user_token>" http://localhost:8085/api/reindex
 ```
 
 ## 결론

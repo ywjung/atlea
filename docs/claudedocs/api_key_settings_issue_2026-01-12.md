@@ -13,7 +13,7 @@
 2. "Tavily API 키, Context7 API 키 설정도 사라졌다"
 3. Context7 API 키 설정 시 오류 발생:
    ```
-   PUT http://localhost:8000/api/admin/context7-api-key 400 (Bad Request)
+   PUT http://localhost:8085/api/admin/context7-api-key 400 (Bad Request)
    Error: API 키가 유효하지 않습니다: [Errno 8] nodename nor servname provided, or not known
    ```
 
@@ -156,7 +156,7 @@ finally:
 kill [PID]
 
 # venv Python으로 서버 시작
-nohup ./venv/bin/python -m uvicorn src.web_server:app --host 0.0.0.0 --port 8000 > logs/web_server.log 2>&1 &
+nohup ./venv/bin/python -m uvicorn src.web_server:app --host 0.0.0.0 --port 8085 > logs/web_server.log 2>&1 &
 ```
 
 ✅ **완료**: 2026-01-12 15:25 - PID 19624로 재시작됨
@@ -165,7 +165,7 @@ nohup ./venv/bin/python -m uvicorn src.web_server:app --host 0.0.0.0 --port 8000
 
 관리자 화면에서 Context7 API 키 설정:
 ```
-http://localhost:8000/admin.html
+http://localhost:8085/admin.html
 → 하이브리드 RAG 설정
 → Context7 API 키 입력
 ```
@@ -328,7 +328,7 @@ docker exec chatbot_redis redis-cli GET "config:context7_api_key"
 
 2. **관리자 페이지 접속**:
    ```
-   http://localhost:8000/admin.html
+   http://localhost:8085/admin.html
    ```
 
 3. **하이브리드 RAG 설정**:

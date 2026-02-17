@@ -19,7 +19,7 @@ from typing import Optional, List
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Request, Depends, UploadFile, File, BackgroundTasks, Query
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from loguru import logger
 
@@ -2799,7 +2799,7 @@ async def check_pii_in_document(
                 import os
                 try:
                     os.unlink(tmp_path)
-                except:
+                except OSError:
                     pass
 
         except Exception as e:

@@ -289,8 +289,8 @@ async def create_default_admin():
                         logger.warning("⚠️  Please read the file, login, change password, then DELETE the file!")
                     except Exception as file_error:
                         logger.error(f"❌ Could not save password file: {file_error}")
-                        # 파일 저장 실패 시에만 로그에 출력 (마지막 수단)
-                        logger.warning(f"🔐 Auto-generated password (SAVE THIS): {default_password}")
+                        # 파일 저장 실패 시 보안을 위해 비밀번호를 로그에 출력하지 않음
+                        logger.error("❌ Auto-generated admin password could not be saved. Please set ADMIN_DEFAULT_PASSWORD env var and restart.")
                 else:
                     logger.info("ℹ️  Admin password set from ADMIN_DEFAULT_PASSWORD environment variable")
                     logger.warning("⚠️  Please change the default admin password after first login!")

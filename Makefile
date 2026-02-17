@@ -19,9 +19,9 @@ COMPOSE_PROD := docker-compose -f docker-compose.production.yml
 COMPOSE_GPU  := docker-compose -f docker-compose.gpu.yml
 COMPOSE_SRXNG := docker-compose -f docker-compose.searxng.yml
 
-# .env 에서 포트 로드 (기본값 8000)
+# .env 에서 포트 로드 (기본값 8085)
 -include .env
-APP_PORT ?= 8000
+APP_PORT ?= $(or $(PORT),8085)
 
 # ==============================================================================
 # 모든 .PHONY 선언
@@ -30,7 +30,7 @@ APP_PORT ?= 8000
         up production gpu down restart \
         status logs logs-app health \
         backup restore build clean \
-        test test-unit test-e2e lint \
+        db-migrate test test-unit test-e2e lint \
         searxng-up searxng-down \
         install dist
 
@@ -53,7 +53,7 @@ help: ## 사용 가능한 명령 목록 표시
 setup: ## 초기 환경 설정
 	@./setup.sh
 
-dev: ## 개발 환경 시작 (Redis + 부가서비스)
+dev: ## 개발 환경 시작 (PostgreSQL + 부가서비스)
 	@./deploy.sh dev
 
 run: ## 로컬 앱 서버 포그라운드 실행
@@ -129,6 +129,9 @@ clean: ## Docker 볼륨/이미지 정리
 # ==============================================================================
 # 테스트
 # ==============================================================================
+
+db-migrate: ## Alembic DB 마이그레이션 실행
+	alembic upgrade head
 
 test: ## 전체 테스트 실행
 	pytest

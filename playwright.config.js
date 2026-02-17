@@ -43,7 +43,7 @@ export default defineConfig({
     // Shared settings for all the projects below
     use: {
         // Base URL to use in actions like `await page.goto('/')`
-        baseURL: 'http://localhost:8000',
+        baseURL: 'http://localhost:8085',
 
         // Collect trace when retrying the failed test
         trace: 'on-first-retry',
@@ -87,7 +87,7 @@ export default defineConfig({
     // Uncomment if you want Playwright to start the server automatically
     // webServer: {
     //     command: 'python -m uvicorn src.web_server:app --reload',
-    //     url: 'http://localhost:8000',
+    //     url: 'http://localhost:8085',
     //     reuseExistingServer: !process.env.CI,
     // },
 });

@@ -22,8 +22,9 @@ services:
       interval: 10s
       timeout: 3s
       retries: 5
+      start_period: 30s
     networks:
-      - chatbot_network
+      - chatbot-network
 
   # Java 문서 처리 서비스
   document-service:
@@ -45,7 +46,7 @@ services:
       retries: 3
       start_period: 40s
     networks:
-      - chatbot_network
+      - chatbot-network
 
   # ClamAV 바이러스 스캔 서비스
   clamav:
@@ -66,7 +67,7 @@ services:
       retries: 3
       start_period: 180s
     networks:
-      - chatbot_network
+      - chatbot-network
 
   # Python RAG 챗봇 애플리케이션
   chatbot-app:
@@ -106,7 +107,7 @@ services:
       retries: 5
       start_period: 60s
     networks:
-      - chatbot_network
+      - chatbot-network
 
 volumes:
   postgres_data:
@@ -115,5 +116,5 @@ volumes:
     driver: local
 
 networks:
-  chatbot_network:
+  chatbot-network:
     driver: bridge

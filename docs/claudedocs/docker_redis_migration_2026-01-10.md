@@ -101,7 +101,7 @@ services:
     container_name: chatbot_redis
     ports:
       - "6379:6379"      # Redis
-      - "8001:8001"      # RedisInsight UI
+      - "8001:5432"      # RedisInsight UI
     volumes:
       - redis_data:/data
     environment:
@@ -129,12 +129,12 @@ ps aux | grep uvicorn | grep -v grep | awk '{print $2}' | xargs kill
 
 # 서버 시작
 source venv/bin/activate
-uvicorn src.web_server:app --host 0.0.0.0 --port 8000 --reload
+uvicorn src.web_server:app --host 0.0.0.0 --port 8085 --reload
 ```
 
 #### 6. 상태 확인
 ```bash
-$ curl http://localhost:8000/api/status
+$ curl http://localhost:8085/api/status
 
 {
   "status": "ready",
@@ -150,7 +150,7 @@ $ curl http://localhost:8000/api/status
 $ curl -X POST -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"question":"운수좋은날 줄거리를 설명해줘","top_k":3}' \
-  http://localhost:8000/api/query
+  http://localhost:8085/api/query
 
 {
   "answer": "## 운수좋은날 줄거리\n\n...",
@@ -171,7 +171,7 @@ $ curl -X POST -H "Authorization: Bearer $TOKEN" \
 
 ### 2. 프론트엔드 확인
 
-**메인 챗봇 페이지** (`http://localhost:8000/static/index.html`):
+**메인 챗봇 페이지** (`http://localhost:8085/static/index.html`):
 
 ```
 사용자: 운수좋은날 줄거리를 설명해줘
@@ -310,7 +310,7 @@ $ redis-cli SMEMBERS "org:groups:default"
 
 Docker Redis Stack에는 **RedisInsight** UI가 포함되어 있습니다:
 
-**접속**: http://localhost:8001
+**접속**: http://localhost:5432
 
 **기능**:
 - 키 브라우저

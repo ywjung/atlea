@@ -15,7 +15,7 @@
 ### 설정 확인
 
 ```bash
-$ curl http://localhost:8000/api/admin/password-reset-method
+$ curl http://localhost:8085/api/admin/password-reset-method
 
 {
   "method": "admin",
@@ -51,7 +51,7 @@ API를 사용하여 방식을 "email"로 변경:
 curl -X PUT -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"method":"email"}' \
-  http://localhost:8000/api/admin/password-reset-method
+  http://localhost:8085/api/admin/password-reset-method
 ```
 
 **응답**:
@@ -66,7 +66,7 @@ curl -X PUT -H "Authorization: Bearer $TOKEN" \
 ### 2. 변경 확인
 
 ```bash
-$ curl http://localhost:8000/api/admin/password-reset-method
+$ curl http://localhost:8085/api/admin/password-reset-method
 
 {
   "method": "email",
@@ -106,19 +106,19 @@ $ curl http://localhost:8000/api/admin/password-reset-method
 curl -X PUT -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"method":"email"}' \
-  http://localhost:8000/api/admin/password-reset-method
+  http://localhost:8085/api/admin/password-reset-method
 
 # OTP 방식으로 변경
 curl -X PUT -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"method":"otp"}' \
-  http://localhost:8000/api/admin/password-reset-method
+  http://localhost:8085/api/admin/password-reset-method
 
 # Admin 방식으로 변경 (비활성화)
 curl -X PUT -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"method":"admin"}' \
-  http://localhost:8000/api/admin/password-reset-method
+  http://localhost:8085/api/admin/password-reset-method
 ```
 
 ### 방법 2: 관리자 페이지 사용
@@ -160,7 +160,7 @@ PASSWORD_RESET_TOKEN_EXPIRE_MINUTES=30
 # 비밀번호 재설정 요청 테스트
 curl -X POST -H "Content-Type: application/json" \
   -d '{"email":"user@example.com"}' \
-  http://localhost:8000/api/auth/forgot-password
+  http://localhost:8085/api/auth/forgot-password
 ```
 
 ## 현재 상태
@@ -185,7 +185,7 @@ curl -X POST -H "Content-Type: application/json" \
 ### 비밀번호 재설정 절차 (Email 방식)
 
 1. **로그인 페이지 접속**
-   - `http://localhost:8000/static/login.html`
+   - `http://localhost:8085/static/login.html`
 
 2. **"비밀번호를 잊으셨나요?" 클릭**
    - 자동으로 `/static/reset-password.html`로 이동

@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-데이터 마이그레이션 스크립트: Single User → Multi User
+[DEPRECATED] 데이터 마이그레이션 스크립트: Single User → Multi User
 
-v2.2.0 다중 사용자 시스템으로 전환하기 위한 데이터 마이그레이션 스크립트입니다.
-기존 데이터를 기본 관리자 계정으로 이전하여 하위 호환성을 유지합니다.
+이 스크립트는 Redis 기반 아키텍처용으로 작성되었으며,
+PostgreSQL 전면 마이그레이션(v3.0+) 이후 더 이상 사용되지 않습니다.
+PostgreSQL 마이그레이션은 Alembic을 사용하세요: alembic upgrade head
 
-사용법:
+기존 사용법 (v2.x 전용):
     python scripts/migrate_to_multiuser.py --admin-email admin@chatbot.com --admin-password SecureP@ssw0rd
 """
 

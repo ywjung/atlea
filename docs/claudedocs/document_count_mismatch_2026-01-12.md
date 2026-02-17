@@ -139,7 +139,7 @@ else:
 
 ### 1. 실제 API 응답 확인
 ```bash
-curl -H "Authorization: Bearer <token>" http://localhost:8000/api/documents
+curl -H "Authorization: Bearer <token>" http://localhost:8085/api/documents
 ```
 
 **확인 사항**:

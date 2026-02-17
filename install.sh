@@ -210,7 +210,7 @@ ENABLE_QUESTION_GENERATION=false
 
 # Server Configuration
 HOST=0.0.0.0
-PORT=8000
+PORT=8085
 
 # JWT Security Configuration (자동 생성됨)
 JWT_SECRET_KEY=$JWT_SECRET
@@ -329,14 +329,14 @@ show_progress 15 "초기화 중"
 log_info "서비스 상태 확인 중..."
 sleep 5
 
-REDIS_STATUS=$(docker-compose -f docker-compose.full.yml ps redis | grep "Up" || echo "Down")
+PG_STATUS=$(docker-compose -f docker-compose.full.yml ps postgres | grep "Up" || echo "Down")
 DOC_SERVICE_STATUS=$(docker-compose -f docker-compose.full.yml ps document-service | grep "Up" || echo "Down")
 APP_STATUS=$(docker-compose -f docker-compose.full.yml ps chatbot-app | grep "Up" || echo "Down")
 
-if [[ $REDIS_STATUS == *"Up"* ]]; then
-    log_success "Redis: 실행 중"
+if [[ $PG_STATUS == *"Up"* ]]; then
+    log_success "PostgreSQL: 실행 중"
 else
-    log_error "Redis: 시작 실패"
+    log_error "PostgreSQL: 시작 실패"
 fi
 
 if [[ $DOC_SERVICE_STATUS == *"Up"* ]]; then
@@ -372,14 +372,14 @@ ${CYAN}📊 설치 요약:${NC}
   ✅ AI 모델: 준비됨
 
 ${CYAN}🌐 접속 정보:${NC}
-  💬 챗봇 웹 UI:          http://localhost:8000
-  📚 API 문서 (Swagger):  http://localhost:8000/docs
-  ❤️  시스템 상태:         http://localhost:8000/health
-  🔍 Redis 관리:          http://localhost:8001
+  💬 챗봇 웹 UI:          http://localhost:8085
+  📚 API 문서 (Swagger):  http://localhost:8085/docs
+  ❤️  시스템 상태:         http://localhost:8085/health
+  📊 PostgreSQL:          localhost:5432
 
 ${CYAN}📝 다음 단계:${NC}
 
-  1️⃣  브라우저에서 http://localhost:8000 접속
+  1️⃣  브라우저에서 http://localhost:8085 접속
 
   2️⃣  문서 추가:
      data/ 디렉토리에 PDF, HWP, DOCX 등의 파일 복사

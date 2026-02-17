@@ -14,7 +14,7 @@
 
 ### API 응답 확인
 ```bash
-$ curl http://localhost:8000/api/status
+$ curl http://localhost:8085/api/status
 
 {
   "status": "initializing",
@@ -159,12 +159,12 @@ def count_unique_files(self) -> int:
 ```bash
 # 가상 환경 활성화 및 서버 재시작
 source venv/bin/activate
-uvicorn src.web_server:app --host 0.0.0.0 --port 8000 --reload
+uvicorn src.web_server:app --host 0.0.0.0 --port 8085 --reload
 ```
 
 ### 2. API 응답 확인
 ```bash
-$ curl http://localhost:8000/api/status
+$ curl http://localhost:8085/api/status
 
 {
   "status": "ready",  # ✅ "initializing" → "ready"
@@ -187,7 +187,7 @@ $ curl http://localhost:8000/api/status
 ```
 
 ### 3. 프론트엔드 확인
-메인 챗봇 페이지(http://localhost:8000/static/index.html):
+메인 챗봇 페이지(http://localhost:8085/static/index.html):
 ```
 상태: 준비 완료  # ✅ "초기화 중..." → "준비 완료"
 문서: 44개 (청크 7487개)  # ✅ 정확한 카운트 표시

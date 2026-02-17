@@ -41,7 +41,7 @@ def analyze_endpoints():
            path in ["/", "/api/auth/login", "/api/auth/register"]:
             public_endpoints.append(endpoint_info)
         # Admin endpoints
-        elif "/admin/" in path or "/redis/" in path:
+        elif "/admin/" in path or "/db-backup/" in path:
             if has_admin_check:
                 admin_endpoints.append(f"✅ {endpoint_info}")
             else:

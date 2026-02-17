@@ -38,18 +38,17 @@ if [ ! -f .env ]; then
     exit 1
 fi
 
-# Check if Redis is running
-echo -e "${BLUE}🔍 Redis 연결 확인...${NC}"
-REDIS_HOST=${REDIS_HOST:-localhost}
-REDIS_PORT=${REDIS_PORT:-6379}
-
-if ! nc -z "$REDIS_HOST" "$REDIS_PORT" 2>/dev/null; then
-    echo -e "${RED}❌ Redis 서버에 연결할 수 없습니다 ($REDIS_HOST:$REDIS_PORT)${NC}"
-    echo -e "${YELLOW}💡 Redis를 먼저 시작해주세요:${NC}"
-    echo -e "   redis-server"
+# Check if PostgreSQL is running
+echo -e "${BLUE}🔍 PostgreSQL 연결 확인...${NC}"
+if docker-compose ps 2>/dev/null | grep -q "postgres.*Up"; then
+    echo -e "${GREEN}✅ PostgreSQL 연결 성공 (Docker)${NC}"
+elif nc -z localhost 5432 2>/dev/null; then
+    echo -e "${GREEN}✅ PostgreSQL 연결 성공 (로컬)${NC}"
+else
+    echo -e "${RED}❌ PostgreSQL에 연결할 수 없습니다${NC}"
+    echo -e "${YELLOW}💡 docker-compose up -d 로 서비스를 시작하세요${NC}"
     exit 1
 fi
-echo -e "${GREEN}✅ Redis 연결 성공${NC}"
 echo ""
 
 # Load environment variables
@@ -59,7 +58,7 @@ source .env
 export ENV=development
 export DEBUG=true
 HOST=${HOST:-0.0.0.0}
-PORT=${PORT:-8000}
+PORT=${PORT:-8085}
 LOG_LEVEL=${LOG_LEVEL:-debug}
 
 echo -e "${BLUE}🚀 서버 설정:${NC}"

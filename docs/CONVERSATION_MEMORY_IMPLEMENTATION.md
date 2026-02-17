@@ -193,7 +193,7 @@ async def _generate_answer(
 ### Quick Test
 ```bash
 # First question
-curl -X POST http://localhost:8000/api/query \
+curl -X POST http://localhost:8085/api/query \
   -H "Authorization: Bearer YOUR_TOKEN" \
   -d '{
     "question": "What is Python?",
@@ -202,7 +202,7 @@ curl -X POST http://localhost:8000/api/query \
   }'
 
 # Follow-up (tests context)
-curl -X POST http://localhost:8000/api/query \
+curl -X POST http://localhost:8085/api/query \
   -H "Authorization: Bearer YOUR_TOKEN" \
   -d '{
     "question": "What are its main features?",

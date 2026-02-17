@@ -99,7 +99,7 @@ ATLEA는 업로드된 문서에서 정보를 검색하고, AI를 활용하여 �
 
 | 포트 | 서비스 | 용도 |
 |------|--------|------|
-| 8000 | ATLEA 애플리케이션 | 웹 UI 및 API |
+| 8085 | ATLEA 애플리케이션 | 웹 UI 및 API |
 | 5432 | PostgreSQL | Vector DB, 캐시, 세션 |
 | 8081 | 문서 처리 서비스 | 문서 텍스트 추출 |
 | 8082 | 관리 포트 | 메트릭 및 헬스체크 |
@@ -171,12 +171,12 @@ docker ps
 df -h .
 
 # 포트 사용 확인 (macOS/Linux)
-lsof -i :8000
+lsof -i :8085
 lsof -i :6379
 lsof -i :8081
 
 # 포트 사용 확인 (Windows PowerShell)
-netstat -ano | findstr :8000
+netstat -ano | findstr :8085
 netstat -ano | findstr :6379
 netstat -ano | findstr :8081
 ```
@@ -220,7 +220,7 @@ chmod +x install.sh
 설치 완료 후 다음 URL에 접속하여 확인:
 
 ```
-http://localhost:8000
+http://localhost:8085
 ```
 
 정상적으로 ATLEA 웹 UI가 표시되면 설치 성공입니다! 🎉
@@ -314,7 +314,7 @@ docker-compose -f docker-compose.full.yml ps
 
 ```bash
 # 헬스체크
-curl http://localhost:8000/health
+curl http://localhost:8085/health
 
 # 서비스 로그 확인
 docker-compose -f docker-compose.full.yml logs -f
@@ -328,7 +328,7 @@ docker-compose -f docker-compose.full.yml logs -f
 
 시스템 첫 실행 시 관리자 계정을 생성해야 합니다.
 
-1. 웹 브라우저에서 `http://localhost:8000` 접속
+1. 웹 브라우저에서 `http://localhost:8085` 접속
 2. "회원가입" 클릭
 3. 관리자 정보 입력:
    - 이메일 주소
@@ -477,12 +477,12 @@ docker-compose ps
 docker-compose -f docker-compose.full.yml logs
 
 # 포트 충돌 확인
-lsof -i :8000
+lsof -i :8085
 lsof -i :6379
 
 # 포트가 사용 중이면 .env 파일에서 포트 변경
 nano .env
-# PORT=8000 → PORT=8888로 변경
+# PORT=8085 → PORT=8888로 변경
 
 # 서비스 재시작
 docker-compose -f docker-compose.full.yml down
@@ -690,10 +690,10 @@ docker-compose -f docker-compose.full.yml up -d --build
 
 ```bash
 # 헬스체크
-curl http://localhost:8000/health | jq
+curl http://localhost:8085/health | jq
 
 # Prometheus 메트릭
-curl http://localhost:8000/metrics
+curl http://localhost:8085/metrics
 ```
 
 #### 리소스 사용량 모니터링
@@ -769,7 +769,7 @@ server {
     ssl_certificate_key /etc/letsencrypt/live/your-domain.com/privkey.pem;
 
     location / {
-        proxy_pass http://localhost:8000;
+        proxy_pass http://localhost:8085;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -916,7 +916,7 @@ ENABLE_QUESTION_GENERATION=false
 
 # 서버
 HOST=0.0.0.0
-PORT=8000
+PORT=8085
 
 # 보안
 JWT_SECRET_KEY=<강력한 키로 변경 필수!>
@@ -935,7 +935,7 @@ RATE_LIMIT_PER_MINUTE=60
 RATE_LIMIT_BURST=10
 
 # CORS
-CORS_ORIGINS=http://localhost:8000     # 프로덕션에서는 실제 도메인으로 변경
+CORS_ORIGINS=http://localhost:8085     # 프로덕션에서는 실제 도메인으로 변경
 ```
 
 > **참고**: 2FA, CAPTCHA, TTS, 감사 로그, Brute Force 방어 등의 보안/기능 설정은 관리자 웹 UI 또는 PostgreSQL `system_config` 테이블로 관리됩니다.
@@ -946,7 +946,7 @@ CORS_ORIGINS=http://localhost:8000     # 프로덕션에서는 실제 도메인�
 ```bash
 # 시스템 상태
 docker-compose -f docker-compose.full.yml ps
-curl http://localhost:8000/health
+curl http://localhost:8085/health
 
 # 로그
 docker-compose -f docker-compose.full.yml logs -f

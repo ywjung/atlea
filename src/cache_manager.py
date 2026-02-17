@@ -126,21 +126,6 @@ class CacheManager:
         """Kept for backward compat. Always returns empty list."""
         return []
 
-    @staticmethod
-    def decode_bytes(value):
-        """Safely decode bytes to string."""
-        if isinstance(value, bytes):
-            return value.decode("utf-8", errors="replace")
-        return value
-
-    @staticmethod
-    def decode_hash(hash_data: Dict) -> Dict[str, str]:
-        """Decode all keys and values in a hash from bytes to strings."""
-        return {
-            (k.decode() if isinstance(k, bytes) else k): (v.decode() if isinstance(v, bytes) else v)
-            for k, v in hash_data.items()
-        }
-
     # ── cache key helpers ─────────────────────────────────────────────
 
     def _get_cache_key(self, question_hash: str) -> str:

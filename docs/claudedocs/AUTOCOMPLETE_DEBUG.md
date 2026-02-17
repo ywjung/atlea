@@ -27,7 +27,7 @@ if (questionAutoComplete) {
 **해결 방법**:
 ```bash
 # 1. 백엔드 서버가 실행 중인지 확인
-curl http://localhost:8000/api/suggested-questions
+curl http://localhost:8085/api/suggested-questions
 
 # 2. 응답 확인 (questions 배열이 있어야 함)
 # 예상 응답:
@@ -114,7 +114,7 @@ questionAutoComplete.updateConfig({ debounceDelay: 500 });
 
 ## 문제 해결 체크리스트
 
-- [ ] 백엔드 서버 실행 중 (http://localhost:8000)
+- [ ] 백엔드 서버 실행 중 (http://localhost:8085)
 - [ ] `/api/suggested-questions` 엔드포인트 정상 응답
 - [ ] 브라우저 Console에 에러 메시지 없음
 - [ ] `questionAutoComplete` 객체 존재
@@ -138,7 +138,7 @@ WARNING: Question pool is empty, using fallback questions
 ```
 → 문서를 업로드하고 서버를 재시작하세요.
 
-**참고**: 서버는 `./run.sh` 스크립트로 실행됩니다. 기본 포트는 8000이며, .env 파일에서 변경 가능합니다.
+**참고**: 서버는 `./run.sh` 스크립트로 실행됩니다. 기본 포트는 8085이며, .env 파일에서 변경 가능합니다.
 
 ## 테스트 예제
 

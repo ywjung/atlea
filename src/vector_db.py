@@ -6,10 +6,8 @@ Provides vector similarity search (cosine), BM25 text search (tsvector),
 and hybrid search combining both via Reciprocal Rank Fusion.
 """
 
-import hashlib
 import json
 import uuid as _uuid
-import numpy as np
 from typing import List, Dict, Optional
 from loguru import logger
 from .performance_utils import log_slow_query

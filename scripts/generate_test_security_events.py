@@ -77,4 +77,4 @@ print("✅ Unauthorized access event logged")
 
 print("\n🎉 Generated 8 test security events!")
 print("📋 Check the logs with: grep 'SECURITY_EVENT:' server.log")
-print("🌐 View in admin dashboard: http://localhost:8000 → 관리자 대시보드 → 보안 로그")
+print("🌐 View in admin dashboard: http://localhost:8085 → 관리자 대시보드 → 보안 로그")

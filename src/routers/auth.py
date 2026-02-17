@@ -264,8 +264,8 @@ async def login(
         # IP 주소 추출
         ip_address = request.client.host if request.client else None
 
-        # 디버깅: 받은 자격증명 로깅 (비밀번호는 길이만)
-        logger.debug(f"🔍 Login attempt - email: {credentials.email}, password_length: {len(credentials.password)}, ip: {ip_address}")
+        # 디버깅: 로그인 시도 로깅 (개인정보 제외)
+        logger.debug(f"🔍 Login attempt - ip: {ip_address}")
 
         # CAPTCHA 검증 (로그인)
         from ..auth.captcha import SimpleCaptchaService

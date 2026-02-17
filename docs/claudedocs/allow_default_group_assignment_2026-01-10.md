@@ -5,7 +5,7 @@
 사용자가 새로 만든 조직에 기본 그룹("미분류")을 할당하려고 하면 다음 오류가 발생했습니다:
 
 ```
-POST http://localhost:8000/api/organizations/{org_id}/groups/{default_group_id} 400 (Bad Request)
+POST http://localhost:8085/api/organizations/{org_id}/groups/{default_group_id} 400 (Bad Request)
 Server error detail: 기본 그룹은 조직에 할당할 수 없습니다
 ```
 
@@ -75,7 +75,7 @@ Raises:
 ```bash
 # 테스트 조직에 기본 그룹 할당
 $ curl -X POST -H "Authorization: Bearer $TOKEN" \
-  "http://localhost:8000/api/organizations/e0e4fd99-171a-4f52-88e9-79c94df4868b/groups/eea12d54-0c0b-4310-a122-efbfa3905a31"
+  "http://localhost:8085/api/organizations/e0e4fd99-171a-4f52-88e9-79c94df4868b/groups/eea12d54-0c0b-4310-a122-efbfa3905a31"
 
 {
   "success": true,
@@ -90,7 +90,7 @@ $ curl -X POST -H "Authorization: Bearer $TOKEN" \
 
 ```bash
 $ curl -H "Authorization: Bearer $TOKEN" \
-  "http://localhost:8000/api/organizations/e0e4fd99-171a-4f52-88e9-79c94df4868b/groups"
+  "http://localhost:8085/api/organizations/e0e4fd99-171a-4f52-88e9-79c94df4868b/groups"
 
 {
   "success": true,
@@ -208,7 +208,7 @@ uvicorn src.web_server:app --reload
 
 # 3. 검증 (선택)
 curl -X POST -H "Authorization: Bearer $TOKEN" \
-  "http://localhost:8000/api/organizations/{org_id}/groups/{default_group_id}"
+  "http://localhost:8085/api/organizations/{org_id}/groups/{default_group_id}"
 ```
 
 ## 결론

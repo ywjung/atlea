@@ -91,7 +91,7 @@ npm run test:e2e:report
 
 Configuration is in `playwright.config.js`:
 
-- **Base URL**: `http://localhost:8000`
+- **Base URL**: `http://localhost:8085`
 - **Timeout**: 30s per test
 - **Browsers**: Chromium, Firefox, WebKit
 - **Mobile**: Pixel 5, iPhone 12
@@ -208,7 +208,7 @@ jobs:
         run: ./run.sh &
 
       - name: Wait for server
-        run: npx wait-on http://localhost:8000
+        run: npx wait-on http://localhost:8085
 
       - name: Run tests
         run: npm run test:e2e

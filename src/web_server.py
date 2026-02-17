@@ -106,7 +106,7 @@ tags_metadata = [
 app = FastAPI(
     title="ATLEA",
     description="ATLEA (Advanced Trusted Learning & Enterprise Assistant)",
-    version="2.2.0",
+    version="2.5.1",
     openapi_tags=tags_metadata,
     debug=config.DEBUG,
     docs_url="/docs" if config.DEBUG else None,  # Disable docs in production
@@ -177,7 +177,11 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 # ==================== Add Middleware ====================
 
 # CORS middleware (must be first for proper header handling)
-cors_origins = ["*"] if config.ENV == "development" else config.CORS_ORIGINS
+if config.ENV == "development":
+    cors_origins = ["*"]
+    logger.warning("⚠️  CORS wildcard enabled (development mode). Set ENV=production for production deployment.")
+else:
+    cors_origins = config.CORS_ORIGINS
 
 app.add_middleware(
     CORSMiddleware,
@@ -307,7 +311,7 @@ if __name__ == "__main__":
 
     # Production configuration
     host = os.getenv("HOST", "0.0.0.0")
-    port = int(os.getenv("PORT", 8000))
+    port = int(os.getenv("PORT", 8085))
     environment = os.getenv("ENVIRONMENT", "production")
 
     # Configure logging for production

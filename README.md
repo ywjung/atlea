@@ -184,7 +184,7 @@ ATLEA는 **Retrieval-Augmented Generation (RAG)** 기술을 활용하여 다양�
 
 | 포트 | 서비스 | 용도 |
 |------|--------|------|
-| 8000 | FastAPI | 웹 UI, API |
+| 8085 | FastAPI | 웹 UI, API |
 | 5432 | PostgreSQL | Vector DB, Cache, 세션 |
 | 8080 | Java Service | 문서 추출 (선택) |
 | 8888 | SearXNG | 웹 검색 (선택) |
@@ -228,7 +228,7 @@ cp your_documents/*.{hwp,hwpx,doc,docx,xls,xlsx,ppt,pptx,txt} ./data/
 
 ### 5단계: 접속
 
-브라우저에서 http://localhost:8000 접속
+브라우저에서 http://localhost:8085 접속
 
 초기 관리자 계정은 `setup.sh` 또는 `scripts/setup_admin.py`로 생성합니다.
 
@@ -240,11 +240,11 @@ python scripts/setup_admin.py
 **서비스 URL**:
 | URL | 용도 |
 |-----|------|
-| http://localhost:8000 | 웹 UI (랜딩 페이지) |
-| http://localhost:8000/static/login.html | 로그인 |
-| http://localhost:8000/docs | Swagger API 문서 |
-| http://localhost:8000/health | Health Check |
-| http://localhost:8000/metrics | Prometheus 메트릭 |
+| http://localhost:8085 | 웹 UI (랜딩 페이지) |
+| http://localhost:8085/static/login.html | 로그인 |
+| http://localhost:8085/docs | Swagger API 문서 |
+| http://localhost:8085/health | Health Check |
+| http://localhost:8085/metrics | Prometheus 메트릭 |
 
 <details>
 <summary>pip install (패키지 설치)</summary>
@@ -273,7 +273,7 @@ cp .env.example .env && nano .env
 docker compose up -d postgres
 
 # 6. 서버 시작
-atlea                              # 기본 (0.0.0.0:8000)
+atlea                              # 기본 (0.0.0.0:8085)
 atlea --port 9000 --reload         # 포트 변경 + 자동 리로드
 ```
 
@@ -350,12 +350,12 @@ python -m src.web_server
 
 ```bash
 # 로그인하여 토큰 발급
-curl -X POST http://localhost:8000/api/auth/login \
+curl -X POST http://localhost:8085/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email": "admin@example.com", "password": "your-password"}'
 
 # 토큰 사용
-curl http://localhost:8000/api/documents \
+curl http://localhost:8085/api/documents \
   -H "Authorization: Bearer <access_token>"
 ```
 
@@ -551,7 +551,7 @@ atlea/
 ```bash
 # 서버
 HOST=0.0.0.0
-PORT=8000
+PORT=8085
 ENVIRONMENT=production
 
 # PostgreSQL

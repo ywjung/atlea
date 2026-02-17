@@ -194,7 +194,7 @@ if [ ! -f ".env" ]; then
     log_info ".env 파일 생성..."
     cp .env.example .env
     log_success ".env 파일이 생성되었습니다"
-    log_warning "필요시 .env 파일을 수정해주세요 (Redis 비밀번호 등)"
+    log_warning "필요시 .env 파일을 수정해주세요 (DB 비밀번호, JWT 키 등)"
 else
     log_success ".env 파일이 이미 존재합니다"
 fi
@@ -207,36 +207,44 @@ log_success "디렉토리 구조 확인 완료"
 echo ""
 
 # ========================================
-# 4. Redis Setup
+# 4. PostgreSQL Setup
 # ========================================
-log_info "Redis 컨테이너 설정 중..."
+log_info "PostgreSQL 컨테이너 설정 중..."
 
-# Check if redis is already running
-if docker ps | grep -q "chatbot_redis"; then
-    log_warning "Redis 컨테이너가 이미 실행 중입니다"
-    read -p "Redis를 재시작하시겠습니까? (y/N): " -n 1 -r
+# Check if postgres is already running
+if docker ps | grep -q "chatbot_postgres"; then
+    log_warning "PostgreSQL 컨테이너가 이미 실행 중입니다"
+    read -p "PostgreSQL을 재시작하시겠습니까? (y/N): " -n 1 -r
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
-        log_info "Redis 중지 중..."
+        log_info "서비스 중지 중..."
         docker-compose down
-        log_info "Redis 시작 중..."
+        log_info "서비스 시작 중..."
         docker-compose up -d
     fi
 else
-    log_info "Redis 시작 중..."
+    log_info "서비스 시작 중..."
     docker-compose up -d
 fi
 
-# Wait for Redis
-log_info "Redis 준비 대기..."
+# Wait for PostgreSQL
+log_info "PostgreSQL 준비 대기..."
 sleep 5
 
-# Check Redis
-if docker ps | grep -q "chatbot_redis.*Up"; then
-    log_success "Redis가 정상적으로 실행 중입니다"
+# Check PostgreSQL
+if docker ps | grep -q "chatbot_postgres.*Up"; then
+    log_success "PostgreSQL이 정상적으로 실행 중입니다"
+
+    # Run Alembic migrations
+    log_info "데이터베이스 마이그레이션 실행 중..."
+    if alembic upgrade head 2>/dev/null; then
+        log_success "데이터베이스 마이그레이션 완료"
+    else
+        log_warning "Alembic 마이그레이션 실패 (첫 실행 시 정상일 수 있습니다)"
+    fi
 else
-    log_error "Redis 시작 실패"
-    log_info "로그 확인: docker-compose logs redis"
+    log_error "PostgreSQL 시작 실패"
+    log_info "로그 확인: docker-compose logs postgres"
     exit 1
 fi
 
@@ -336,7 +344,7 @@ echo ""
 echo "📊 설치 요약:"
 echo "  • Python: $PYTHON_VERSION"
 echo "  • Docker: 실행 중"
-echo "  • Redis: 실행 중"
+echo "  • PostgreSQL: 실행 중"
 if [ "$SKIP_HWP" = false ]; then
     echo "  • HWP 서비스: 준비됨"
 else
@@ -362,14 +370,14 @@ echo "3. HWP 서비스 시작 (선택사항):"
 echo "   cd document-service && mvn spring-boot:run"
 echo ""
 echo "4. 브라우저에서 접속:"
-echo "   http://localhost:8000"
+echo "   http://localhost:8085"
 echo ""
 
 echo "🔧 유용한 명령어:"
-echo "  • Redis 중지:      docker-compose down"
-echo "  • Redis 재시작:    docker-compose restart"
-echo "  • Redis 로그:      docker-compose logs -f"
-echo "  • 서버 중지:       ./stop.sh"
+echo "  • 서비스 중지:     docker-compose down"
+echo "  • 서비스 재시작:   docker-compose restart"
+echo "  • 서비스 로그:     docker-compose logs -f"
+echo "  • 서버 중지:       ./run.sh stop"
 echo "  • 설정 파일:       .env"
 echo ""
 

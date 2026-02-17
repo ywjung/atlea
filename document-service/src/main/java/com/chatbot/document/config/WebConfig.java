@@ -15,9 +15,9 @@ public class WebConfig implements WebMvcConfigurer {
         // Security: Restrict CORS to specific origins (prevents CSRF and unauthorized access)
         registry.addMapping("/api/**")
                 .allowedOrigins(
-                    "http://localhost:8000",      // Python FastAPI backend
+                    "http://localhost:8085",      // Python FastAPI backend
                     "http://localhost:3000",      // Development frontend
-                    "http://127.0.0.1:8000",
+                    "http://127.0.0.1:8085",
                     "http://127.0.0.1:3000"
                     // Add production domains here: "https://yourdomain.com"
                 )

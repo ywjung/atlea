@@ -937,12 +937,12 @@ grep -r "your-secret-key-change-in-production" src/
 # 결과 없어야 함
 
 # 2. 블랙리스트 동작 확인
-curl -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/auth/logout
-curl -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/documents
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8085/api/auth/logout
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8085/api/documents
 # 401 Unauthorized 반환되어야 함
 
 # 3. SSRF 방지 확인
-curl -X POST http://localhost:8000/api/webhooks \
+curl -X POST http://localhost:8085/api/webhooks \
   -H "Authorization: Bearer $TOKEN" \
   -d '{"url":"http://localhost:6379","name":"test","events":["USER_LOGIN"]}'
 # 400 Bad Request 반환되어야 함

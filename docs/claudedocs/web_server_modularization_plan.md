@@ -257,7 +257,7 @@ python -m py_compile src/web_server.py
 uvicorn src.web_server:app --reload
 
 # 3. API 엔드포인트 테스트
-curl http://localhost:8000/docs
+curl http://localhost:8085/docs
 
 # 4. 기능 테스트
 pytest tests/

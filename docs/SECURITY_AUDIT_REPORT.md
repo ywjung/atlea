@@ -118,7 +118,7 @@ redis_client = Redis(
 ```python
 CORS_ORIGINS: List[str] = os.getenv(
     "CORS_ORIGINS",
-    "http://localhost:8000,http://localhost:3000"
+    "http://localhost:8085,http://localhost:3000"
 ).split(',')
 ```
 
@@ -522,7 +522,7 @@ RUN chown -R chatbot:chatbot /app
 # 비root 사용자로 전환
 USER chatbot
 
-CMD ["uvicorn", "src.web_server:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "src.web_server:app", "--host", "0.0.0.0", "--port", "8085"]
 ```
 
 **우선순위**: 🟡 **중간 (3주 내)**

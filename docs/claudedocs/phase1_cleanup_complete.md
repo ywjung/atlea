@@ -100,7 +100,7 @@ PUT    /api/documents/{filename}/group
 
 ### 엔드포인트 등록 확인
 ```bash
-$ curl -s http://localhost:8000/openapi.json | \
+$ curl -s http://localhost:8085/openapi.json | \
   jq -r '.paths | keys[] | select(startswith("/api/documents") or startswith("/api/reindex"))' | \
   wc -l
 16  # 16개 고유 경로 (일부는 여러 HTTP 메서드 포함)
@@ -138,7 +138,7 @@ Groups (2):
 
 ### Double-Prefix 검증
 ```bash
-$ curl -s http://localhost:8000/openapi.json | \
+$ curl -s http://localhost:8085/openapi.json | \
   jq -r '.paths | keys[]' | \
   grep "/api/api" || echo "✅ No double-prefix URLs found"
 
