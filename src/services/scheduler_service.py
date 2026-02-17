@@ -11,7 +11,7 @@ import json
 import shutil
 import asyncio
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 import logging
 
@@ -93,8 +93,8 @@ async def backup_scheduler():
                     interval = schedule.get("interval", "daily")
                     scheduled_minute = schedule.get("minute", 0)  # 기본값 0분
 
-                    # 현재 시간
-                    now = datetime.now()
+                    # 현재 시간 (UTC)
+                    now = datetime.now(timezone.utc)
 
                     # 다음 실행 시간 계산
                     if interval == "hourly":

@@ -147,7 +147,7 @@ async def status():
         logger.error(f"Status check failed: {e}")
         return {
             "status": "error",
-            "error": str(e)
+            "error": "Status check failed"
         }
 
 
@@ -317,7 +317,7 @@ async def health_check():
         logger.error(f"Health check failed: {e}")
         return JSONResponse(
             status_code=503,
-            content={"status": "unhealthy", "error": str(e)}
+            content={"status": "unhealthy", "error": "Health check failed"}
         )
 
 
@@ -334,7 +334,7 @@ async def metrics():
         cache_stats = _cache_manager.get_cache_stats() if _cache_manager else {}
 
         # System metrics
-        cpu_percent = psutil.cpu_percent(interval=0.1)
+        cpu_percent = psutil.cpu_percent(interval=0)
         memory = psutil.virtual_memory()
 
         # Format metrics in Prometheus format

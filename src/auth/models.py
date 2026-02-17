@@ -205,6 +205,22 @@ class PasswordResetOTP(BaseModel):
         return v
 
 
+class OTPVerifyRequest(BaseModel):
+    """OTP 검증 요청 (비밀번호 변경 없이 검증만)"""
+    email: EmailStr
+    otp_code: str = Field(..., min_length=6, max_length=6)
+
+    @field_validator('otp_code')
+    @classmethod
+    def validate_otp_code(cls, v: str) -> str:
+        """OTP 코드는 6자리 숫자여야 함"""
+        if not v.isdigit():
+            raise ValueError("OTP 코드는 숫자만 입력 가능합니다")
+        if len(v) != 6:
+            raise ValueError("OTP 코드는 6자리여야 합니다")
+        return v
+
+
 class PasswordResetOTPConfirm(BaseModel):
     """OTP 검증 후 토큰 기반 비밀번호 재설정"""
     reset_token: str = Field(..., min_length=20, max_length=128, description="재설정 토큰")

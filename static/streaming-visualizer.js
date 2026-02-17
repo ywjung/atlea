@@ -148,12 +148,18 @@ class StreamingVisualizer {
 
         if (this.currentIndicator) {
             this.currentIndicator.className = 'streaming-indicator error-indicator';
-            this.currentIndicator.innerHTML = `
-                <div class="error-content">
-                    <span class="error-icon">⚠️</span>
-                    <span class="error-text">${errorMessage}</span>
-                </div>
-            `;
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'error-content';
+            const iconSpan = document.createElement('span');
+            iconSpan.className = 'error-icon';
+            iconSpan.textContent = '⚠️';
+            const textSpan = document.createElement('span');
+            textSpan.className = 'error-text';
+            textSpan.textContent = errorMessage;
+            errorDiv.appendChild(iconSpan);
+            errorDiv.appendChild(textSpan);
+            this.currentIndicator.innerHTML = '';
+            this.currentIndicator.appendChild(errorDiv);
 
             // Auto-hide after 3 seconds
             setTimeout(() => {

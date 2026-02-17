@@ -210,8 +210,8 @@ class ConversationManager:
                 "title": conv.title,
                 "created_at": conv.created_at.isoformat() if conv.created_at else None,
                 "updated_at": conv.updated_at.isoformat() if conv.updated_at else None,
-                "message_count": str(conv.message_count),
-                "is_bookmarked": "1" if conv.is_bookmarked else "0",
+                "message_count": conv.message_count or 0,
+                "is_bookmarked": bool(conv.is_bookmarked),
             }
 
     def session_exists(self, session_id: str, user_id: str = None) -> bool:
@@ -270,8 +270,8 @@ class ConversationManager:
                 "title": conv.title,
                 "created_at": conv.created_at.isoformat() if conv.created_at else None,
                 "updated_at": conv.updated_at.isoformat() if conv.updated_at else None,
-                "message_count": str(conv.message_count),
-                "is_bookmarked": "1" if conv.is_bookmarked else "0",
+                "message_count": conv.message_count or 0,
+                "is_bookmarked": bool(conv.is_bookmarked),
             })
 
         return sessions
@@ -408,8 +408,8 @@ class ConversationManager:
                 "title": conv.title,
                 "created_at": conv.created_at.isoformat() if conv.created_at else None,
                 "updated_at": conv.updated_at.isoformat() if conv.updated_at else None,
-                "message_count": str(conv.message_count),
-                "is_bookmarked": "1",
+                "message_count": conv.message_count or 0,
+                "is_bookmarked": True,
             })
 
         return sessions

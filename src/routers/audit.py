@@ -10,11 +10,12 @@ Handles audit logging and compliance including:
 Admin privileges required for all endpoints.
 """
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from typing import Optional
 from loguru import logger
 
 from ..audit import AuditAction
+from ..auth.middleware import require_admin
 from ..utils.error_handling import (
     raise_server_error,
     raise_bad_request,
@@ -58,7 +59,8 @@ async def get_audit_logs(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     limit: int = 100,
-    offset: int = 0
+    offset: int = 0,
+    _=Depends(require_admin)
 ):
     """
     감사 로그 조회 (관리자 전용)
@@ -76,13 +78,8 @@ async def get_audit_logs(
         감사 로그 목록
     """
     try:
-        # 관리자 권한 확인
-        from ..auth.utils import require_admin
-
         if not cache_manager:
             raise_service_unavailable("캐시 관리자", "get audit logs")
-
-        require_admin(request)
 
         # Audit logger 가져오기
         if not audit_logger:
@@ -129,7 +126,8 @@ async def get_audit_logs(
 async def get_audit_stats(
     request: Request,
     start_date: Optional[str] = None,
-    end_date: Optional[str] = None
+    end_date: Optional[str] = None,
+    _=Depends(require_admin)
 ):
     """
     감사 로그 통계 조회 (관리자 전용)
@@ -142,13 +140,8 @@ async def get_audit_stats(
         감사 로그 통계
     """
     try:
-        # 관리자 권한 확인
-        from ..auth.utils import require_admin
-
         if not cache_manager:
             raise_service_unavailable("캐시 관리자", "get audit stats")
-
-        require_admin(request)
 
         # Audit logger 가져오기
         if not audit_logger:
@@ -170,7 +163,8 @@ async def get_audit_stats(
 async def get_user_audit_logs(
     request: Request,
     user_id: str,
-    limit: int = 50
+    limit: int = 50,
+    _=Depends(require_admin)
 ):
     """
     특정 사용자의 감사 로그 조회 (관리자 전용)
@@ -185,13 +179,8 @@ async def get_user_audit_logs(
         사용자 활동 로그
     """
     try:
-        # 관리자 권한 확인
-        from ..auth.utils import require_admin
-
         if not cache_manager:
             raise_service_unavailable("캐시 관리자", "get user audit logs")
-
-        require_admin(request)
 
         # Audit logger 가져오기
         if not audit_logger:
@@ -214,7 +203,7 @@ async def get_user_audit_logs(
 
 
 @router.get("/audit/actions", tags=["Audit"])
-async def get_audit_actions(request: Request):
+async def get_audit_actions(request: Request, _=Depends(require_admin)):
     """
     사용 가능한 감사 로그 작업 유형 목록 (관리자 전용)
 
@@ -222,13 +211,8 @@ async def get_audit_actions(request: Request):
         작업 유형 목록
     """
     try:
-        # 관리자 권한 확인
-        from ..auth.utils import require_admin
-
         if not cache_manager:
             raise_service_unavailable("캐시 관리자", "get audit actions")
-
-        require_admin(request)
 
         # 작업 유형 목록
         actions = [

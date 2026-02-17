@@ -9,6 +9,14 @@ let currentOrgId = null;
 let allOrganizations = [];
 let allUsers = [];
 
+/** Escape HTML to prevent XSS in innerHTML */
+function escapeHtml(str) {
+    if (!str) return '';
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
 /**
  * Initialize organization management when tab is switched
  */
@@ -64,7 +72,7 @@ function renderOrganizationList() {
         <div style="display: grid; gap: 12px; margin-top: 15px;">
             ${allOrganizations.map(org => `
                 <div class="org-item ${currentOrgId === org.id ? 'active' : ''}"
-                     onclick="selectOrganization('${org.id}')"
+                     onclick="selectOrganization('${escapeHtml(org.id)}')"
                      style="padding: 15px; border: 2px solid ${currentOrgId === org.id ? '#667eea' : 'var(--border-color, #e5e7eb)'};
                             border-radius: 8px; cursor: pointer; transition: all 0.2s;
                             background: ${currentOrgId === org.id ? '#f0f4ff' : 'var(--bg-card, white)'};
@@ -72,10 +80,10 @@ function renderOrganizationList() {
                     <div style="display: flex; justify-content: space-between; align-items: start;">
                         <div style="flex: 1;">
                             <div style="font-weight: 600; font-size: 16px; margin-bottom: 5px; color: var(--text-primary, inherit);">
-                                ${org.name}
+                                ${escapeHtml(org.name)}
                             </div>
                             <div style="font-size: 13px; color: var(--text-muted, #666); margin-bottom: 8px;">
-                                ${org.description || '설명 없음'}
+                                ${escapeHtml(org.description) || '설명 없음'}
                             </div>
                             <div style="font-size: 12px; color: var(--text-muted, #666);">
                                 <span>👥 ${org.member_count || 0}명</span>
@@ -183,10 +191,10 @@ function renderMembersList(members) {
                     border: 1px solid var(--border-color, #e5e7eb);">
             <div>
                 <div style="font-weight: 500; margin-bottom: 3px; color: var(--text-primary, inherit);">
-                    ${member.username}
+                    ${escapeHtml(member.username)}
                     ${member.is_org_admin ? '<span class="badge-org-admin">조직 관리자</span>' : ''}
                 </div>
-                <div style="font-size: 12px; color: var(--text-muted, #666);">${member.email}</div>
+                <div style="font-size: 12px; color: var(--text-muted, #666);">${escapeHtml(member.email)}</div>
             </div>
             <div style="display: flex; gap: 8px;">
                 ${!member.is_org_admin ? `
@@ -625,12 +633,12 @@ async function loadOrgGroups(orgId) {
                 <div style="padding: 12px; padding-left: ${12 + indent}px; border-bottom: 1px solid var(--border-color, #e5e7eb); display: flex; justify-content: space-between; align-items: center;">
                     <div style="flex: 1;">
                         <div style="font-weight: 600; margin-bottom: 4px; color: var(--text-primary, inherit);">
-                            ${level > 0 ? '<span style="color: var(--text-muted, #9ca3af);">└─</span> ' : ''}${group.icon || '📁'} ${group.name}
+                            ${level > 0 ? '<span style="color: var(--text-muted, #9ca3af);">└─</span> ' : ''}${escapeHtml(group.icon) || '📁'} ${escapeHtml(group.name)}
                             ${group.org_count > 1 ? `<span style="font-size: 11px; color: #0ea5e9; margin-left: 8px;">🔗 ${group.org_count}개 조직 공유</span>` : ''}
                         </div>
                         <div style="font-size: 13px; color: var(--text-muted, #666);">
                             문서: ${group.document_count || 0}개
-                            ${group.description ? ` • ${group.description}` : ''}
+                            ${group.description ? ` • ${escapeHtml(group.description)}` : ''}
                         </div>
                     </div>
                     <button onclick="removeGroupFromOrg('${group.id}')" class="btn-small btn-danger" style="margin-left: 10px;">

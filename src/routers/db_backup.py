@@ -149,7 +149,7 @@ async def create_backup(
 
         if result.returncode != 0:
             logger.error(f"pg_dump failed: {result.stderr}")
-            raise HTTPException(status_code=500, detail=f"백업 생성 실패: {result.stderr[:200]}")
+            raise HTTPException(status_code=500, detail="백업 생성 실패")
 
         backup_path.write_text(result.stdout, encoding="utf-8")
         stat = backup_path.stat()
@@ -173,7 +173,7 @@ async def create_backup(
         raise HTTPException(status_code=500, detail="pg_dump 명령을 찾을 수 없습니다. PostgreSQL 클라이언트를 설치하세요.")
     except Exception as e:
         logger.error(f"Backup creation error: {e}")
-        raise HTTPException(status_code=500, detail=f"백업 생성 중 오류: {str(e)[:200]}")
+        raise HTTPException(status_code=500, detail="백업 생성 중 오류가 발생했습니다")
 
 
 @router.get("/list")
@@ -245,7 +245,7 @@ async def restore_backup(
 
         if result.returncode != 0:
             logger.error(f"psql restore failed: {result.stderr}")
-            raise HTTPException(status_code=500, detail=f"복원 실패: {result.stderr[:200]}")
+            raise HTTPException(status_code=500, detail="복원 실패")
 
         logger.info(f"Backup restored from: {filename}")
 
@@ -264,7 +264,7 @@ async def restore_backup(
         raise HTTPException(status_code=500, detail="psql 명령을 찾을 수 없습니다. PostgreSQL 클라이언트를 설치하세요.")
     except Exception as e:
         logger.error(f"Restore error: {e}")
-        raise HTTPException(status_code=500, detail=f"복원 중 오류: {str(e)[:200]}")
+        raise HTTPException(status_code=500, detail="복원 중 오류가 발생했습니다")
 
 
 @router.get("/download/{filename}")

@@ -10,9 +10,10 @@ Handles performance metrics and monitoring including:
 Admin privileges required for all endpoints.
 """
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from loguru import logger
 
+from ..auth.middleware import require_admin
 from ..utils.error_handling import (
     raise_server_error,
     raise_service_unavailable,
@@ -44,7 +45,7 @@ def inject_dependencies(cache_mgr):
 # ============================================================================
 
 @router.get("/metrics/summary", tags=["Metrics"])
-async def get_metrics_summary(request: Request):
+async def get_metrics_summary(request: Request, _=Depends(require_admin)):
     """
     성능 메트릭 종합 요약 조회 (관리자 전용)
 
@@ -52,13 +53,8 @@ async def get_metrics_summary(request: Request):
         전체, 오늘, 최근 24시간, 추세, 일별/시간별 통계
     """
     try:
-        # 관리자 권한 확인
-        from ..auth.utils import require_admin
-
         if not cache_manager:
             raise_service_unavailable("캐시 관리자", "get metrics summary")
-
-        require_admin(request)
 
         # MetricsCollector 초기화
         from ..metrics_collector import MetricsCollector
@@ -83,7 +79,7 @@ async def get_metrics_summary(request: Request):
 
 
 @router.get("/metrics/recent", tags=["Metrics"])
-async def get_recent_searches(request: Request, limit: int = 100):
+async def get_recent_searches(request: Request, limit: int = 100, _=Depends(require_admin)):
     """
     최근 검색 기록 조회 (관리자 전용)
 
@@ -94,13 +90,8 @@ async def get_recent_searches(request: Request, limit: int = 100):
         최근 검색 기록 목록
     """
     try:
-        # 관리자 권한 확인
-        from ..auth.utils import require_admin
-
         if not cache_manager:
             raise_service_unavailable("캐시 관리자", "get recent searches")
-
-        require_admin(request)
 
         # Limit 값 검증
         limit = min(limit, 1000)
@@ -123,7 +114,7 @@ async def get_recent_searches(request: Request, limit: int = 100):
 
 
 @router.get("/metrics/source-performance", tags=["Metrics"])
-async def get_source_performance(request: Request):
+async def get_source_performance(request: Request, _=Depends(require_admin)):
     """
     소스별 성능 비교 (관리자 전용)
 
@@ -131,13 +122,8 @@ async def get_source_performance(request: Request):
         로컬 문서, 웹 검색, 문서 검색 소스별 성능 통계
     """
     try:
-        # 관리자 권한 확인
-        from ..auth.utils import require_admin
-
         if not cache_manager:
             raise_service_unavailable("캐시 관리자", "get source performance")
-
-        require_admin(request)
 
         # MetricsCollector 초기화
         from ..metrics_collector import MetricsCollector
@@ -157,24 +143,23 @@ async def get_source_performance(request: Request):
 
 
 @router.delete("/metrics/cleanup", tags=["Metrics"])
-async def cleanup_old_metrics(request: Request, days: int = 30):
+async def cleanup_old_metrics(request: Request, days: int = 30, _=Depends(require_admin)):
     """
     오래된 메트릭 데이터 삭제 (관리자 전용)
 
     Args:
-        days: 보관 기간 (일)
+        days: 보관 기간 (일, 1~3650)
 
     Returns:
         삭제된 데이터 수
     """
-    try:
-        # 관리자 권한 확인
-        from ..auth.utils import require_admin
+    if days < 1 or days > 3650:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="days는 1~3650 사이의 값이어야 합니다")
 
+    try:
         if not cache_manager:
             raise_service_unavailable("캐시 관리자", "cleanup old metrics")
-
-        require_admin(request)
 
         # MetricsCollector 초기화
         from ..metrics_collector import MetricsCollector

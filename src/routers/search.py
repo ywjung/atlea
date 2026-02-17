@@ -11,6 +11,8 @@ from pydantic import BaseModel, Field
 from loguru import logger
 
 from ..auth.middleware import get_current_active_user
+from ..auth.rate_limiter import create_rate_limit_dependency
+from ..utils.error_handling import get_safe_error_message
 
 router = APIRouter(prefix="/api/search", tags=["Search"])
 
@@ -64,7 +66,10 @@ class DocsSearchResponse(BaseModel):
 async def search_web(
     request: WebSearchRequest,
     current_user: dict = Depends(get_current_active_user),
-    app_request: Request = None
+    app_request: Request = None,
+    _rate_limit: bool = Depends(
+        create_rate_limit_dependency(max_requests=10, window_seconds=60, identifier="search_web")
+    )
 ):
     """
     Tavily 웹 검색 독립 API
@@ -135,7 +140,7 @@ async def search_web(
         logger.error(f"❌ 웹 검색 실패: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"웹 검색 중 오류가 발생했습니다: {str(e)}"
+            detail=get_safe_error_message(e, "web search")
         )
 
 
@@ -143,7 +148,10 @@ async def search_web(
 async def search_docs(
     request: DocsSearchRequest,
     current_user: dict = Depends(get_current_active_user),
-    app_request: Request = None
+    app_request: Request = None,
+    _rate_limit: bool = Depends(
+        create_rate_limit_dependency(max_requests=10, window_seconds=60, identifier="search_docs")
+    )
 ):
     """
     Context7 공식 문서 검색 독립 API
@@ -202,5 +210,5 @@ async def search_docs(
         logger.error(f"❌ 공식 문서 검색 실패: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"공식 문서 검색 중 오류가 발생했습니다: {str(e)}"
+            detail=get_safe_error_message(e, "docs search")
         )

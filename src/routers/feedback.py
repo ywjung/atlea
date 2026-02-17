@@ -20,6 +20,7 @@ from loguru import logger
 from sqlalchemy import select, func, case
 
 from ..auth.middleware import get_current_active_user
+from ..auth.rate_limiter import create_rate_limit_dependency
 from ..routers.admin import require_admin
 from ..utils.error_handling import get_safe_error_message
 from ..database.connection import SyncSessionFactory
@@ -71,7 +72,10 @@ class FeedbackRequest(BaseModel):
 async def submit_feedback(
     request: Request,
     feedback: FeedbackRequest,
-    current_user: dict = Depends(get_current_active_user)
+    current_user: dict = Depends(get_current_active_user),
+    _rate_limit: bool = Depends(
+        create_rate_limit_dependency(max_requests=10, window_seconds=60, identifier="feedback")
+    )
 ):
     """
     답변 평가 피드백 제출 (로그인 필요)
@@ -343,7 +347,7 @@ async def get_feedback_analyzer_stats(
 
 @router.post("/feedback/analyzer/stats/reset", tags=["Feedback", "Analytics", "Admin"])
 async def reset_feedback_analyzer_stats(
-    current_user: dict = Depends(get_current_active_user)
+    current_user: dict = Depends(require_admin)
 ):
     """
     FeedbackAnalyzer 통계 초기화 (로그인 필요)

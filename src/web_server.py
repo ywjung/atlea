@@ -167,6 +167,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 "report-uri /api/security/csp-report;"
             )
 
+        # Security headers
+        response.headers["X-Content-Type-Options"] = "nosniff"
+
         # HSTS for HTTPS connections
         if request.url.scheme == "https":
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
@@ -178,8 +181,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 # CORS middleware (must be first for proper header handling)
 if config.ENV == "development":
-    cors_origins = ["*"]
-    logger.warning("⚠️  CORS wildcard enabled (development mode). Set ENV=production for production deployment.")
+    cors_origins = ["http://localhost:3000", "http://localhost:8085", "http://localhost:5173"]
+    logger.warning("⚠️  CORS development origins enabled. Set ENV=production for production deployment.")
 else:
     cors_origins = config.CORS_ORIGINS
 

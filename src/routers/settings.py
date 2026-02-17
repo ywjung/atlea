@@ -17,7 +17,7 @@ from typing import Optional, List
 import json
 from loguru import logger
 
-from ..auth.middleware import get_current_active_user
+from ..auth.middleware import get_current_active_user, require_admin
 from ..utils.error_handling import get_safe_error_message
 from ..services.config_service import config_get_sync, config_set_sync, config_get_multi
 
@@ -186,15 +186,12 @@ async def get_settings(
 
 
 @router.get("/admin/settings", tags=["Admin", "Settings"])
-async def get_admin_settings(request: Request):
+async def get_admin_settings(request: Request, _=Depends(require_admin)):
     """
     시스템 설정 조회 (관리자 전용)
     """
     try:
-        from ..auth.utils import require_admin
         from ..services import SettingsService
-
-        require_admin(request)
 
         # 설정 조회
         settings_service = SettingsService()
@@ -210,16 +207,14 @@ async def get_admin_settings(request: Request):
 
 
 @router.put("/admin/settings", tags=["Admin", "Settings"])
-async def update_admin_settings(request: Request):
+async def update_admin_settings(request: Request, _=Depends(require_admin)):
     """
     시스템 설정 업데이트 (관리자 전용)
     """
     try:
-        from ..auth.utils import require_admin, extract_token_from_request, verify_token
+        from ..auth.utils import extract_token_from_request, verify_token
         from ..services import SettingsService
         from ..auth.models import SystemSettings
-
-        require_admin(request)
 
         # Request body 파싱 및 검증
         body = await request.json()

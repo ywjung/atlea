@@ -425,12 +425,6 @@ async def startup_event(app):
     try:
         logger.info("🚀 Starting application initialization (fast mode)...")
 
-        # Initialize reindex service (Phase 3.3: Modularization)
-        logger.info("🔄 Injecting dependencies into reindex_service...")
-        reindex_service.inject_dependencies(vector_db_instance=vector_db)
-        reindex_service.initialize_reindex_event()
-        logger.info("✅ Reindex service initialized")
-
         # Initialize embedding model (required for search)
         logger.info("📚 Loading embedding model...")
         use_ollama = os.getenv("USE_OLLAMA", "false").lower() == "true"
@@ -450,6 +444,12 @@ async def startup_event(app):
         )
 
         logger.info(f"VectorDB initialized (embedding_dim={embedding_model.get_embedding_dim()})")
+
+        # Initialize reindex service (after vector_db is ready)
+        logger.info("🔄 Injecting dependencies into reindex_service...")
+        reindex_service.inject_dependencies(vector_db_instance=vector_db)
+        reindex_service.initialize_reindex_event()
+        logger.info("✅ Reindex service initialized")
 
         # Verify PostgreSQL connection
         logger.info("🐘 Checking PostgreSQL connection...")

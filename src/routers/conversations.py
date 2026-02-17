@@ -129,7 +129,7 @@ async def list_conversations(
 @router.get("/conversations/{session_id}", tags=["Conversations"])
 async def get_conversation(
     session_id: str,
-    limit: int = None,
+    limit: int = 200,
     offset: int = 0,
     current_user: dict = Depends(get_current_active_user)
 ):

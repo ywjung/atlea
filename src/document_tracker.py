@@ -20,19 +20,19 @@ class DocumentTracker:
 
     def _calculate_file_hash(self, file_path: Path) -> str:
         """
-        Calculate MD5 hash of file
+        Calculate SHA256 hash of file
 
         Args:
             file_path: Path to file
 
         Returns:
-            MD5 hash string
+            SHA256 hash string
         """
-        hash_md5 = hashlib.md5()
+        hash_sha256 = hashlib.sha256()
         with open(file_path, "rb") as f:
             for chunk in iter(lambda: f.read(4096), b""):
-                hash_md5.update(chunk)
-        return hash_md5.hexdigest()
+                hash_sha256.update(chunk)
+        return hash_sha256.hexdigest()
 
     def _get_file_metadata(self, file_path: Path) -> Dict:
         """

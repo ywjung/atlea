@@ -9,11 +9,14 @@ Handles security-related monitoring and reporting:
 Public endpoint for browser CSP reporting.
 """
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from typing import Optional, Dict, Any
 from loguru import logger
 from datetime import datetime, timedelta, timezone
 import json
+
+from ..auth.middleware import require_admin
+from ..auth.rate_limiter import create_rate_limit_dependency
 
 # Create router with prefix and tags
 router = APIRouter(prefix="/api/security", tags=["Security"])
@@ -44,7 +47,16 @@ def inject_dependencies(cache_mgr, audit_log):
 # ============================================================================
 
 @router.post("/csp-report")
-async def csp_report(request: Request):
+async def csp_report(
+    request: Request,
+    _: bool = Depends(
+        create_rate_limit_dependency(
+            max_requests=30,
+            window_seconds=60,
+            identifier="csp_report"
+        )
+    )
+):
     """
     Receive and process CSP violation reports from browsers
 
@@ -101,7 +113,7 @@ async def csp_report(request: Request):
 
 
 @router.get("/csp-violations/stats")
-async def get_csp_violation_stats(request: Request):
+async def get_csp_violation_stats(request: Request, _=Depends(require_admin)):
     """
     Get CSP violation statistics from PostgreSQL
 
@@ -175,7 +187,7 @@ async def get_csp_violation_stats(request: Request):
     except Exception as e:
         logger.error(f"Error retrieving CSP stats: {e}")
         return {
-            "error": str(e),
+            "error": "CSP 통계 조회에 실패했습니다",
             "total_violations": 0,
             "by_directive": {},
             "recent_violations": []
@@ -185,7 +197,8 @@ async def get_csp_violation_stats(request: Request):
 @router.get("/csp-violations/recent")
 async def get_recent_csp_violations(
     request: Request,
-    limit: int = 50
+    limit: int = 50,
+    _=Depends(require_admin)
 ):
     """
     Get recent CSP violations from PostgreSQL
@@ -233,6 +246,6 @@ async def get_recent_csp_violations(
     except Exception as e:
         logger.error(f"Error retrieving recent CSP violations: {e}")
         return {
-            "error": str(e),
+            "error": "CSP 위반 기록 조회에 실패했습니다",
             "violations": []
         }

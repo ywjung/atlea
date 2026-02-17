@@ -171,7 +171,7 @@ async def get_cache_enabled(
 @router.post("/cache/enabled", tags=["Cache"])
 async def set_cache_enabled(
     request: CacheEnabledRequest,
-    current_user: dict = Depends(get_current_active_user)
+    current_user: dict = Depends(require_admin)
 ):
     """
     Enable or disable cache (로그인 필요)

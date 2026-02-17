@@ -14,7 +14,7 @@ import secrets
 from loguru import logger
 from ..auth.models import (
     UserCreate, UserLogin, LoginResponse, TokenPair,
-    PasswordReset, PasswordResetConfirm, PasswordResetOTP, PasswordResetOTPConfirm,
+    PasswordReset, PasswordResetConfirm, PasswordResetOTP, PasswordResetOTPConfirm, OTPVerifyRequest,
     ProfileUpdate, PasswordChange, Session,
     WebhookCreate, WebhookUpdate, Webhook, WebhookEvent, WebhookTestRequest, WebhookDelivery
 )
@@ -29,7 +29,8 @@ router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 
 # ============= Cache Invalidation Helper =============
 
-# In-memory dashboard cache
+# In-memory dashboard cache (max 100 entries)
+_DASHBOARD_CACHE_MAX = 100
 _dashboard_cache = {}
 
 
@@ -529,16 +530,25 @@ async def request_password_reset(
             }
 
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        logger.warning(f"Password reset request failed: {e}")
+        # 사용자 존재 여부를 노출하지 않도록 항상 동일한 응답 반환
+        return {
+            "message": "비밀번호 재설정 링크가 이메일로 전송되었습니다",
+            "email_sent": False
+        }
 
 
 @router.post("/password-reset/confirm")
 async def confirm_password_reset(
     reset_confirm: PasswordResetConfirm,
-    request: Request
+    request: Request,
+    _: bool = Depends(
+        create_rate_limit_dependency(
+            max_requests=5,
+            window_seconds=300,
+            identifier="password_reset_confirm"
+        )
+    )
 ):
     """비밀번호 재설정 확인
 
@@ -576,7 +586,14 @@ async def confirm_password_reset(
 @router.post("/reset-password-with-otp")
 async def reset_password_with_otp(
     reset_data: PasswordResetOTP,
-    request: Request
+    request: Request,
+    _: bool = Depends(
+        create_rate_limit_dependency(
+            max_requests=5,
+            window_seconds=300,
+            identifier="otp_password_reset"
+        )
+    )
 ):
     """OTP 기반 비밀번호 재설정 (토큰 없이 직접 실행 - 하위 호환성)
 
@@ -603,26 +620,20 @@ async def reset_password_with_otp(
             repo = UserRepository(session)
             pg_user = await repo.get_by_email(reset_data.email)
 
-            if not pg_user:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="사용자를 찾을 수 없습니다"
-                )
-
-            # 2. 사용자에게 OTP가 설정되어 있는지 확인
-            if not pg_user.totp_secret:
+            if not pg_user or not pg_user.totp_secret:
+                # Generic response to prevent user enumeration
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="해당 계정에 OTP가 설정되지 않았습니다"
+                    detail="OTP 인증에 실패했습니다"
                 )
 
-            # 3. OTP 코드 검증
+            # OTP 코드 검증
             is_valid = totp_service.verify_token(pg_user.totp_secret, reset_data.otp_code)
             if not is_valid:
-                logger.warning(f"Invalid OTP attempt for user: {reset_data.email}")
+                logger.warning(f"Invalid OTP attempt for password reset")
                 raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="OTP 코드가 일치하지 않습니다"
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="OTP 인증에 실패했습니다"
                 )
 
             # 4. 비밀번호 해싱 및 업데이트
@@ -650,7 +661,14 @@ async def reset_password_with_otp(
 @router.post("/verify-otp-for-reset")
 async def verify_otp_for_reset(
     request: Request,
-    verify_data: dict
+    verify_data: OTPVerifyRequest,
+    _: bool = Depends(
+        create_rate_limit_dependency(
+            max_requests=5,
+            window_seconds=300,
+            identifier="otp_verify_reset"
+        )
+    )
 ):
     """비밀번호 재설정을 위한 OTP 검증 (비밀번호 변경 없이 검증만)
 
@@ -669,15 +687,8 @@ async def verify_otp_for_reset(
     from ..repositories.user_repository import UserRepository
     from ..services.config_service import config_set_sync
 
-    # Extract data from JSON body
-    email = verify_data.get("email")
-    otp_code = verify_data.get("otp_code")
-
-    if not email or not otp_code:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="이메일과 OTP 코드는 필수입니다"
-        )
+    email = verify_data.email
+    otp_code = verify_data.otp_code
 
     totp_service = TOTPService()
 
@@ -687,31 +698,27 @@ async def verify_otp_for_reset(
             repo = UserRepository(session)
             pg_user = await repo.get_by_email(email)
 
-            if not pg_user:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="사용자를 찾을 수 없습니다"
-                )
-
-            # 2. 사용자에게 OTP가 설정되어 있는지 확인
-            if not pg_user.totp_secret:
+            if not pg_user or not pg_user.totp_secret:
+                # Generic response to prevent user enumeration
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="해당 계정에 OTP가 설정되지 않았습니다"
+                    detail="OTP 인증에 실패했습니다"
                 )
 
-            # 3. OTP 코드 검증
+            # OTP 코드 검증
             is_valid = totp_service.verify_token(pg_user.totp_secret, otp_code)
             if not is_valid:
-                logger.warning(f"Invalid OTP attempt for password reset: {email}")
+                logger.warning(f"Invalid OTP attempt for password reset verification")
                 raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="OTP 코드가 일치하지 않습니다"
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="OTP 인증에 실패했습니다"
                 )
 
-        # 4. 검증 성공 - 임시 토큰 생성 (PG SystemConfig에 저장)
+        # 4. 검증 성공 - 임시 토큰 생성 (PG SystemConfig에 저장, 10분 만료)
         reset_token = secrets.token_urlsafe(32)
-        config_set_sync(f"otp_reset_token:{reset_token}", email)
+        import json as _json
+        token_data = _json.dumps({"email": email, "expires_at": time.time() + 600})
+        config_set_sync(f"otp_reset_token:{reset_token}", token_data)
 
         logger.info(f"OTP verified for password reset: {email}")
 
@@ -736,7 +743,14 @@ async def verify_otp_for_reset(
 @router.post("/confirm-password-reset-otp")
 async def confirm_password_reset_otp(
     request: Request,
-    reset_data: PasswordResetOTPConfirm
+    reset_data: PasswordResetOTPConfirm,
+    _: bool = Depends(
+        create_rate_limit_dependency(
+            max_requests=5,
+            window_seconds=300,
+            identifier="otp_confirm_reset"
+        )
+    )
 ):
     """OTP 검증 후 비밀번호 재설정 (토큰 기반)
 
@@ -760,13 +774,27 @@ async def confirm_password_reset_otp(
     new_password = reset_data.new_password
 
     try:
-        # 1. 토큰으로 이메일 조회 (PG SystemConfig)
-        email = config_get_sync(f"otp_reset_token:{reset_token}")
-        if not email:
+        # 1. 토큰으로 이메일 조회 (PG SystemConfig) + TTL 검증
+        import json as _json
+        raw_token_data = config_get_sync(f"otp_reset_token:{reset_token}")
+        if not raw_token_data:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="유효하지 않거나 만료된 토큰입니다"
             )
+
+        try:
+            token_info = _json.loads(raw_token_data)
+            email = token_info["email"]
+            if time.time() > token_info.get("expires_at", 0):
+                config_delete_sync(f"otp_reset_token:{reset_token}")
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="토큰이 만료되었습니다. 다시 OTP 인증을 해주세요."
+                )
+        except (_json.JSONDecodeError, KeyError):
+            # 레거시 토큰 (plain email) 호환
+            email = raw_token_data
 
         # 비밀번호 강도 검증은 Pydantic 모델에서 이미 수행됨
 
@@ -1001,8 +1029,9 @@ async def get_admin_dashboard(
 
     auth_service = AuthService()
 
-    # 인메모리 캐시 키 (페이지별로 캐싱)
-    cache_key = f"page_{page}:size_{page_size}"
+    # 인메모리 캐시 키 (관리자별 + 페이지별로 캐싱)
+    admin_id = current_user.get("user_id", "unknown")
+    cache_key = f"admin_{admin_id}:page_{page}:size_{page_size}"
     cache_ttl = 30  # 30초 TTL
 
     # 1. 인메모리 캐시 조회 시도
@@ -1027,7 +1056,10 @@ async def get_admin_dashboard(
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
-    # 3. 인메모리 캐시 저장
+    # 3. 인메모리 캐시 저장 (evict oldest if over limit)
+    if len(_dashboard_cache) >= _DASHBOARD_CACHE_MAX:
+        oldest_key = min(_dashboard_cache, key=lambda k: _dashboard_cache[k][0])
+        del _dashboard_cache[oldest_key]
     _dashboard_cache[cache_key] = (time.time(), dashboard_data)
 
     return dashboard_data
@@ -1298,7 +1330,7 @@ async def reset_user_password_admin(
         logger.error(f"Failed to reset user password: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"비밀번호 변경 실패: {str(e)}"
+            detail=get_safe_error_message(e, "admin password reset")
         )
 
 

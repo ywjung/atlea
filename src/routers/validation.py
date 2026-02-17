@@ -8,7 +8,7 @@ Admin and authenticated users can view validation metrics.
 from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
 
-from ..auth.middleware import get_current_active_user
+from ..auth.middleware import get_current_active_user, require_admin
 from ..response_validator import response_validator
 from ..utils.error_handling import get_safe_error_message
 
@@ -41,7 +41,7 @@ async def get_validation_stats(
 
 @router.post("/stats/reset")
 async def reset_validation_stats(
-    current_user: dict = Depends(get_current_active_user)
+    current_user: dict = Depends(require_admin)
 ):
     """
     응답 품질 검증 통계 초기화

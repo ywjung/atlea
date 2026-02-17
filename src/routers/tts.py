@@ -170,9 +170,6 @@ _TTS_DEFAULT_CONFIG = {
 # Helper functions
 def get_tts_config() -> dict:
     """Get TTS configuration (인메모리 캐시 사용)"""
-    if not cache_manager:
-        raise HTTPException(status_code=500, detail="Service not initialized")
-
     # 인메모리 캐시 확인
     now = _time.time()
     if (_tts_config_cache["data"] is not None and
@@ -451,7 +448,7 @@ async def synthesize_speech(
         raise
     except Exception as e:
         logger.error(f"TTS synthesis failed: {e}")
-        raise HTTPException(status_code=500, detail=f"TTS synthesis failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="TTS 합성에 실패했습니다")
 
 
 @router.get("/tts/audio/{file_id}")

@@ -1063,6 +1063,8 @@ async def reindex(
 async def cancel_reindex(
     current_user: dict = Depends(get_current_active_user)
 ):
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다")
     """
     Cancel ongoing reindexing operation
 

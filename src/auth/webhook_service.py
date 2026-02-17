@@ -239,7 +239,7 @@ class WebhookService:
         )
 
         try:
-            payload_json = json.dumps(payload, ensure_ascii=False)
+            payload_json = json.dumps(payload, sort_keys=True, ensure_ascii=True, separators=(',', ':'))
 
             headers = {
                 "Content-Type": "application/json",

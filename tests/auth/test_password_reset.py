@@ -443,7 +443,8 @@ class TestPasswordResetAPI:
             json={"email": "nonexistent@example.com"}
         )
 
-        assert response.status_code == 400
+        # Returns 200 with generic success message to prevent user enumeration
+        assert response.status_code == 200
 
     @pytest.mark.asyncio
     async def test_confirm_reset_endpoint_success(self, mock_redis):

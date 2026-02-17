@@ -39,7 +39,7 @@ async def root():
 async def serve_html(filename: str):
     """Serve HTML files with no-cache headers"""
     # Security: Only allow safe filenames (no path traversal)
-    if ".." in filename or "/" in filename:
+    if ".." in filename or "/" in filename or "\\" in filename:
         raise HTTPException(status_code=404, detail="Invalid filename")
 
     html_file = static_path / f"{filename}.html"
