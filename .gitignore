@@ -161,8 +161,8 @@ desktop.ini
 # Test & Debug Scripts
 # ============================================================
 check_*.py
-test_*.py
-test_*.sh
+/test_*.py
+/test_*.sh
 debug_*.py
 debug_*.sh
 reindex_all.py

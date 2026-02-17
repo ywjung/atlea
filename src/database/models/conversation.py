@@ -25,6 +25,7 @@ class Conversation(Base):
     )
     message_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     is_bookmarked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    user_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
 
     # Relationship to messages
     messages = relationship(

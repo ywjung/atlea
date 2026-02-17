@@ -294,15 +294,18 @@ async def query(
     try:
         # Save user question to conversation history & retrieve context
         if request.session_id and conversation_manager:
+            uid = current_user.get("user_id")
             conversation_manager.add_message(
                 session_id=request.session_id,
                 role="user",
-                content=request.question
+                content=request.question,
+                user_id=uid
             )
 
             conversation_history = conversation_manager.get_messages(
                 session_id=request.session_id,
-                limit=10
+                limit=10,
+                user_id=uid
             )
         else:
             conversation_history = []
@@ -562,7 +565,8 @@ async def query(
                 session_id=request.session_id,
                 role="assistant",
                 content=result["answer"],
-                metadata=metadata
+                metadata=metadata,
+                user_id=current_user.get("user_id")
             )
 
         # Save to semantic cache for future queries (skip if empty or fallback response)
@@ -620,23 +624,26 @@ async def query_stream(
 
     try:
         # Ensure session exists (create if needed)
+        stream_uid = current_user.get("user_id")
         if conversation_manager:
-            if not request.session_id or not conversation_manager.session_exists(request.session_id):
+            if not request.session_id or not conversation_manager.session_exists(request.session_id, user_id=stream_uid):
                 # Create new session if session_id is None or doesn't exist
-                request.session_id = conversation_manager.create_session()
+                request.session_id = conversation_manager.create_session(user_id=stream_uid)
                 logger.info(f"Created new session for user query: {request.session_id}")
 
             # Save user question to conversation history
             conversation_manager.add_message(
                 session_id=request.session_id,
                 role="user",
-                content=request.question
+                content=request.question,
+                user_id=stream_uid
             )
 
             # 🆕 Retrieve conversation history (last 10 messages = 5 Q&A pairs)
             conversation_history = conversation_manager.get_messages(
                 session_id=request.session_id,
-                limit=10
+                limit=10,
+                user_id=stream_uid
             )
         else:
             conversation_history = []
@@ -709,7 +716,8 @@ async def query_stream(
                         session_id=request.session_id,
                         role="assistant",
                         content=query_result_cached["response"],
-                        metadata=metadata
+                        metadata=metadata,
+                        user_id=stream_uid
                     )
 
             return StreamingResponse(
@@ -788,7 +796,8 @@ async def query_stream(
                         session_id=request.session_id,
                         role="assistant",
                         content=cached_response["response"],
-                        metadata=metadata
+                        metadata=metadata,
+                        user_id=stream_uid
                     )
 
             return StreamingResponse(
@@ -1225,7 +1234,8 @@ async def query_stream(
                         session_id=request.session_id,
                         role="assistant",
                         content=complete_response,
-                        metadata=metadata
+                        metadata=metadata,
+                        user_id=stream_uid
                     )
                     logger.info(f"💾 [CONV] Saved to session {request.session_id}")
 
@@ -1801,11 +1811,13 @@ async def generate_follow_up_questions(
                 with conversation_manager._acquire_lock(lock_key, timeout=5):
                     for attempt in range(max_retries):
                         # Check if last message is from assistant
-                        last_msg = conversation_manager.get_last_message(request.session_id)
+                        followup_uid = current_user.get("user_id")
+                        last_msg = conversation_manager.get_last_message(request.session_id, user_id=followup_uid)
                         if last_msg and last_msg.get('role') == 'assistant':
                             result = conversation_manager.update_last_message_metadata(
                                 session_id=request.session_id,
-                                metadata_update={"follow_up_questions": final_questions}
+                                metadata_update={"follow_up_questions": final_questions},
+                                user_id=followup_uid
                             )
                             if result:
                                 logger.info(f"💾 [API] Save result: True (attempt {attempt + 1})")
@@ -1830,7 +1842,8 @@ async def generate_follow_up_questions(
         if request.session_id and conversation_manager:
             conversation_manager.update_last_message_metadata(
                 session_id=request.session_id,
-                metadata_update={"follow_up_questions": fallback_questions}
+                metadata_update={"follow_up_questions": fallback_questions},
+                user_id=current_user.get("user_id")
             )
 
         return {"questions": fallback_questions}

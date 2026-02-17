@@ -9,6 +9,7 @@ Handles conversation session management including:
 - Listing bookmarked conversations
 
 All endpoints require authentication.
+Conversations are scoped to the authenticated user (IDOR protection).
 """
 
 from fastapi import APIRouter, Depends, Query
@@ -75,29 +76,17 @@ async def create_conversation(
 
     Creates a new conversation session with optional title.
     Each session maintains its own message history.
-
-    Args:
-        title: Optional conversation title (max 200 characters, sanitized for XSS)
-        current_user: Authenticated user (injected by dependency)
-
-    Returns:
-        dict: Session ID and metadata
-            - session_id: Unique session identifier
-            - session: Session metadata (title, created_at, etc.)
-
-    Raises:
-        HTTPException: 500 if conversation manager not initialized or error occurs
     """
     try:
         if not conversation_manager:
             raise_service_unavailable("대화 관리자", "create conversation")
 
-        # Sanitize title to prevent XSS
+        user_id = current_user.get("user_id")
         safe_title = sanitize_title(title)
-        session_id = conversation_manager.create_session(title=safe_title)
-        session = conversation_manager.get_session(session_id)
+        session_id = conversation_manager.create_session(title=safe_title, user_id=user_id)
+        session = conversation_manager.get_session(session_id, user_id=user_id)
 
-        logger.info(f"Created conversation {session_id} for user {current_user.get('user_id')}")
+        logger.info(f"Created conversation {session_id} for user {user_id}")
 
         return {
             "session_id": session_id,
@@ -117,29 +106,15 @@ async def list_conversations(
     List conversation sessions (로그인 필요)
 
     Returns a paginated list of conversation sessions sorted by most recent.
-    Useful for displaying conversation history in UI.
-
-    Args:
-        limit: Maximum number of sessions to return (1-200, default: 50)
-        offset: Number of sessions to skip for pagination (0-10000, default: 0)
-        current_user: Authenticated user (injected by dependency)
-
-    Returns:
-        dict: Paginated conversation list
-            - sessions: List of conversation session objects
-            - total_count: Total number of sessions
-            - limit: Requested limit
-            - offset: Requested offset
-
-    Raises:
-        HTTPException: 500 if conversation manager not initialized or error occurs
+    Only returns conversations owned by the authenticated user.
     """
     try:
         if not conversation_manager:
             raise_service_unavailable("대화 관리자", "list conversations")
 
-        sessions = conversation_manager.list_sessions(limit=limit, offset=offset)
-        total_count = conversation_manager.get_session_count()
+        user_id = current_user.get("user_id")
+        sessions = conversation_manager.list_sessions(limit=limit, offset=offset, user_id=user_id)
+        total_count = conversation_manager.get_session_count(user_id=user_id)
 
         return {
             "sessions": sessions,
@@ -162,33 +137,18 @@ async def get_conversation(
     Get conversation session with messages (로그인 필요)
 
     Retrieves a specific conversation session including its metadata and messages.
-    Supports pagination for large conversations.
-
-    Args:
-        session_id: Conversation session ID
-        limit: Maximum number of messages to return (None = all messages)
-        offset: Number of messages to skip for pagination (default: 0)
-        current_user: Authenticated user (injected by dependency)
-
-    Returns:
-        dict: Conversation session and messages
-            - session: Session metadata
-            - messages: List of messages (user/assistant)
-            - message_count: Number of messages returned
-
-    Raises:
-        HTTPException: 404 if conversation not found
-        HTTPException: 500 if conversation manager not initialized or error occurs
+    Returns 404 if the conversation doesn't exist or is not owned by the user.
     """
     try:
         if not conversation_manager:
             raise_service_unavailable("대화 관리자", "get conversation")
 
-        session = conversation_manager.get_session(session_id)
+        user_id = current_user.get("user_id")
+        session = conversation_manager.get_session(session_id, user_id=user_id)
         if not session:
             raise_not_found("대화", "get conversation")
 
-        messages = conversation_manager.get_messages(session_id, limit=limit, offset=offset)
+        messages = conversation_manager.get_messages(session_id, limit=limit, offset=offset, user_id=user_id)
 
         return {
             "session": session,
@@ -207,32 +167,19 @@ async def delete_conversation(
     """
     Delete a conversation session and all its messages (로그인 필요)
 
-    Permanently deletes a conversation session and all associated messages.
-    This operation cannot be undone.
-
-    Args:
-        session_id: Conversation session ID to delete
-        current_user: Authenticated user (injected by dependency)
-
-    Returns:
-        dict: Success message
-            - status: "success"
-            - message: Confirmation message
-
-    Raises:
-        HTTPException: 404 if conversation not found
-        HTTPException: 500 if conversation manager not initialized or error occurs
+    Returns 404 if the conversation doesn't exist or is not owned by the user.
     """
     try:
         if not conversation_manager:
             raise_service_unavailable("대화 관리자", "delete conversation")
 
-        success = conversation_manager.delete_session(session_id)
+        user_id = current_user.get("user_id")
+        success = conversation_manager.delete_session(session_id, user_id=user_id)
 
         if not success:
             raise_not_found("대화", "delete conversation")
 
-        logger.info(f"Deleted conversation {session_id} by user {current_user.get('user_id')}")
+        logger.info(f"Deleted conversation {session_id} by user {user_id}")
 
         return {
             "status": "success",
@@ -247,35 +194,18 @@ async def delete_all_conversations(
     current_user: dict = Depends(get_current_active_user)
 ):
     """
-    Delete all conversation sessions (로그인 필요)
+    Delete all conversation sessions for the current user (로그인 필요)
 
-    ⚠️ WARNING: This deletes ALL conversations for the user.
-    Use with caution - this operation cannot be undone.
-
-    Useful for:
-    - Clearing all conversation history
-    - Testing and development
-    - Privacy/data cleanup
-
-    Args:
-        current_user: Authenticated user (injected by dependency)
-
-    Returns:
-        dict: Success message with count
-            - status: "success"
-            - message: Confirmation message
-            - deleted_count: Number of conversations deleted
-
-    Raises:
-        HTTPException: 500 if conversation manager not initialized or error occurs
+    Only deletes conversations owned by the authenticated user.
     """
     try:
         if not conversation_manager:
             raise_service_unavailable("대화 관리자", "delete all conversations")
 
-        deleted_count = conversation_manager.clear_all_sessions()
+        user_id = current_user.get("user_id")
+        deleted_count = conversation_manager.clear_all_sessions(user_id=user_id)
 
-        logger.warning(f"Deleted ALL {deleted_count} conversations by user {current_user.get('user_id')}")
+        logger.warning(f"Deleted ALL {deleted_count} conversations by user {user_id}")
 
         return {
             "status": "success",
@@ -294,32 +224,17 @@ async def toggle_bookmark(
     """
     Toggle bookmark status for a conversation (로그인 필요)
 
-    Bookmarks help users mark important conversations for quick access.
-    Calling this endpoint toggles the bookmark status:
-    - If not bookmarked → becomes bookmarked
-    - If bookmarked → becomes unbookmarked
-
-    Args:
-        session_id: Conversation session ID
-        current_user: Authenticated user (injected by dependency)
-
-    Returns:
-        dict: New bookmark status
-            - status: "success"
-            - session_id: Conversation ID
-            - is_bookmarked: New bookmark status (true/false)
-
-    Raises:
-        HTTPException: 500 if conversation manager not initialized or error occurs
+    Returns 404 if the conversation doesn't exist or is not owned by the user.
     """
     try:
         if not conversation_manager:
             raise_service_unavailable("대화 관리자", "toggle bookmark")
 
-        is_bookmarked = conversation_manager.toggle_bookmark(session_id)
+        user_id = current_user.get("user_id")
+        is_bookmarked = conversation_manager.toggle_bookmark(session_id, user_id=user_id)
 
         action = "bookmarked" if is_bookmarked else "unbookmarked"
-        logger.info(f"User {current_user.get('user_id')} {action} conversation {session_id}")
+        logger.info(f"User {user_id} {action} conversation {session_id}")
 
         return {
             "status": "success",
@@ -339,31 +254,15 @@ async def get_bookmarked_conversations(
     """
     Get list of bookmarked conversations (로그인 필요)
 
-    Returns a paginated list of conversations that have been bookmarked.
-    Useful for "Favorites" or "Starred" conversations view.
-
-    Args:
-        limit: Maximum number of conversations to return (1-200, default: 50)
-        offset: Number of conversations to skip for pagination (0-10000, default: 0)
-        current_user: Authenticated user (injected by dependency)
-
-    Returns:
-        dict: Paginated bookmarked conversation list
-            - status: "success"
-            - sessions: List of bookmarked conversation sessions
-            - total: Total number of bookmarked conversations
-            - limit: Requested limit
-            - offset: Requested offset
-
-    Raises:
-        HTTPException: 500 if conversation manager not initialized or error occurs
+    Only returns bookmarked conversations owned by the authenticated user.
     """
     try:
         if not conversation_manager:
             raise_service_unavailable("대화 관리자", "get bookmarked conversations")
 
-        sessions = conversation_manager.list_bookmarked_sessions(limit, offset)
-        total = conversation_manager.get_bookmarked_count()
+        user_id = current_user.get("user_id")
+        sessions = conversation_manager.list_bookmarked_sessions(limit, offset, user_id=user_id)
+        total = conversation_manager.get_bookmarked_count(user_id=user_id)
 
         return {
             "status": "success",

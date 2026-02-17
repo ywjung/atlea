@@ -117,7 +117,7 @@ async def submit_feedback(
         if conversation_manager and feedback_analyzer:
             try:
                 # Get all messages and find the specific message by ID
-                messages = conversation_manager.get_messages(feedback.conversation_id)
+                messages = conversation_manager.get_messages(feedback.conversation_id, user_id=current_user.get("user_id"))
                 message = None
                 question = None
 

@@ -16,47 +16,11 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 from sqlalchemy.pool import StaticPool
-from sqlalchemy.ext.compiler import compiles
-from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID, ARRAY as PG_ARRAY
 
-try:
-    from pgvector.sqlalchemy import Vector as PG_VECTOR
-except ImportError:
-    PG_VECTOR = None
+# SQLite type compilation hooks and UUID adapters are registered
+# in tests/conftest.py (loaded automatically by pytest).
 
 from src.database.base import Base
-
-
-# ── SQLite type compilation hooks ─────────────────────────────
-# Map PostgreSQL-specific types to SQLite equivalents so that
-# Base.metadata.create_all() works on SQLite engines.
-
-@compiles(JSONB, "sqlite")
-def _compile_jsonb_sqlite(type_, compiler, **kw):
-    return "TEXT"
-
-@compiles(PG_UUID, "sqlite")
-def _compile_uuid_sqlite(type_, compiler, **kw):
-    return "CHAR(32)"
-
-@compiles(PG_ARRAY, "sqlite")
-def _compile_array_sqlite(type_, compiler, **kw):
-    return "TEXT"
-
-if PG_VECTOR is not None:
-    @compiles(PG_VECTOR, "sqlite")
-    def _compile_vector_sqlite(type_, compiler, **kw):
-        return "BLOB"
-
-
-# ── SQLite UUID workaround ──────────────────────────────────────
-# PostgreSQL UUID columns store native UUIDs; SQLite stores them as
-# 32-char hex strings. We register adapters so uuid.UUID round-trips.
-import sqlite3
-
-sqlite3.register_adapter(uuid.UUID, lambda u: u.hex)
-sqlite3.register_converter("UUID", lambda b: uuid.UUID(b.decode()))
-sqlite3.register_converter("uuid", lambda b: uuid.UUID(b.decode()))
 
 
 # ── Engine & session factories for tests ────────────────────────

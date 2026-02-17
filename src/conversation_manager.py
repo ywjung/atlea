@@ -40,12 +40,29 @@ class ConversationManager:
         """
         yield True
 
-    def create_session(self, title: str = None) -> str:
+    def _get_conv_for_user(self, db: SaSession, sid: uuid.UUID, user_id: Optional[str]) -> Optional[Conversation]:
+        """
+        Get conversation and verify ownership.
+
+        Returns None if:
+        - conversation doesn't exist
+        - user_id is provided AND conversation has an owner AND owner != user_id
+        """
+        conv = db.get(Conversation, sid)
+        if conv is None:
+            return None
+        # Ownership check: skip if no user_id filter or if conversation has no owner (legacy)
+        if user_id is not None and conv.user_id is not None and conv.user_id != user_id:
+            return None
+        return conv
+
+    def create_session(self, title: str = None, user_id: str = None) -> str:
         """
         Create a new conversation session
 
         Args:
             title: Optional session title (auto-generated from first message if not provided)
+            user_id: Owner user ID
 
         Returns:
             Session ID
@@ -60,16 +77,17 @@ class ConversationManager:
             updated_at=now,
             message_count=0,
             is_bookmarked=False,
+            user_id=user_id,
         )
 
         with SyncSessionFactory() as db:
             db.add(conv)
             db.commit()
 
-        logger.info(f"Created conversation session: {session_id}")
+        logger.info(f"Created conversation session: {session_id} for user: {user_id}")
         return str(session_id)
 
-    def add_message(self, session_id: str, role: str, content: str, metadata: Dict = None) -> bool:
+    def add_message(self, session_id: str, role: str, content: str, metadata: Dict = None, user_id: str = None) -> bool:
         """
         Add a message to conversation history
 
@@ -78,6 +96,7 @@ class ConversationManager:
             role: Message role ('user' or 'assistant')
             content: Message content
             metadata: Optional metadata (sources, chunk_count, etc.)
+            user_id: Owner user ID for ownership verification
 
         Returns:
             True if successful
@@ -89,9 +108,9 @@ class ConversationManager:
             return False
 
         with SyncSessionFactory() as db:
-            conv = db.get(Conversation, sid)
+            conv = self._get_conv_for_user(db, sid, user_id)
             if conv is None:
-                logger.warning(f"Session {session_id} does not exist")
+                logger.warning(f"Session {session_id} not found or not owned by user")
                 return False
 
             now = datetime.now(timezone.utc)
@@ -117,7 +136,7 @@ class ConversationManager:
 
         return True
 
-    def get_messages(self, session_id: str, limit: int = None, offset: int = 0) -> List[Dict]:
+    def get_messages(self, session_id: str, limit: int = None, offset: int = 0, user_id: str = None) -> List[Dict]:
         """
         Get conversation messages
 
@@ -125,6 +144,7 @@ class ConversationManager:
             session_id: Conversation session ID
             limit: Maximum number of messages to return (None = all)
             offset: Number of messages to skip
+            user_id: Owner user ID for ownership verification
 
         Returns:
             List of message dictionaries
@@ -135,9 +155,8 @@ class ConversationManager:
             return []
 
         with SyncSessionFactory() as db:
-            conv = db.get(Conversation, sid)
+            conv = self._get_conv_for_user(db, sid, user_id)
             if conv is None:
-                logger.warning(f"Session {session_id} does not exist")
                 return []
 
             stmt = (
@@ -165,12 +184,13 @@ class ConversationManager:
 
         return messages
 
-    def get_session(self, session_id: str) -> Optional[Dict]:
+    def get_session(self, session_id: str, user_id: str = None) -> Optional[Dict]:
         """
         Get session metadata
 
         Args:
             session_id: Conversation session ID
+            user_id: Owner user ID for ownership verification
 
         Returns:
             Session data dictionary or None
@@ -181,7 +201,7 @@ class ConversationManager:
             return None
 
         with SyncSessionFactory() as db:
-            conv = db.get(Conversation, sid)
+            conv = self._get_conv_for_user(db, sid, user_id)
             if conv is None:
                 return None
 
@@ -194,15 +214,16 @@ class ConversationManager:
                 "is_bookmarked": "1" if conv.is_bookmarked else "0",
             }
 
-    def session_exists(self, session_id: str) -> bool:
+    def session_exists(self, session_id: str, user_id: str = None) -> bool:
         """
-        Check if a conversation session exists
+        Check if a conversation session exists (and is owned by user if user_id provided)
 
         Args:
             session_id: Conversation session ID
+            user_id: Owner user ID for ownership verification
 
         Returns:
-            True if session exists, False otherwise
+            True if session exists (and is owned by user), False otherwise
         """
         try:
             sid = uuid.UUID(session_id)
@@ -210,16 +231,23 @@ class ConversationManager:
             return False
 
         with SyncSessionFactory() as db:
-            conv = db.get(Conversation, sid)
+            conv = self._get_conv_for_user(db, sid, user_id)
             return conv is not None
 
-    def list_sessions(self, limit: int = 50, offset: int = 0) -> List[Dict]:
+    def _user_filter(self, stmt, user_id: Optional[str]):
+        """Add user_id filter to a query statement if user_id is provided."""
+        if user_id is not None:
+            stmt = stmt.where(Conversation.user_id == user_id)
+        return stmt
+
+    def list_sessions(self, limit: int = 50, offset: int = 0, user_id: str = None) -> List[Dict]:
         """
         List conversation sessions (sorted by most recent)
 
         Args:
             limit: Maximum number of sessions to return
             offset: Number of sessions to skip
+            user_id: Filter by owner user ID
 
         Returns:
             List of session dictionaries
@@ -231,6 +259,7 @@ class ConversationManager:
                 .offset(offset)
                 .limit(limit)
             )
+            stmt = self._user_filter(stmt, user_id)
             result = db.execute(stmt)
             rows = result.scalars().all()
 
@@ -247,12 +276,13 @@ class ConversationManager:
 
         return sessions
 
-    def delete_session(self, session_id: str) -> bool:
+    def delete_session(self, session_id: str, user_id: str = None) -> bool:
         """
         Delete a conversation session and all its messages
 
         Args:
             session_id: Conversation session ID
+            user_id: Owner user ID for ownership verification
 
         Returns:
             True if successful
@@ -263,9 +293,9 @@ class ConversationManager:
             return False
 
         with SyncSessionFactory() as db:
-            conv = db.get(Conversation, sid)
+            conv = self._get_conv_for_user(db, sid, user_id)
             if conv is None:
-                logger.warning(f"Session {session_id} does not exist")
+                logger.warning(f"Session {session_id} not found or not owned by user")
                 return False
 
             db.delete(conv)  # CASCADE deletes messages
@@ -274,44 +304,56 @@ class ConversationManager:
         logger.info(f"Deleted conversation session: {session_id}")
         return True
 
-    def clear_all_sessions(self) -> int:
+    def clear_all_sessions(self, user_id: str = None) -> int:
         """
-        Delete all conversation sessions (use with caution)
+        Delete all conversation sessions for user (or all if no user_id)
+
+        Args:
+            user_id: Owner user ID to scope deletion
 
         Returns:
             Number of sessions deleted
         """
         with SyncSessionFactory() as db:
             count_stmt = select(func.count()).select_from(Conversation)
+            count_stmt = self._user_filter(count_stmt, user_id)
             count = db.execute(count_stmt).scalar_one()
 
             if count == 0:
                 logger.info("No conversation sessions to delete")
                 return 0
 
-            db.execute(delete(Conversation))
+            del_stmt = delete(Conversation)
+            if user_id is not None:
+                del_stmt = del_stmt.where(Conversation.user_id == user_id)
+            db.execute(del_stmt)
             db.commit()
 
         logger.info(f"Deleted {count} conversation sessions (batch)")
         return count
 
-    def get_session_count(self) -> int:
+    def get_session_count(self, user_id: str = None) -> int:
         """
         Get total number of conversation sessions
+
+        Args:
+            user_id: Filter by owner user ID
 
         Returns:
             Number of sessions
         """
         with SyncSessionFactory() as db:
             stmt = select(func.count()).select_from(Conversation)
+            stmt = self._user_filter(stmt, user_id)
             return db.execute(stmt).scalar_one()
 
-    def toggle_bookmark(self, session_id: str) -> bool:
+    def toggle_bookmark(self, session_id: str, user_id: str = None) -> bool:
         """
         Toggle bookmark status for a conversation session
 
         Args:
             session_id: Conversation session ID
+            user_id: Owner user ID for ownership verification
 
         Returns:
             New bookmark status (True if bookmarked, False if unbookmarked)
@@ -322,9 +364,9 @@ class ConversationManager:
             return False
 
         with SyncSessionFactory() as db:
-            conv = db.get(Conversation, sid)
+            conv = self._get_conv_for_user(db, sid, user_id)
             if conv is None:
-                logger.warning(f"Session {session_id} does not exist")
+                logger.warning(f"Session {session_id} not found or not owned by user")
                 return False
 
             conv.is_bookmarked = not conv.is_bookmarked
@@ -335,13 +377,14 @@ class ConversationManager:
         logger.info(f"{action} conversation: {session_id}")
         return new_status
 
-    def list_bookmarked_sessions(self, limit: int = 50, offset: int = 0) -> List[Dict]:
+    def list_bookmarked_sessions(self, limit: int = 50, offset: int = 0, user_id: str = None) -> List[Dict]:
         """
         List bookmarked conversation sessions (sorted by most recent)
 
         Args:
             limit: Maximum number of sessions to return
             offset: Number of sessions to skip
+            user_id: Filter by owner user ID
 
         Returns:
             List of bookmarked session dictionaries
@@ -354,6 +397,7 @@ class ConversationManager:
                 .offset(offset)
                 .limit(limit)
             )
+            stmt = self._user_filter(stmt, user_id)
             result = db.execute(stmt)
             rows = result.scalars().all()
 
@@ -370,9 +414,12 @@ class ConversationManager:
 
         return sessions
 
-    def get_bookmarked_count(self) -> int:
+    def get_bookmarked_count(self, user_id: str = None) -> int:
         """
         Get total number of bookmarked conversations
+
+        Args:
+            user_id: Filter by owner user ID
 
         Returns:
             Number of bookmarked sessions
@@ -383,14 +430,16 @@ class ConversationManager:
                 .select_from(Conversation)
                 .where(Conversation.is_bookmarked == True)
             )
+            stmt = self._user_filter(stmt, user_id)
             return db.execute(stmt).scalar_one()
 
-    def get_last_message(self, session_id: str) -> Optional[Dict]:
+    def get_last_message(self, session_id: str, user_id: str = None) -> Optional[Dict]:
         """
         Get the last message in a session
 
         Args:
             session_id: Conversation session ID
+            user_id: Owner user ID for ownership verification
 
         Returns:
             Last message as dict, or None if not found
@@ -401,6 +450,10 @@ class ConversationManager:
             return None
 
         with SyncSessionFactory() as db:
+            conv = self._get_conv_for_user(db, sid, user_id)
+            if conv is None:
+                return None
+
             stmt = (
                 select(ConversationMessage)
                 .where(ConversationMessage.conversation_id == sid)
@@ -422,13 +475,14 @@ class ConversationManager:
                 msg["metadata"] = row.metadata_json
             return msg
 
-    def update_last_message_metadata(self, session_id: str, metadata_update: Dict) -> bool:
+    def update_last_message_metadata(self, session_id: str, metadata_update: Dict, user_id: str = None) -> bool:
         """
         Update the metadata of the last message in a session
 
         Args:
             session_id: Conversation session ID
             metadata_update: Dictionary of metadata fields to add/update
+            user_id: Owner user ID for ownership verification
 
         Returns:
             True if successful, False otherwise
@@ -439,9 +493,9 @@ class ConversationManager:
             return False
 
         with SyncSessionFactory() as db:
-            conv = db.get(Conversation, sid)
+            conv = self._get_conv_for_user(db, sid, user_id)
             if conv is None:
-                logger.warning(f"Session {session_id} does not exist")
+                logger.warning(f"Session {session_id} not found or not owned by user")
                 return False
 
             stmt = (
@@ -468,22 +522,22 @@ class ConversationManager:
 
     # --- Async wrappers (이벤트 루프 블로킹 방지) ---
 
-    async def async_add_message(self, session_id: str, role: str, content: str, metadata: Dict = None) -> bool:
+    async def async_add_message(self, session_id: str, role: str, content: str, metadata: Dict = None, user_id: str = None) -> bool:
         """add_message의 비동기 래퍼"""
         import asyncio
-        return await asyncio.to_thread(self.add_message, session_id, role, content, metadata)
+        return await asyncio.to_thread(self.add_message, session_id, role, content, metadata, user_id)
 
-    async def async_get_messages(self, session_id: str, limit: int = None, offset: int = 0) -> List[Dict]:
+    async def async_get_messages(self, session_id: str, limit: int = None, offset: int = 0, user_id: str = None) -> List[Dict]:
         """get_messages의 비동기 래퍼"""
         import asyncio
-        return await asyncio.to_thread(self.get_messages, session_id, limit, offset)
+        return await asyncio.to_thread(self.get_messages, session_id, limit, offset, user_id)
 
-    async def async_create_session(self, title: str = None) -> str:
+    async def async_create_session(self, title: str = None, user_id: str = None) -> str:
         """create_session의 비동기 래퍼"""
         import asyncio
-        return await asyncio.to_thread(self.create_session, title)
+        return await asyncio.to_thread(self.create_session, title, user_id)
 
-    async def async_list_sessions(self, limit: int = 50, offset: int = 0) -> List[Dict]:
+    async def async_list_sessions(self, limit: int = 50, offset: int = 0, user_id: str = None) -> List[Dict]:
         """list_sessions의 비동기 래퍼"""
         import asyncio
-        return await asyncio.to_thread(self.list_sessions, limit, offset)
+        return await asyncio.to_thread(self.list_sessions, limit, offset, user_id)
